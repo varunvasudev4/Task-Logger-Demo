@@ -1,1 +1,2 @@
-# Task-Logger-Demo
+# Task-Logger
+Uses to log daily tasks
