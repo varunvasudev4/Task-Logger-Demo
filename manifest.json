@@ -2,7 +2,7 @@
   "name": "Task Time Logger",
   "short_name": "TimeLogger",
   "description": "Track daily effort and log tasks",
-  "start_url": "/Task-Logger/",
+  "start_url": "/Task-Logger-Demo/",
   "display": "standalone",
   "background_color": "#f5f5f3",
   "theme_color": "#1D9E75",
