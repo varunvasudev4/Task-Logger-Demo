@@ -4,7 +4,19 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Task Time Logger</title>
-<link rel="icon" href="./favicon.ico" type="image/x-icon">
+<script>
+  // Apply saved theme before first paint to avoid a flash of the wrong theme.
+  (function() {
+    try {
+      var saved = localStorage.getItem('ttl_theme'); // 'light' | 'dark' | 'system' | null
+      if (saved === 'light' || saved === 'dark') {
+        document.documentElement.setAttribute('data-theme', saved);
+      }
+      // 'system' or unset: leave data-theme unset so the prefers-color-scheme media query applies.
+    } catch (e) {}
+  })();
+</script>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%231D9E75'/%3E%3Crect x='8' y='9' width='10' height='2' rx='1' fill='white'/%3E%3Crect x='8' y='15' width='16' height='2' rx='1' fill='white' opacity='.7'/%3E%3Crect x='8' y='21' width='12' height='2' rx='1' fill='white' opacity='.5'/%3E%3Ccircle cx='24' cy='10' r='4' fill='white'/%3E%3Cpath d='M23 10l1 1 2-2' stroke='%231D9E75' stroke-width='1.2' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E" />
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css" />
 <link rel="manifest" href="manifest.json" />
 <script>
@@ -43,8 +55,9 @@ if ('serviceWorker' in navigator) {
   --red-mid: #A32D2D;
   --shadow: 0 1px 3px rgba(0,0,0,0.07), 0 4px 16px rgba(0,0,0,0.05);
 }
+/* System preference fallback — only applies when no explicit theme is set */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]):not([data-theme="dark"]) {
     --bg: #1c1c1a; --bg-secondary: #262624; --bg-tertiary: #2e2e2c;
     --text-primary: #f0efe8; --text-secondary: #a0a09a; --text-tertiary: #6b6b66;
     --border: rgba(255,255,255,0.10); --border-md: rgba(255,255,255,0.20);
@@ -54,6 +67,28 @@ if ('serviceWorker' in navigator) {
     --red-bg: #501313; --red-mid: #F09595;
     --shadow: 0 1px 3px rgba(0,0,0,0.3), 0 4px 16px rgba(0,0,0,0.2);
   }
+}
+/* Explicit dark theme — set via the theme toggle, overrides system preference */
+:root[data-theme="dark"] {
+  --bg: #1c1c1a; --bg-secondary: #262624; --bg-tertiary: #2e2e2c;
+  --text-primary: #f0efe8; --text-secondary: #a0a09a; --text-tertiary: #6b6b66;
+  --border: rgba(255,255,255,0.10); --border-md: rgba(255,255,255,0.20);
+  --green-bg: #04342C; --green-mid: #5DCAA5; --green-dark: #9FE1CB;
+  --amber-bg: #412402; --amber-mid: #EF9F27; --amber-dark: #FAC775;
+  --blue-bg: #042C53; --blue-mid: #378ADD; --blue-dark: #85B7EB;
+  --red-bg: #501313; --red-mid: #F09595;
+  --shadow: 0 1px 3px rgba(0,0,0,0.3), 0 4px 16px rgba(0,0,0,0.2);
+}
+/* Explicit light theme — set via the theme toggle, overrides system preference */
+:root[data-theme="light"] {
+  --bg: #ffffff; --bg-secondary: #f5f5f3; --bg-tertiary: #efefec;
+  --text-primary: #1a1a18; --text-secondary: #6b6b66; --text-tertiary: #9e9e99;
+  --border: rgba(0,0,0,0.10); --border-md: rgba(0,0,0,0.20);
+  --green-bg: #E1F5EE; --green-mid: #1D9E75; --green-dark: #0F6E56;
+  --amber-bg: #FAEEDA; --amber-mid: #BA7517; --amber-dark: #854F0B;
+  --blue-bg: #E6F1FB; --blue-mid: #185FA5; --blue-dark: #0C447C;
+  --red-bg: #FCEBEB; --red-mid: #A32D2D;
+  --shadow: 0 1px 3px rgba(0,0,0,0.07), 0 4px 16px rgba(0,0,0,0.05);
 }
 
 body {
@@ -610,6 +645,7 @@ tbody td:first-child { color: var(--text-primary); font-weight: 500; }
         <input type="date" id="log-date-input" class="date-picker-input" onchange="onDateChange()" />
         <span id="today-badge" class="date-today-badge">Today</span>
       </div>
+      <button class="btn" onclick="cycleTheme()" id="theme-toggle-btn" title="Switch theme"><i class="ti ti-sun" id="theme-toggle-icon"></i> <span id="theme-toggle-label">Light</span></button>
       <button class="btn" onclick="openMasters()"><i class="ti ti-list-details"></i> Masters</button>
       <button class="btn btn-primary" onclick="addTask()"><i class="ti ti-plus"></i> Add task</button>
     </div>
@@ -653,6 +689,7 @@ tbody td:first-child { color: var(--text-primary); font-weight: 500; }
             <th>Task progress / Effort description</th>
             <th>Effort (Minutes)</th>
             <th>Status</th>
+            <th>Remark</th>
             <th style="width:36px"></th>
           </tr>
         </thead>
@@ -761,10 +798,36 @@ tbody td:first-child { color: var(--text-primary); font-weight: 500; }
         <label class="complete-label">Task progress / Effort description <span class="req">*</span></label>
         <textarea class="complete-textarea" id="cm-description" placeholder="Describe what was done…"></textarea>
       </div>
+      <div class="complete-field">
+        <label class="complete-label">Remark</label>
+        <textarea class="complete-textarea" id="cm-remark" placeholder="Optional remark or note…" style="min-height:52px"></textarea>
+      </div>
     </div>
     <div class="modal-footer">
       <button class="btn" onclick="closeCompleteModal()">Cancel</button>
       <button class="btn btn-primary" id="cm-submit-btn" onclick="submitComplete()"><i class="ti ti-check"></i> Mark Complete</button>
+    </div>
+  </div>
+</div>
+
+<!-- Carry Forward date-picker modal -->
+<div class="modal-overlay hidden" id="carry-forward-modal">
+  <div class="modal" style="max-width:380px">
+    <div class="modal-header">
+      <div class="modal-title"><i class="ti ti-calendar-plus" style="vertical-align:-2px;margin-right:6px;color:var(--blue-mid)"></i>Carry Forward Task</div>
+      <button class="btn-icon" onclick="closeCarryForwardModal()"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="modal-body">
+      <div id="cf-task-name" style="font-size:13px;font-weight:600;margin-bottom:12px;color:var(--text-primary)"></div>
+      <div class="complete-field">
+        <label class="complete-label">Add task to date</label>
+        <input class="complete-input" id="cf-date" type="date" style="width:100%" />
+      </div>
+      <div style="font-size:11px;color:var(--text-tertiary);margin-top:6px">The task will be created with status Not Started and 00:00 duration on the chosen date.</div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeCarryForwardModal()">Cancel</button>
+      <button class="btn btn-primary" id="cf-confirm-btn" onclick="confirmCarryForward()"><i class="ti ti-check"></i> Add Task</button>
     </div>
   </div>
 </div>
@@ -964,6 +1027,7 @@ let userName = '';
 let tasks = [];
 let logEntries = [];
 let taskIdCounter = 0;
+let importIdCounter = 0; // separate negative-only namespace for CSV-imported entries, never overlaps real task IDs
 let intervals = {};
 let masters = {
   projects: [...DEFAULT_PROJECTS], natures: [...DEFAULT_NATURES],
@@ -983,6 +1047,7 @@ function saveState() {
     localStorage.setItem('ttl_tasks',    JSON.stringify(tasks));
     localStorage.setItem('ttl_log',      JSON.stringify(logEntries));
     localStorage.setItem('ttl_counter',  String(taskIdCounter));
+    localStorage.setItem('ttl_import_counter', String(importIdCounter));
     localStorage.setItem('ttl_masters',  JSON.stringify(masters));
     localStorage.setItem('ttl_username', userName);
   } catch(e) {}
@@ -993,6 +1058,7 @@ function loadState() {
     const t = localStorage.getItem('ttl_tasks');
     const l = localStorage.getItem('ttl_log');
     const counter = localStorage.getItem('ttl_counter');
+    const importCounter = localStorage.getItem('ttl_import_counter');
     const m = localStorage.getItem('ttl_masters');
     const u = localStorage.getItem('ttl_username');
     if (t) tasks = JSON.parse(t);
@@ -1003,6 +1069,7 @@ function loadState() {
       logEntries = allEntries.filter(e => e.startTs >= cutoff);
     }
     if (counter) taskIdCounter = parseInt(counter) || 0;
+    if (importCounter) importIdCounter = parseInt(importCounter) || 0;
     if (m) {
       const parsed = JSON.parse(m);
       masters = { ...masters, ...parsed };
@@ -1012,6 +1079,21 @@ function loadState() {
       if (masters.flags.sleepAutoPause === undefined) masters.flags.sleepAutoPause = true;
     }
     if (u) userName = u;
+
+    // ── One-time migration: repair counter/ID collisions from the old scheme where
+    // CSV imports decremented the same counter used for real tasks. If taskIdCounter
+    // was dragged to 0 or below by old imports, or any real task ID collides with an
+    // existing log entry's taskId from a different task, bump taskIdCounter clear of
+    // every ID currently in use so future tasks (including carry-forward) never reuse
+    // an ID that belongs to an old imported/unrelated log entry.
+    let maxKnownId = 0;
+    tasks.forEach(t => { if (typeof t.id === 'number' && t.id > maxKnownId) maxKnownId = t.id; });
+    logEntries.forEach(e => { if (typeof e.taskId === 'number' && e.taskId > maxKnownId) maxKnownId = e.taskId; });
+    if (taskIdCounter <= maxKnownId) taskIdCounter = maxKnownId;
+
+    let minKnownId = 0;
+    logEntries.forEach(e => { if (typeof e.taskId === 'number' && e.taskId < minKnownId) minKnownId = e.taskId; });
+    if (importIdCounter >= minKnownId) importIdCounter = minKnownId;
   } catch(e) {}
 }
 
@@ -1277,37 +1359,54 @@ function openCompleteModal(id) {
 
   document.getElementById('cm-timer').textContent = fmt(liveElapsedSecs(task));
 
+  // Pull the most recent log entry for this task (completed or reopened) so that
+  // reopening a completed task and marking it complete again re-populates every
+  // field exactly as it was last saved, not just description/remark.
+  const lastEntry =
+    [...logEntries].reverse().find(e => e.taskId === id && e.endTs !== null) ||
+    [...logEntries].reverse().find(e => e.taskId === id);
+
+  const heading = (lastEntry && lastEntry.heading) || task.heading || '';
+  const project = (lastEntry && lastEntry.project) || task.project || '';
+  const nature  = (lastEntry && lastEntry.nature)  || task.nature  || '';
+  const module_ = (lastEntry && lastEntry.module)  || task.module  || '';
+  const ticket  = (lastEntry && lastEntry.ticket)  || task.ticket  || '';
+
   // Task name
   const headEl = document.getElementById('cm-heading');
-  headEl.value = task.heading || '';
+  headEl.value = heading;
   headEl.classList.remove('invalid');
 
   // Project
   const pSel = document.getElementById('cm-project');
   pSel.innerHTML = '<option value="">— select —</option>' +
-    masters.projects.map(v => `<option value="${esc(v)}" ${v===task.project?'selected':''}>${esc(v)}</option>`).join('');
+    masters.projects.map(v => `<option value="${esc(v)}" ${v===project?'selected':''}>${esc(v)}</option>`).join('');
   pSel.classList.remove('invalid');
 
   // Nature
   const nSel = document.getElementById('cm-nature');
   nSel.innerHTML = '<option value="">— select —</option>' +
-    masters.natures.map(v => `<option value="${esc(v)}" ${v===task.nature?'selected':''}>${esc(v)}</option>`).join('');
+    masters.natures.map(v => `<option value="${esc(v)}" ${v===nature?'selected':''}>${esc(v)}</option>`).join('');
   nSel.classList.remove('invalid');
 
   const modEl = document.getElementById('cm-module');
-  modEl.value = task.module || '';
+  modEl.value = module_;
   modEl.classList.remove('invalid');
 
-  document.getElementById('cm-ticket').value = task.ticket || '';
+  document.getElementById('cm-ticket').value = ticket;
 
-  // Status — default to Completed
+  // Status — always default to Completed when (re-)opening this popup,
+  // regardless of what status was saved last time for this task
   const stSel = document.getElementById('cm-status');
   stSel.value = 'Completed';
   stSel.classList.remove('invalid');
 
   const descEl = document.getElementById('cm-description');
-  descEl.value = '';
+  descEl.value = (lastEntry && lastEntry.description) || '';
   descEl.classList.remove('invalid');
+
+  const remarkEl = document.getElementById('cm-remark');
+  if (remarkEl) { remarkEl.value = (lastEntry && lastEntry.remark) || ''; }
 
   // Clear duration adjustment and custom time for fresh completion
   const adjInp = document.getElementById('cm-duration-adj');
@@ -1377,6 +1476,9 @@ function editLogEntry(globalIdx) {
 
   const descEl = document.getElementById('cm-description');
   descEl.value = entry.description || ''; descEl.classList.remove('invalid');
+
+  const remarkEl = document.getElementById('cm-remark');
+  if (remarkEl) remarkEl.value = entry.remark || '';
 
   // Update modal chrome for edit mode
   document.querySelector('#complete-modal .modal-title').innerHTML =
@@ -1530,6 +1632,7 @@ function submitComplete() {
   const ticket   = document.getElementById('cm-ticket').value.trim();
   const status   = document.getElementById('cm-status').value.trim();
   const desc     = document.getElementById('cm-description').value.trim();
+  const remark   = (document.getElementById('cm-remark') || {value:''}).value.trim();
 
   let invalid = false;
   const check = (elId, val) => {
@@ -1552,7 +1655,7 @@ function submitComplete() {
       editEntry.heading = heading; editEntry.project = project;
       editEntry.module = module;   editEntry.nature = nature;
       editEntry.ticket = ticket;   editEntry.taskStatus = status;
-      editEntry.description = desc;
+      editEntry.description = desc; editEntry.remark = remark;
       const adjMinsEdit = parseInt(document.getElementById('cm-duration-adj').value, 10);
       if (!isNaN(adjMinsEdit) && adjMinsEdit > 0) editEntry.durationSecs = adjMinsEdit * 60;
       const csEdit = getCustomStartTimestamp();
@@ -1605,6 +1708,7 @@ function submitComplete() {
     entry.nature = nature; entry.ticket = ticket;
     entry.taskStatus = status;
     entry.description = desc;
+    entry.remark = remark;
   }
   closeCompleteModal();
   saveState();
@@ -1613,6 +1717,105 @@ function submitComplete() {
   if (doneRow) doneRow.remove();
   updateEmptyState();
   updateLogPanel();
+}
+
+// ── Continue an "In Progress" task tomorrow (manual, button-triggered) ───────
+// Creates a fresh idle task for the next calendar day with 00:00 duration,
+// copying name/project/nature/module/ticket from the source task's last log entry.
+// ── Continue an "In Progress" task on a chosen day (manual, button-triggered) ─
+// Opens a small date-picker modal pre-filled with the day after the entry's
+// own date. Confirming creates a fresh idle task on the chosen date with
+// 00:00 duration, copying name/project/nature/module/ticket from the entry.
+let pendingCarryForwardTaskId = null;
+
+function continueTomorrow(taskId) {
+  const task = tasks.find(t => t.id === taskId);
+  const entry = [...logEntries].reverse().find(e => e.taskId === taskId);
+  if (!task && !entry) return;
+
+  pendingCarryForwardTaskId = taskId;
+
+  const heading = (entry && entry.heading) || (task && task.heading) || 'Untitled';
+  document.getElementById('cf-task-name').textContent = heading;
+
+  // Default the date field to the day after the entry's own date —
+  // not real-world today — so carrying forward a past day's entry
+  // defaults sensibly to the day right after it.
+  const baseDate = entry ? new Date(entry.startTs) : new Date();
+  const nextDay = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate() + 1);
+  const nextDayStr = nextDay.getFullYear() + '-' +
+    String(nextDay.getMonth() + 1).padStart(2, '0') + '-' +
+    String(nextDay.getDate()).padStart(2, '0');
+  document.getElementById('cf-date').value = nextDayStr;
+
+  document.getElementById('carry-forward-modal').classList.remove('hidden');
+}
+
+function closeCarryForwardModal() {
+  document.getElementById('carry-forward-modal').classList.add('hidden');
+  pendingCarryForwardTaskId = null;
+}
+
+function confirmCarryForward() {
+  const taskId = pendingCarryForwardTaskId;
+  if (taskId == null) return;
+
+  const chosenDateStr = document.getElementById('cf-date').value;
+  if (!chosenDateStr) { document.getElementById('cf-date').classList.add('invalid'); return; }
+
+  const task = tasks.find(t => t.id === taskId);
+  const entry = [...logEntries].reverse().find(e => e.taskId === taskId);
+  if (!task && !entry) { closeCarryForwardModal(); return; }
+
+  const heading = (entry && entry.heading) || (task && task.heading) || '';
+  const project = (entry && entry.project) || (task && task.project) || '';
+  const nature  = (entry && entry.nature)  || (task && task.nature)  || '';
+  const module  = (entry && entry.module)  || (task && task.module)  || '';
+  const ticket  = (entry && entry.ticket)  || (task && task.ticket)  || '';
+
+  const [yy, mm, dd] = chosenDateStr.split('-').map(Number);
+  const w = (typeof getWorkHours === 'function') ? getWorkHours() : { startH: 9, startM: 30 };
+  const carryTs = new Date(yy, mm - 1, dd, w.startH, w.startM, 0, 0).getTime();
+
+  const newId = ++taskIdCounter;
+  tasks.unshift({
+    id: newId,
+    heading, project, nature, module, ticket,
+    status: 'idle',
+    accumulatedMs: 0,       // starts fresh at 00:00 for daily-basis logging
+    segmentStart: null,
+    startedAt: null,
+    createdAt: carryTs,
+    carriedOver: true       // flag so the card shows a "Carried" badge
+  });
+
+  saveState();
+  updateLogTable();
+  closeCarryForwardModal();
+
+  // Notice
+  const notice = document.getElementById('wake-notice');
+  if (notice) {
+    notice.textContent = '📋 Task added to ' + chosenDateStr + ' at 00:00 — "' + (heading || 'Untitled') + '"';
+    notice.style.background = 'var(--blue-mid)';
+    notice.classList.add('show');
+    setTimeout(() => {
+      notice.classList.remove('show');
+      notice.style.background = '';
+      notice.textContent = '⏱ Timers refreshed after wake';
+    }, 4000);
+  }
+
+  // If the date picker is already showing the chosen date, render the row immediately
+  if (typeof getSelectedDate === 'function' && getSelectedDate() === chosenDateStr) {
+    const list = document.getElementById('task-list');
+    const emptyState = document.getElementById('empty-state');
+    if (emptyState) emptyState.remove();
+    const rowEl = document.createElement('div');
+    rowEl.id = 'row-' + newId;
+    list.insertBefore(rowEl, list.firstChild);
+    renderRow(newId);
+  }
 }
 
 
@@ -1778,6 +1981,7 @@ function renderRow(id) {
         onkeydown="if(event.key==='Enter' && !${isFuture}) startTask(${id})" />
       ${isFuture ? '' : `<span id="timer-${id}" class="timer-display${isRunning?' running':isPaused?' paused':''}">${fmt(liveElapsedSecs(task))}</span>`}
       <span class="status-badge badge-${isFuture?'planned':status}">${isFuture?'planned':status}</span>
+      ${task.carriedOver ? `<span class="status-badge" style="background:var(--amber-bg);color:var(--amber-dark);font-size:10px" title="Carried over from previous day's In Progress task"><i class="ti ti-arrow-forward-up" style="font-size:11px;vertical-align:-1px"></i> Carried</span>` : ''}
       <div class="actions">
         ${actionBtns}
         <button class="btn-icon btn-delete" onclick="confirmDeleteTask(${id})" title="Remove"><i class="ti ti-trash"></i></button>
@@ -1929,10 +2133,19 @@ function updateLogTable() {
       <td>${esc(e.module)}</td>
       <td>${esc(e.nature)}</td>
       <td>${esc(e.ticket)}</td>
-      <td class="td-desc">${esc(e.description || (isRunning ? '— pending on completion —' : ''))}</td>
+      <td class="td-desc">${esc(e.heading || (isRunning ? '— pending on completion —' : ''))}</td>
       <td>${minsCell}</td>
       <td>${statusText}</td>
-      <td>${selDate === todayStr() ? '<div style="display:flex;flex-direction:row;align-items:center;gap:4px"><button class="btn-icon btn-edit" onclick="editLogEntry('+logEntries.indexOf(e)+')" title="Edit entry"><i class="ti ti-pencil"></i></button><button class="btn-icon" onclick="reopenTask('+e.taskId+')" title="Reopen task" style="border-color:var(--amber-mid);color:var(--amber-dark)"><i class="ti ti-refresh"></i></button><button class="btn-icon btn-delete" onclick="confirmDeleteLogEntry('+logEntries.indexOf(e)+')" title="Delete entry"><i class="ti ti-trash"></i></button></div>' : ''}</td>
+      <td class="td-desc">${esc(e.remark || '')}</td>
+      <td>
+        <div style="display:flex;flex-direction:row;align-items:center;gap:4px">
+        ${selDate === todayStr() ? '<button class="btn-icon btn-edit" onclick="editLogEntry('+logEntries.indexOf(e)+')" title="Edit entry"><i class="ti ti-pencil"></i></button>' : ''}
+        ${statusText==='In Progress'
+            ? '<button class="btn-icon" id="continue-'+e.taskId+'" onclick="continueTomorrow('+e.taskId+')" title="Add this task to another day" style="border-color:var(--blue-mid);color:var(--blue-dark)"><i class="ti ti-calendar-plus"></i></button>'
+            : (selDate === todayStr() ? '<button class="btn-icon" onclick="reopenTask('+e.taskId+')" title="Reopen task" style="border-color:var(--amber-mid);color:var(--amber-dark)"><i class="ti ti-refresh"></i></button>' : '')}
+        ${selDate === todayStr() ? '<button class="btn-icon btn-delete" onclick="confirmDeleteLogEntry('+logEntries.indexOf(e)+')" title="Delete entry"><i class="ti ti-trash"></i></button>' : ''}
+        </div>
+      </td>
     </tr>`;
   }).join('');
 }
@@ -2203,7 +2416,8 @@ function copyLog() {
       e.ticket||'',
       e.description||'',
       Math.ceil(secs/60),
-      e.taskStatus || (e.endTs ? 'Completed' : (task ? task.status : ''))
+      e.taskStatus || (e.endTs ? 'Completed' : (task ? task.status : '')),
+      e.remark||''
     ].join('\t');
   });
 
@@ -2243,7 +2457,7 @@ function openCSVModal() {
 }
 
 const CSV_HEADERS = ['Date','Employee Name','Project','Module / Feature','Nature of Task',
-  'Ticket # if support ticket','Task progress / Effort description','Effort (Minutes)','Status'];
+  'Ticket # if support ticket','Task progress / Effort description','Effort (Minutes)','Status','Remarks'];
 
 function csvEscape(val) {
   const s = String(val == null ? '' : val);
@@ -2280,7 +2494,8 @@ function exportCSV() {
       e.ticket  || '',
       e.description || '',
       Math.ceil(secs / 60),
-      e.taskStatus || (e.endTs ? 'Completed' : (task ? task.status : ''))
+      e.taskStatus || (e.endTs ? 'Completed' : (task ? task.status : '')),
+      e.remark || ''
     ].map(csvEscape).join(','));
   });
 
@@ -2339,16 +2554,9 @@ function processCSVFile(file) {
       dataRows.forEach(line => {
         const vals = parseCSVLine(line);
         const dateStr = vals[col['Date']] || '';
-        // Normalize date from DD-MM-YYYY to YYYY-MM-DD for range check
-        let iso = dateStr;
-        const parts = dateStr.match(/^(\d{2})-(\d{2})-(\d{4})$/);
-        if (parts) iso = parts[3] + '-' + parts[2] + '-' + parts[1];
-
-        if (from && iso < from) { skipped++; return; }
-        if (to   && iso > to)   { skipped++; return; }
 
         // Parse date: supports DD-MM-YYYY and DD-Mon-YY / DD-Mon-YYYY
-        let startTs;
+        let startTs, iso;
         const numMatch = dateStr.match(/^(\d{1,2})-(\d{2})-(\d{4})$/);
         const monMatch = dateStr.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{2,4})$/);
         if (numMatch) {
@@ -2363,21 +2571,23 @@ function processCSVFile(file) {
           iso = yr + '-' + String(mo+1).padStart(2,'0') + '-' + String(dy).padStart(2,'0');
         } else {
           startTs = Date.now();
+          iso = dateStr; // fallback, won't match range checks below if malformed
         }
+
+        if (from && iso < from) { skipped++; return; }
+        if (to   && iso > to)   { skipped++; return; }
 
         const mins = parseInt(vals[col['Effort (Minutes)']] || '0', 10) || 0;
         const entry = {
-          taskId: --taskIdCounter, // negative IDs for imported
+          taskId: --importIdCounter, // separate negative IDs for imported, never collides with real task IDs
           heading: vals[col['Task progress / Effort description']] || '',
           employee: vals[col['Employee Name']] || userName,
           project: vals[col['Project']] || '',
           module: vals[col['Module / Feature']] || '',
           nature: vals[col['Nature of Task']] || '',
           ticket: vals[col['Ticket # if support ticket']] || '',
-          description: [
-            vals[col['Task progress / Effort description']],
-            col['Remarks'] >= 0 ? vals[col['Remarks']] : ''
-          ].filter(Boolean).join(' | ') || '',
+          description: vals[col['Task progress / Effort description']] || '',
+          remark: col['Remarks'] >= 0 ? vals[col['Remarks']] || '' : '',
           taskStatus: vals[col['Status']] || 'Completed',
           startTs, endTs: startTs + mins * 60000,
           durationSecs: mins * 60,
@@ -2424,7 +2634,7 @@ function parseCSVLine(line) {
 
 // ── XLSX export (SheetJS) ─────────────────────────────────────────────────────
 function exportXLSX() {
-  const logHeaders = ['Date','Employee Name','Project','Module / Feature','Nature of Task','Ticket # if support ticket','Task progress / Effort description','Effort (Minutes)','Status'];
+  const logHeaders = ['Date','Employee Name','Project','Module / Feature','Nature of Task','Ticket # if support ticket','Task progress / Effort description','Effort (Minutes)','Status','Remarks'];
   const logRows = logEntries.map(e => {
     const task = tasks.find(t=>t.id===e.taskId);
     const secs = e.durationSecs!==null ? e.durationSecs : (task ? liveElapsedSecs(task) : 0);
@@ -2433,7 +2643,8 @@ function exportXLSX() {
       fmtDate(startD), e.employee || userName, e.project||'', e.module||'', e.nature||'', e.ticket||'',
       e.description||'',
       Math.ceil(secs/60),
-      e.taskStatus || (e.endTs ? 'Completed' : (task ? task.status : ''))
+      e.taskStatus || (e.endTs ? 'Completed' : (task ? task.status : '')),
+      e.remark||''
     ];
   });
   const masterRows=[
@@ -2825,8 +3036,46 @@ function restoreIntervals() {
   });
 }
 
+// ── Theme: light / dark / system ────────────────────────────────────────────
+function getStoredTheme() {
+  try { return localStorage.getItem('ttl_theme') || 'system'; } catch (e) { return 'system'; }
+}
+
+function applyTheme(theme) {
+  const root = document.documentElement;
+  if (theme === 'light' || theme === 'dark') {
+    root.setAttribute('data-theme', theme);
+  } else {
+    root.removeAttribute('data-theme'); // 'system' — let prefers-color-scheme decide
+  }
+  const icon = document.getElementById('theme-toggle-icon');
+  const label = document.getElementById('theme-toggle-label');
+  if (icon && label) {
+    if (theme === 'light') { icon.className = 'ti ti-sun'; label.textContent = 'Light'; }
+    else if (theme === 'dark') { icon.className = 'ti ti-moon'; label.textContent = 'Dark'; }
+    else { icon.className = 'ti ti-device-desktop'; label.textContent = 'System'; }
+  }
+}
+
+function setTheme(theme) {
+  try { localStorage.setItem('ttl_theme', theme); } catch (e) {}
+  applyTheme(theme);
+}
+
+function cycleTheme() {
+  const order = ['light', 'dark', 'system'];
+  const current = getStoredTheme();
+  const next = order[(order.indexOf(current) + 1) % order.length];
+  setTheme(next);
+}
+
+function initTheme() {
+  applyTheme(getStoredTheme());
+}
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 loadState();
+initTheme();
 if (typeof Notification !== 'undefined' && Notification.permission === 'default') { Notification.requestPermission(); }
 checkUserNamePrompt();
 initDatePicker();
