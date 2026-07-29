@@ -1,8 +1,8 @@
 {
-  "name": "Task Time Logger",
-  "short_name": "TimeLogger",
-  "description": "Track daily effort and log tasks",
-  "start_url": "/Task-Logger-Demo/",
+  "name": "Effort App",
+  "short_name": "EffortApp",
+  "description": "Effort App Track daily effort and log tasks and dashboard on that",
+  "start_url": "/EffortApp/",
   "display": "standalone",
   "background_color": "#f5f5f3",
   "theme_color": "#1D9E75",
