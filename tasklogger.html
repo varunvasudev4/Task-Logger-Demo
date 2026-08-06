@@ -1520,6 +1520,7 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
         <button class="tab-btn" onclick="switchTab('workhours')">Work Hours</button>
         <button class="tab-btn" onclick="switchTab('email')"><i class="ti ti-mail" style="font-size:13px"></i> Email</button>
         <button class="tab-btn" onclick="switchTab('data')"><i class="ti ti-database" style="font-size:13px"></i> Data</button>
+        <button class="tab-btn" onclick="switchTab('sync')"><i class="ti ti-cloud" style="font-size:13px"></i> Synchronization</button>
       </div>
       <div id="masters-content"></div>
       <div id="master-add-section" class="master-add-row">
@@ -1845,6 +1846,1027 @@ let pendingCompleteId = null;
 let pendingEditIdx = null;
 let cmTimerInterval = null; // task waiting for complete modal
 
+// ── Synchronization Metadata (Phase 1 — Sync Metadata Scaffolding) ─────────────
+// Implements ONLY the common synchronization metadata fields defined in
+// SYNC_DATA_MODEL.md §3, scoped to Tasks per this phase's brief. No sync
+// behavior is active: nothing here ever makes a network call, and no field
+// added here changes how a task behaves or renders. Metadata lives entirely
+// under each task's `_sync` property — strictly separate from business data,
+// per SYNC_DATA_MODEL.md §11 design principle 3 — and is never surfaced in
+// the UI (§3/§11 design principle 2).
+//
+// Fields stored on task._sync (SYNC_DATA_MODEL.md §3):
+//   syncId       — stable, app-generated, provider-independent identity. Never changes.
+//   cloudId      — provider file id. Always null until a future phase uploads anything.
+//   localId      — mirrors the existing internal task.id scheme (§3 "Local ID").
+//   version      — monotonically increasing change counter for this entity.
+//   createdAt    — first-creation timestamp (local). Never changes once set.
+//   modifiedAt   — timestamp of the most recent local edit.
+//   lastSync     — timestamp of the last successful sync pass. Always null (no sync yet).
+//   deleted      — soft-delete flag (Deleted Flag, §3/§5). See markSyncMetadataDeleted().
+//   deviceId     — id of the device that produced the current version.
+//   checksum     — hash of business-data fields only, never including _sync itself.
+//   schemaVersion— shape version of this metadata block.
+//   contentHash  — hash over the serialized payload, for future transport-corruption checks.
+//   syncStatus   — position in the Synchronization State model (§7). Always 'local_only'
+//                  in this phase, since no cloud connection or sync pass ever runs yet.
+
+const SYNC_SCHEMA_VERSION = 1;
+const DEVICE_ID_STORAGE_KEY = 'ttl_device_id';
+
+// In-memory cache of this browser profile's Device ID, so repeated calls within a
+// session don't re-read localStorage every time. Populated lazily by getDeviceId().
+let _cachedDeviceId = null;
+
+// Deterministic, dependency-free string hash (cyrb53-style). Used for both Checksum
+// and Content Hash (§3) — not cryptographic, just a cheap, stable "did this change"
+// signal, which is all either field needs to do in this phase.
+function simpleHash(str) {
+  let h1 = 0xdeadbeef ^ 0, h2 = 0x41c6ce57 ^ 0;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+}
+
+// Deterministic JSON serialization (object keys sorted recursively) so two objects
+// with identical content but different key-insertion order still hash identically —
+// otherwise a no-op re-save could spuriously look like a content change.
+function stableStringify(value) {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return '[' + value.map(stableStringify).join(',') + ']';
+  const keys = Object.keys(value).sort();
+  return '{' + keys.map(k => JSON.stringify(k) + ':' + stableStringify(value[k])).join(',') + '}';
+}
+
+// Generates a stable, app-generated, provider-independent Sync ID (SYNC_DATA_MODEL.md
+// §3 "Sync ID"). Uses crypto.randomUUID() where available (all modern browsers);
+// falls back to a timestamp+random string so this never throws in an older engine.
+function generateSyncId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'sid-' + Date.now().toString(36) + '-' +
+    Math.random().toString(36).slice(2, 12) + Math.random().toString(36).slice(2, 12);
+}
+
+// Returns this browser profile's persistent Device ID (SYNC_DATA_MODEL.md §3 "Device
+// ID"), generating and persisting one on first use. Reused forever afterward — never
+// regenerated unless localStorage is cleared/reset, since that's the only way the
+// backing key can disappear.
+function getDeviceId() {
+  if (_cachedDeviceId) return _cachedDeviceId;
+  try {
+    let stored = localStorage.getItem(DEVICE_ID_STORAGE_KEY);
+    if (!stored) {
+      stored = generateSyncId();
+      localStorage.setItem(DEVICE_ID_STORAGE_KEY, stored);
+    }
+    _cachedDeviceId = stored;
+  } catch (e) {
+    // localStorage unavailable/blocked (e.g. private browsing edge cases) — fall back
+    // to an in-memory-only id for this session rather than letting metadata creation fail.
+    if (!_cachedDeviceId) _cachedDeviceId = generateSyncId();
+  }
+  return _cachedDeviceId;
+}
+
+// Checksum (§3): hash of business-data fields only. Computed generically over every
+// key on the task except `_sync` itself, so it never needs updating as the task shape
+// grows — and it can never accidentally include synchronization metadata (§10 validation
+// rule: "Checksums must reflect business-data content only, never sync metadata itself").
+function computeTaskChecksum(task) {
+  const business = {};
+  Object.keys(task).forEach(k => { if (k !== '_sync') business[k] = task[k]; });
+  return simpleHash(stableStringify(business));
+}
+
+// Content Hash (§3): distinct from Checksum — represents the payload as it would be
+// serialized/transmitted, for future transport-corruption detection. Computed from the
+// entity's identity + current checksum/version rather than raw business data again, so
+// it changes exactly when Checksum or Version changes without duplicating that work.
+function computeTaskContentHash(task) {
+  const s = task._sync || {};
+  return simpleHash(stableStringify({ id: task.id, syncId: s.syncId, version: s.version, checksum: s.checksum }));
+}
+
+// Creates a fresh synchronization metadata block for a brand-new task and attaches it
+// as task._sync. Used by every task-creation path (Add Task, Carry Forward, Recurring
+// materialization) so every newly created task receives metadata automatically (Phase 1
+// requirement 3/7/8). Version starts at 1 per SYNC_DATA_MODEL.md §5 (versions only
+// increase, never start below 1).
+function createSyncMetadata(task) {
+  const now = Date.now();
+  const meta = {
+    syncId: generateSyncId(),
+    cloudId: null,
+    localId: task.id,
+    version: 1,
+    createdAt: now,
+    modifiedAt: now,
+    lastSync: null,
+    deleted: false,
+    deviceId: getDeviceId(),
+    checksum: null,
+    schemaVersion: SYNC_SCHEMA_VERSION,
+    contentHash: null,
+    syncStatus: 'local_only',
+    // Phase 2 (Dirty Tracking): a brand-new task has never been synced, so it
+    // starts dirty — see markTaskDirty()/isTaskDirty() below.
+    dirty: true
+  };
+  task._sync = meta;
+  meta.checksum = computeTaskChecksum(task);
+  meta.contentHash = computeTaskContentHash(task);
+  // Phase 3 (Local Queue Engine): a brand-new task starts dirty (above), so it
+  // needs a corresponding Upload Queue entry immediately — see enqueueTask().
+  enqueueTask(task);
+  return meta;
+}
+
+// Backfills synchronization metadata on a task that may predate Phase 1 (missing
+// task._sync entirely) or that has a partially-shaped _sync block (e.g. from a future
+// schema bump). Never overwrites a field that's already validly present — only fills
+// in what's missing — so this is always safe to call on every load/import, even
+// repeatedly, with no data loss (Phase 1 requirement 2/10). Recomputes the derived
+// checksum/contentHash every call since those must always reflect current content.
+function ensureSyncMetadata(task) {
+  if (!task || typeof task !== 'object') return null;
+  if (!task._sync || typeof task._sync !== 'object') {
+    const createdAt = typeof task.createdAt === 'number' ? task.createdAt : Date.now();
+    task._sync = {
+      syncId: generateSyncId(),
+      cloudId: null,
+      localId: task.id,
+      version: 1,
+      createdAt: createdAt,
+      modifiedAt: createdAt,
+      lastSync: null,
+      deleted: false,
+      deviceId: getDeviceId(),
+      checksum: null,
+      schemaVersion: SYNC_SCHEMA_VERSION,
+      contentHash: null,
+      syncStatus: 'local_only',
+      // Phase 2 (Dirty Tracking): this task had no _sync block at all (pre-Phase-1
+      // data), so it has certainly never been synced — starts dirty, same as any
+      // other brand-new metadata block (see createSyncMetadata()).
+      dirty: true
+    };
+  } else {
+    const s = task._sync;
+    if (!s.syncId) s.syncId = generateSyncId();
+    if (s.cloudId === undefined) s.cloudId = null;
+    if (s.localId === undefined) s.localId = task.id;
+    if (typeof s.version !== 'number' || s.version < 1) s.version = 1;
+    if (typeof s.createdAt !== 'number') s.createdAt = (typeof task.createdAt === 'number' ? task.createdAt : Date.now());
+    if (typeof s.modifiedAt !== 'number') s.modifiedAt = s.createdAt;
+    if (s.lastSync === undefined) s.lastSync = null;
+    if (typeof s.deleted !== 'boolean') s.deleted = false;
+    if (!s.deviceId) s.deviceId = getDeviceId();
+    if (typeof s.schemaVersion !== 'number') s.schemaVersion = SYNC_SCHEMA_VERSION;
+    if (!s.syncStatus) s.syncStatus = 'local_only';
+    // Phase 2 (Dirty Tracking): back-fill ONLY when missing, so loading existing
+    // data never overwrites a dirty flag a Phase-2-aware save already set — this
+    // branch exists purely for _sync blocks written by Phase 1 before this field
+    // existed. Default to true (needs sync) rather than false: a task with no
+    // recorded dirty state has never been confirmed synced, so assuming it's
+    // clean could hide real changes from a future sync pass.
+    if (typeof s.dirty !== 'boolean') s.dirty = true;
+  }
+  task._sync.checksum = computeTaskChecksum(task);
+  task._sync.contentHash = computeTaskContentHash(task);
+  return task._sync;
+}
+
+// Called on every confirmed edit to a task's business data (field edit, custom-field
+// edit, completion). Bumps Version, stamps Modified At/Device ID, and recomputes
+// Checksum/Content Hash — metadata only, never touches business fields itself
+// (Phase 1 requirement 4/5). Guarantees _sync exists first via ensureSyncMetadata so
+// this is safe to call even on a legacy task that slipped through migration.
+function touchSyncMetadata(task) {
+  ensureSyncMetadata(task);
+  const s = task._sync;
+  s.version += 1;
+  s.modifiedAt = Date.now();
+  s.deviceId = getDeviceId();
+  s.checksum = computeTaskChecksum(task);
+  s.contentHash = computeTaskContentHash(task);
+  // Phase 2 (Dirty Tracking): every confirmed business-data edit marks the task
+  // dirty. Setting this to true when it's already true is a no-op, so rapid
+  // repeated edits never produce duplicate tracking information.
+  s.dirty = true;
+  // Phase 3 (Local Queue Engine): ensure/refresh this task's Upload Queue entry.
+  // enqueueTask() upserts by syncId, so a task edited multiple times before its
+  // next sync pass updates its one existing entry rather than duplicating it.
+  enqueueTask(task);
+  return s;
+}
+
+// Called immediately before a task is removed from the `tasks` array by deleteTask().
+// Stamps the Deleted Flag and bumps Version on the metadata exactly as
+// SYNC_DATA_MODEL.md §3/§5 defines a deletion event, WITHOUT changing deleteTask's
+// existing removal behavior — no cloud deletion, no soft-delete retention of the row,
+// and no change to what the user sees, per this phase's explicit scope (Phase 1
+// requirement 6; retaining soft-deleted tasks in storage/UI is a Sync Manager /
+// Storage Adapter concern for a later phase, not a Phase 1 metadata change).
+function markSyncMetadataDeleted(task) {
+  ensureSyncMetadata(task);
+  const s = task._sync;
+  s.deleted = true;
+  s.version += 1;
+  s.modifiedAt = Date.now();
+  s.deviceId = getDeviceId();
+  s.checksum = computeTaskChecksum(task);
+  s.contentHash = computeTaskContentHash(task);
+  // Phase 2 (Dirty Tracking): a deletion is itself an edit (SYNC_DATA_MODEL.md
+  // §5) — the Deleted Flag needs to reach the cloud just like any other change.
+  s.dirty = true;
+  // Phase 3 (Local Queue Engine): if this task already had an Upload Queue
+  // entry (e.g. it was edited earlier), enqueueTask() updates that SAME entry
+  // in place to reflect a pending delete instead of a pending upload — it is
+  // never removed automatically (requirement 4). If no entry existed yet, one
+  // is created now, already recorded as a delete.
+  enqueueTask(task);
+  return s;
+}
+// ── End Synchronization Metadata (Phase 1) ──────────────────────────────────────
+
+// ── Dirty Tracking (Phase 2) ─────────────────────────────────────────────────────
+// Determines WHICH task records still have local changes that haven't reached the
+// cloud. This phase adds a single boolean, task._sync.dirty, on top of Phase 1's
+// existing metadata block — it never performs synchronization itself, never makes
+// a network call, and never introduces any separate queue or pending-upload list.
+// The `tasks` array (already persisted by saveState()) IS the durable record of
+// what's dirty; these helpers only read/write the one flag on it.
+//
+// Every task-mutation call site already funnels through createSyncMetadata(),
+// touchSyncMetadata(), or markSyncMetadataDeleted() (see Phase 1 above) for Add
+// Task, Carry Forward, Recurring materialization, starting/pausing/resuming,
+// completion, field/custom-field edits, auto-pause, and deletion — so marking
+// dirty inside those three functions covers every mutation path this phase's
+// brief lists, with no changes needed at any individual call site.
+
+// Marks a single task dirty. Idempotent: calling this on an already-dirty task
+// just leaves the flag at `true`, so repeated/rapid edits never create duplicate
+// tracking information (there is nothing to duplicate — it's one boolean per
+// task). Guarantees the task has a _sync block first, so this is safe to call on
+// any task, including one that predates Phase 1.
+function markTaskDirty(task) {
+  if (!task) return;
+  ensureSyncMetadata(task);
+  task._sync.dirty = true;
+  // Phase 3 (Local Queue Engine): keep this helper's contract complete — any
+  // caller that marks a task dirty through here also gets a queue entry,
+  // exactly like the three Phase 1 mutators below already do inline.
+  enqueueTask(task);
+}
+
+// Clears the dirty flag on a single task. Nothing in this phase calls it yet —
+// there is no push pipeline to confirm against — but it's provided now as the
+// counterpart a future sync phase needs: per LOCAL_SYNC_ENGINE.md §3, dirty must
+// only be cleared once a push completes and is confirmed, never optimistically.
+function clearTaskDirty(task) {
+  if (!task) return;
+  ensureSyncMetadata(task);
+  task._sync.dirty = false;
+}
+
+// Returns whether a task currently has local changes that haven't been confirmed
+// synced.
+function isTaskDirty(task) {
+  return !!(task && task._sync && task._sync.dirty === true);
+}
+
+// Returns every currently-dirty task. Computed on demand by filtering the live
+// `tasks` array — not a separately maintained/persisted list — so it can never
+// drift out of sync with the data it describes, and there is nothing beyond the
+// existing task records for saveState()/loadState() to keep durable.
+function getDirtyTasks() {
+  return tasks.filter(isTaskDirty);
+}
+// ── End Dirty Tracking (Phase 2) ─────────────────────────────────────────────────
+
+// ── Local Queue Engine (Phase 3) ──────────────────────────────────────────────────
+// Implements ONLY the persistent local queue infrastructure described in
+// LOCAL_SYNC_ENGINE.md §4: durable, inspectable records of outstanding
+// synchronization work. This engine NEVER communicates with any cloud provider,
+// never uploads/downloads/syncs anything, and never modifies business data — it
+// only tracks which entities (referenced by Sync ID, per SYNC_DATA_MODEL.md §4
+// rule 3 — never by Cloud ID, and never by embedding the full task object) still
+// have work outstanding. Queue entries carry synchronization metadata only
+// (requirement 7/8): syncId, operation, version, timestamps — never a copy of
+// the task's business-data fields.
+//
+// Five queue types exist per LOCAL_SYNC_ENGINE.md §4 — Upload, Download, Delete,
+// Retry, Conflict — but ONLY Upload Queue is actively populated in this phase.
+// The other four exist as real, persisted, empty structures so a future phase
+// can start using them without any data-shape migration.
+
+const QUEUE_SCHEMA_VERSION = 1;
+const QUEUE_STORAGE_KEY = 'ttl_sync_queues';
+const QUEUE_NAMES = ['upload', 'download', 'delete', 'retry', 'conflict'];
+
+// In-memory queue state. Each queue is an array of entries:
+//   { queueId, syncId, localId, operation, status, version, createdAt, updatedAt, attempts }
+// Rebuilt from localStorage on load (loadQueues()); never holds a full task object.
+let syncQueues = { upload: [], download: [], delete: [], retry: [], conflict: [] };
+
+// Reuses the same identity generator as Sync IDs (generateSyncId(), Phase 1) —
+// a queue entry needs the same "stable, collision-free, app-generated" identity
+// guarantee a synchronized entity does.
+function generateQueueEntryId() {
+  return generateSyncId();
+}
+
+// Persists all five queues as one JSON blob under their own storage key —
+// deliberately separate from ttl_tasks/ttl_log/etc. (saveState(), Phase 1/2's
+// existing keys) so this phase never touches or depends on those. Write-through:
+// called after every queue mutation (not just alongside saveState()), so queue
+// contents survive a refresh, browser restart, or power interruption even if the
+// interruption happens between two unrelated business-data edits (requirement 5).
+function saveQueues() {
+  try {
+    localStorage.setItem(QUEUE_STORAGE_KEY, JSON.stringify({
+      schemaVersion: QUEUE_SCHEMA_VERSION,
+      queues: syncQueues
+    }));
+  } catch (e) {}
+}
+
+// Loads persisted queues from localStorage. Safe to call on a profile that
+// predates Phase 3 (no key yet, or a malformed one) — leaves the default
+// empty-queues shape in place rather than throwing.
+function loadQueues() {
+  try {
+    const raw = localStorage.getItem(QUEUE_STORAGE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (parsed && parsed.queues && typeof parsed.queues === 'object') {
+      QUEUE_NAMES.forEach(name => {
+        syncQueues[name] = Array.isArray(parsed.queues[name]) ? parsed.queues[name] : [];
+      });
+    }
+  } catch (e) {}
+}
+
+// Generic helpers — usable against any of the five queues, so a future phase
+// that starts populating Download/Delete/Retry/Conflict needs no new plumbing.
+
+function findQueueEntry(syncId, queueName) {
+  const q = syncQueues[queueName];
+  if (!Array.isArray(q) || !syncId) return null;
+  return q.find(e => e.syncId === syncId) || null;
+}
+
+// Does `queueName` already have an entry for this Sync ID?
+function hasQueueEntry(syncId, queueName) {
+  return !!findQueueEntry(syncId, queueName);
+}
+
+// Creates a new entry for `syncId` in `queueName`, OR updates the existing one
+// in place — never both. This single upsert path is what guarantees "never
+// create duplicate queue entries" (requirement 2) and "editing again updates
+// the existing entry" (requirement 3) with no separate branching at call sites.
+function upsertQueueEntry(queueName, syncId, entryData) {
+  if (!QUEUE_NAMES.includes(queueName) || !syncId) return null;
+  if (!Array.isArray(syncQueues[queueName])) syncQueues[queueName] = [];
+  const now = Date.now();
+  let entry = findQueueEntry(syncId, queueName);
+  if (entry) {
+    Object.assign(entry, entryData, { updatedAt: now });
+  } else {
+    entry = Object.assign({
+      queueId: generateQueueEntryId(),
+      syncId: syncId,
+      status: 'pending',
+      createdAt: now,
+      updatedAt: now,
+      attempts: 0
+    }, entryData);
+    syncQueues[queueName].push(entry);
+  }
+  saveQueues();
+  return entry;
+}
+
+// Updates fields on an existing entry without changing its identity or
+// creating one if none exists — callers that want create-or-update semantics
+// should use upsertQueueEntry() (or enqueueTask() for the Upload Queue) instead.
+function updateQueueEntry(syncId, queueName, updates) {
+  const entry = findQueueEntry(syncId, queueName);
+  if (!entry) return null;
+  Object.assign(entry, updates, { updatedAt: Date.now() });
+  saveQueues();
+  return entry;
+}
+
+// Removes an entry entirely. Nothing in this phase calls this to react to a
+// task edit/delete — per requirement 4, a deleted task's entry is UPDATED
+// (enqueueTask(), below), never removed automatically. This exists as the
+// generic counterpart a future phase needs once a push actually confirms
+// (see also clearCompletedEntries()).
+function removeQueueEntry(syncId, queueName) {
+  if (!QUEUE_NAMES.includes(queueName)) return false;
+  const q = syncQueues[queueName];
+  if (!Array.isArray(q)) return false;
+  const before = q.length;
+  syncQueues[queueName] = q.filter(e => e.syncId !== syncId);
+  const removed = syncQueues[queueName].length !== before;
+  if (removed) saveQueues();
+  return removed;
+}
+
+// Removes every entry currently marked 'completed' from a given queue. Nothing
+// in this phase ever marks an entry 'completed' (there is no push pipeline
+// yet), so this is a no-op today — provided now as the generic cleanup
+// counterpart a future sync-confirmation phase will need (requirement 6).
+function clearCompletedEntries(queueName) {
+  if (!QUEUE_NAMES.includes(queueName)) return 0;
+  const q = syncQueues[queueName];
+  if (!Array.isArray(q)) return 0;
+  const before = q.length;
+  syncQueues[queueName] = q.filter(e => e.status !== 'completed');
+  const removedCount = before - syncQueues[queueName].length;
+  if (removedCount > 0) saveQueues();
+  return removedCount;
+}
+
+// ── Upload Queue — the only actively-used queue this phase ─────────────────
+
+// Ensures the task has a corresponding Upload Queue entry, per requirement 2.
+// Called from every place a task becomes Dirty (touchSyncMetadata(),
+// markSyncMetadataDeleted(), createSyncMetadata(), markTaskDirty() — Phase 1/2
+// above), so every task-mutation path already covered by those functions
+// (Add Task, Carry Forward, Recurring materialization, start/pause/resume,
+// completion, field/custom-field edits, auto-pause, deletion) gets a queue
+// entry with no changes needed at any individual call site.
+//
+// Upserts by Sync ID (never duplicates — requirement 2/3). If the task's
+// Deleted Flag is set, the entry's operation is recorded as 'delete' instead
+// of 'upload' — updating the SAME entry rather than removing it or creating a
+// second one (requirement 4). Only synchronization identity/metadata is
+// stored, never the task's business-data fields (requirement 7/8) — this
+// function never reads or writes anything on `task` other than `task._sync`.
+function enqueueTask(task) {
+  if (!task || !task._sync || !task._sync.syncId) return null;
+  const s = task._sync;
+  return upsertQueueEntry('upload', s.syncId, {
+    localId: s.localId,
+    operation: s.deleted ? 'delete' : 'upload',
+    version: s.version
+  });
+}
+
+// Returns a copy of the current Upload Queue (never the live array — callers
+// can't mutate queue state by holding onto this).
+function getUploadQueue() {
+  return syncQueues.upload.slice();
+}
+
+// Statistics (requirement 9). Only pendingUploads will ever be non-zero this
+// phase, since Download/Delete/Retry/Conflict queues are unused placeholders —
+// their counts are included now so a future phase's UI/logic can read this
+// same shape without a breaking change.
+function getQueueStatistics() {
+  return {
+    pendingUploads:   syncQueues.upload.filter(e => e.status !== 'completed').length,
+    pendingDownloads: syncQueues.download.filter(e => e.status !== 'completed').length,
+    pendingDeletes:   syncQueues.delete.filter(e => e.status !== 'completed').length,
+    pendingRetries:   syncQueues.retry.filter(e => e.status !== 'completed').length,
+    pendingConflicts: syncQueues.conflict.filter(e => e.status !== 'completed').length
+  };
+}
+
+// Reconciliation: ensures every currently-dirty task has a matching Upload
+// Queue entry. Covers two cases the inline enqueueTask() calls above can't:
+// (a) tasks that were already dirty from Phase 1/2 before this queue existed
+// at all (their dirty flag was set long before any enqueueTask() call site
+// existed), and (b) defensive self-healing if a queue entry and a task's
+// dirty flag ever fall out of sync. Called once on load, after queue and task
+// data are both in memory (see loadState()). Never removes an entry for a
+// task that's no longer dirty — that's a future confirmed-push phase's job.
+function reconcileUploadQueue() {
+  tasks.forEach(t => { if (isTaskDirty(t)) enqueueTask(t); });
+}
+// ── End Local Queue Engine (Phase 3) ──────────────────────────────────────────────
+
+// ── Local Synchronization Manager (Phase 4) ─────────────────────────────────────
+// Coordinates the local synchronization components already implemented in Phases
+// 1–3 (Synchronization Metadata, Dirty Tracking, Local Queue Engine) and reserves
+// integration points for a future cloud provider. This is the single entry point
+// future synchronization phases will call through.
+//
+// The Local Sync Manager NEVER communicates with Google Drive (or any cloud
+// provider), NEVER makes a network request, and NEVER performs synchronization,
+// upload, download, retry, or conflict resolution itself. It only prepares and
+// coordinates local synchronization state, delegating to the existing Phase 1/2/3
+// helpers rather than duplicating their logic. See LOCAL_SYNC_ENGINE.md §1/§2 and
+// SYNC_ARCHITECTURE.md §4 (Sync Manager) for the finalized roles this module is a
+// local-only precursor to.
+const LocalSyncManager = (function () {
+  // In-memory manager state only — never persisted separately, since everything
+  // it summarizes (tasks, queues) is already durable via saveState()/saveQueues().
+  let _initialized = false;
+  let _ready = false;
+  let _lastValidation = null;
+
+  // ── Validation routines ────────────────────────────────────────────────────
+  // Validation NEVER modifies business data automatically — it only reports.
+
+  // Checks every task for a well-formed synchronization metadata block. Reuses
+  // the existing task shape from Phase 1 rather than inventing a parallel model.
+  function validateMetadata() {
+    const errors = [];
+    if (!Array.isArray(tasks)) {
+      errors.push('Tasks are not currently available to validate.');
+      return { healthy: false, errors };
+    }
+    tasks.forEach(t => {
+      if (!t || typeof t !== 'object') return;
+      if (!t._sync || typeof t._sync !== 'object') {
+        errors.push(`Task ${t.id} is missing synchronization metadata.`);
+        return;
+      }
+      const s = t._sync;
+      if (!s.syncId) errors.push(`Task ${t.id} is missing a Sync ID.`);
+      if (typeof s.version !== 'number' || s.version < 1) errors.push(`Task ${t.id} has an invalid version.`);
+      if (typeof s.dirty !== 'boolean') errors.push(`Task ${t.id} has an invalid dirty flag.`);
+      if (!s.deviceId) errors.push(`Task ${t.id} is missing a Device ID.`);
+    });
+    return { healthy: errors.length === 0, errors };
+  }
+
+  // Checks queue structural integrity and detects orphan entries (a queue entry
+  // whose Sync ID no longer matches any known task) and dirty tasks that are
+  // missing their expected Upload Queue entry (LOCAL_SYNC_ENGINE.md §4).
+  function validateQueueIntegrity() {
+    const errors = [];
+    const orphanEntries = [];
+    if (!syncQueues || typeof syncQueues !== 'object') {
+      errors.push('Synchronization queues are not currently available to validate.');
+      return { healthy: false, errors, orphanEntries };
+    }
+    const knownSyncIds = new Set(
+      (Array.isArray(tasks) ? tasks : [])
+        .filter(t => t && t._sync && t._sync.syncId)
+        .map(t => t._sync.syncId)
+    );
+    QUEUE_NAMES.forEach(name => {
+      const q = syncQueues[name];
+      if (!Array.isArray(q)) { errors.push(`Queue "${name}" is not a valid array.`); return; }
+      q.forEach(entry => {
+        if (!entry || !entry.syncId) { errors.push(`Queue "${name}" contains an entry with no Sync ID.`); return; }
+        if (!knownSyncIds.has(entry.syncId)) orphanEntries.push({ queue: name, syncId: entry.syncId });
+      });
+    });
+    if (orphanEntries.length > 0) {
+      errors.push(`${orphanEntries.length} orphan queue ${orphanEntries.length === 1 ? 'entry references' : 'entries reference'} no known task.`);
+    }
+    (Array.isArray(tasks) ? tasks : []).forEach(t => {
+      if (isTaskDirty(t) && t._sync && t._sync.syncId && !hasQueueEntry(t._sync.syncId, 'upload')) {
+        errors.push(`Dirty task ${t.id} has no matching Upload Queue entry.`);
+      }
+    });
+    return { healthy: errors.length === 0, errors, orphanEntries };
+  }
+
+  // Combined health report (requirement 6). Never modifies business data or
+  // queue contents — pure read/report, exactly like validateMetadata() and
+  // validateQueueIntegrity() above.
+  function validateSynchronizationState() {
+    const metadataResult = validateMetadata();
+    const queueResult = validateQueueIntegrity();
+    const result = {
+      metadataHealthy: metadataResult.healthy,
+      queueHealthy: queueResult.healthy,
+      errors: metadataResult.errors.concat(queueResult.errors),
+      orphanEntries: queueResult.orphanEntries
+    };
+    _lastValidation = result;
+    return result;
+  }
+
+  // ── Coordination functions ─────────────────────────────────────────────────
+  // These only coordinate existing Phase 1/2/3 components — no duplicated logic.
+
+  // Coordinates metadata + queue handling for a single task. Reuses
+  // ensureSyncMetadata() (Phase 1) and enqueueTask() (Phase 3) rather than
+  // reimplementing either.
+  function prepareTask(task) {
+    if (!task) return null;
+    ensureSyncMetadata(task);
+    if (isTaskDirty(task)) enqueueTask(task);
+    return task._sync;
+  }
+
+  // Coordinates every currently-dirty task through prepareTask() above.
+  function prepareDirtyTasks() {
+    if (!Array.isArray(tasks)) return [];
+    return tasks.filter(isTaskDirty).map(prepareTask);
+  }
+
+  // Coordinates the Upload Queue via the existing reconciliation helper
+  // (Phase 3's reconcileUploadQueue()), then reports current statistics.
+  function prepareQueue() {
+    reconcileUploadQueue();
+    return getQueueStatistics();
+  }
+
+  // Read-only manager status (requirement 7). Always returns a fresh object —
+  // never a live reference — so callers can't mutate manager state by holding
+  // onto a previous result.
+  function getManagerStatus() {
+    const validation = _lastValidation || validateSynchronizationState();
+    return {
+      initialized: _initialized,
+      ready: _ready,
+      disabled: !_initialized,
+      queueHealthy: validation.queueHealthy,
+      metadataHealthy: validation.metadataHealthy,
+      validationErrors: validation.errors.slice(),
+      queueStatistics: getQueueStatistics()
+    };
+  }
+
+  // ── Lifecycle ───────────────────────────────────────────────────────────────
+
+  // Called once at application startup (see initializeSyncInfrastructure() below).
+  // Validates metadata, validates queue integrity, ensures required structures
+  // exist, and recovers local synchronization state — entirely by coordinating
+  // the existing Phase 1/2/3 helpers. Never contacts a cloud provider, never
+  // makes a network request. Safe to call more than once (idempotent).
+  function initialize() {
+    if (Array.isArray(tasks)) tasks.forEach(ensureSyncMetadata); // recover/backfill metadata
+    if (!syncQueues || typeof syncQueues !== 'object') syncQueues = { upload: [], download: [], delete: [], retry: [], conflict: [] };
+    loadQueues();          // recover persisted queue structures
+    reconcileUploadQueue(); // ensure every dirty task has a matching queue entry
+    validateSynchronizationState();
+    _initialized = true;
+    _ready = true;
+    return getManagerStatus();
+  }
+
+  // Called on application shutdown / tab close (see shutdownSyncInfrastructure()
+  // below). Performs local cleanup only — flushes queue state defensively so
+  // nothing outstanding is lost between now and the next load. No cloud
+  // communication of any kind.
+  function shutdown() {
+    try { saveQueues(); } catch (e) {}
+    _ready = false;
+    return getManagerStatus();
+  }
+
+  return {
+    initialize,
+    shutdown,
+    prepareTask,
+    prepareDirtyTasks,
+    prepareQueue,
+    getManagerStatus,
+    validateSynchronizationState,
+    // ── Reserved extension points (requirement 8) ──────────────────────────────
+    // Placeholders only. Nothing here is implemented, referenced, or called by
+    // this phase — reserved so a future phase can attach a real implementation
+    // without any structural change to the Local Sync Manager itself.
+    Extensions: {
+      GoogleDriveClient: null,   // future: Cloud Adapter implementation (SYNC_ARCHITECTURE.md §4)
+      ConflictResolver: null,    // future: conflict detection/resolution (CONFLICT_RESOLUTION.md)
+      BackgroundScheduler: null, // future: scheduling triggers/debounce (LOCAL_SYNC_ENGINE.md §8)
+      AttachmentManager: null,   // future: attachment upload/download (ATTACHMENT_SYNC.md)
+      RetryEngine: null,         // future: backoff/retry handling (LOCAL_SYNC_ENGINE.md §6)
+      Diagnostics: null,         // future: sync logging / debug counters
+      // Populated at startup (see initializeSyncInfrastructure()) with the
+      // Google Authentication Manager (Phase 5, below). Reserved here — not
+      // called by this module — so a future phase can ask "am I
+      // authenticated" through a stable slot without any structural change
+      // to the Local Sync Manager itself (requirement 8: authentication
+      // integrates through a clearly defined interface, never tight coupling).
+      AuthManager: null
+    }
+  };
+})();
+// ── End Local Synchronization Manager (Phase 4) ─────────────────────────────────
+
+// ── Google Authentication Manager (Phase 5) ──────────────────────────────────────
+// Implements sign-in / sign-out / reconnect / validation / refresh for Google
+// Drive access using Google Identity Services (GIS) — the current, non-deprecated,
+// token-based OAuth flow (GOOGLE_DRIVE_API.md §2). This module owns AUTHENTICATION
+// ONLY. It never creates Drive folders, never uploads or downloads files, never
+// synchronizes data, and never reaches into the Local Queue Engine or Local
+// Synchronization Manager's business logic — it only exposes a yes/no "am I
+// authenticated" surface, exactly as SYNC_ARCHITECTURE.md's Authentication Manager
+// role and GOOGLE_DRIVE_API.md §12 principle 10 require.
+//
+// Scope requested: drive.appdata ONLY (GOOGLE_DRIVE_API.md §3) — the narrowest
+// scope that will let a future Cloud Adapter read/write the app's private Drive
+// storage area. No broader scope is ever requested by this module.
+//
+// Token handling: the OAuth access token lives only in memory for the running
+// session (a module-private closure variable) and is NEVER written to
+// localStorage, NEVER included in any synced payload, and NEVER logged
+// (GOOGLE_DRIVE_API.md §2, §10). The only thing persisted locally is a small,
+// non-sensitive "connection hint" (provider name + display email/name + a
+// connected flag) used to (a) decide whether to attempt a silent, non-interactive
+// reconnect on page load and (b) render the Authenticated User field before that
+// reconnect completes — never the token itself.
+//
+// Requirement 10 (backward compatibility): the Google Identity Services script is
+// loaded lazily, only when authentication is actually attempted. If it fails to
+// load (offline, blocked, no Client ID configured), every function below fails
+// gracefully and the app continues working entirely offline exactly as before.
+
+const GOOGLE_AUTH_CLIENT_ID   = '45726027476-8cjilo7krcn1tr0g196rfuvh6crg7p54.apps.googleusercontent.com'; // TODO: set to your Google Cloud OAuth 2.0 Web Client ID before use
+const GOOGLE_AUTH_SCOPE       = 'https://www.googleapis.com/auth/drive.appdata';
+const GOOGLE_AUTH_STORAGE_KEY = 'ttl_sync_auth';
+const GOOGLE_GIS_SCRIPT_URL   = 'https://accounts.google.com/gsi/client';
+// Proactively refresh this many ms before the access token actually expires,
+// so a background silent refresh has room to complete before anything would
+// ever observe an expired token (GOOGLE_DRIVE_API.md §2 Refresh Strategy).
+const GOOGLE_AUTH_REFRESH_MARGIN_MS = 5 * 60 * 1000;
+
+const GoogleAuthManager = (function () {
+  // ── In-memory-only session state (never persisted — see module header) ─────
+  let _accessToken    = null;   // current OAuth access token, memory-only
+  let _tokenExpiresAt = null;   // epoch ms
+  let _currentUser    = null;   // { email, name, picture } — cached per token
+  let _tokenClient    = null;   // GIS token client instance
+  let _gisLoadPromise = null;   // dedupes concurrent script-load attempts
+  let _authState       = 'disconnected'; // disconnected | connecting | connected | expired | error
+  let _lastError       = null;
+  let _refreshTimer    = null;
+
+  // ── Minimal persisted "connection hint" (never the token itself) ───────────
+  function loadPersistedHint() {
+    try {
+      const raw = localStorage.getItem(GOOGLE_AUTH_STORAGE_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      return (parsed && typeof parsed === 'object') ? parsed : null;
+    } catch (e) { return null; }
+  }
+
+  function savePersistedHint(identity) {
+    try {
+      localStorage.setItem(GOOGLE_AUTH_STORAGE_KEY, JSON.stringify({
+        connected: true,
+        provider: 'google',
+        email: (identity && identity.email) || null,
+        name: (identity && identity.name) || null,
+        lastConnectedAt: new Date().toISOString()
+      }));
+    } catch (e) {}
+  }
+
+  function clearPersistedHint() {
+    try { localStorage.removeItem(GOOGLE_AUTH_STORAGE_KEY); } catch (e) {}
+  }
+
+  // ── Lazy GIS script loading ─────────────────────────────────────────────────
+  // Only fetched when authentication is actually attempted, so the app never
+  // depends on network access to Google just to load and run normally.
+  function loadGisScript() {
+    if (window.google && window.google.accounts && window.google.accounts.oauth2) {
+      return Promise.resolve();
+    }
+    if (_gisLoadPromise) return _gisLoadPromise;
+    _gisLoadPromise = new Promise((resolve, reject) => {
+      const existing = document.querySelector('script[data-ttl-gis]');
+      if (existing) {
+        existing.addEventListener('load', () => resolve());
+        existing.addEventListener('error', () => reject(new Error('Failed to load Google Identity Services.')));
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = GOOGLE_GIS_SCRIPT_URL;
+      script.async = true;
+      script.defer = true;
+      script.setAttribute('data-ttl-gis', '1');
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error('Failed to load Google Identity Services.'));
+      document.head.appendChild(script);
+    }).catch(err => { _gisLoadPromise = null; throw err; });
+    return _gisLoadPromise;
+  }
+
+  function ensureTokenClient() {
+    if (_tokenClient) return _tokenClient;
+    if (!GOOGLE_AUTH_CLIENT_ID) {
+      throw new Error('Google OAuth Client ID is not configured.');
+    }
+    _tokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: GOOGLE_AUTH_CLIENT_ID,
+      scope: GOOGLE_AUTH_SCOPE,
+      callback: () => {} // overridden per-request in requestToken()
+    });
+    return _tokenClient;
+  }
+
+  // Requests a token from GIS. interactive=false attempts a silent,
+  // non-interactive request (prompt: 'none') per GOOGLE_DRIVE_API.md §2's
+  // Refresh Strategy — invisible to the user, and never surfaced as an error
+  // if it fails; the caller decides whether to fall back to an interactive
+  // prompt. interactive=true is only ever invoked from a direct, user-
+  // initiated action (the Connect Google Drive button).
+  function requestToken(interactive) {
+    return loadGisScript().then(() => new Promise((resolve, reject) => {
+      let client;
+      try { client = ensureTokenClient(); } catch (e) { reject(e); return; }
+      client.callback = (response) => {
+        if (response && response.error) { reject(new Error(response.error)); return; }
+        if (!response || !response.access_token) { reject(new Error('No access token returned.')); return; }
+        resolve(response);
+      };
+      client.error_callback = (err) => { reject(err || new Error('Authentication request failed.')); };
+      try {
+        client.requestAccessToken(interactive ? { prompt: 'consent' } : { prompt: 'none' });
+      } catch (e) { reject(e); }
+    }));
+  }
+
+  // Fetches minimal display identity (name/email/photo) for the currently
+  // authenticated user via Drive's `about` endpoint, scoped to the user's own
+  // profile fields only. This is a read-only identity check for display
+  // purposes — it creates nothing, uploads nothing, downloads no application
+  // data, and is never allowed to fail the connect flow: if it errors,
+  // connection still succeeds, just without a display name/email.
+  function fetchCurrentUser(token) {
+    return fetch('https://www.googleapis.com/drive/v3/about?fields=user', {
+      headers: { Authorization: 'Bearer ' + token }
+    })
+      .then(res => res.ok ? res.json() : null)
+      .then(data => (data && data.user) ? {
+        email: data.user.emailAddress || null,
+        name: data.user.displayName || null,
+        picture: data.user.photoLink || null
+      } : null)
+      .catch(() => null);
+  }
+
+  function scheduleProactiveRefresh() {
+    if (_refreshTimer) { clearTimeout(_refreshTimer); _refreshTimer = null; }
+    if (!_tokenExpiresAt) return;
+    const delay = Math.max(0, (_tokenExpiresAt - Date.now()) - GOOGLE_AUTH_REFRESH_MARGIN_MS);
+    _refreshTimer = setTimeout(() => { refreshAuthentication(); }, delay);
+  }
+
+  function applyTokenResponse(response) {
+    _accessToken = response.access_token;
+    const expiresInSec = Number(response.expires_in) || 3600;
+    _tokenExpiresAt = Date.now() + expiresInSec * 1000;
+    _authState = 'connected';
+    _lastError = null;
+    scheduleProactiveRefresh();
+  }
+
+  // ── Public helper functions (requirement 5) ─────────────────────────────────
+
+  // Interactive sign-in — user-initiated only (Connect Google Drive button).
+  // Never creates folders, never uploads/downloads, never syncs (see module
+  // header, requirement 6). On failure, local data, sync queues, and any
+  // previously persisted connection hint are left completely untouched
+  // (requirement 7) — only in-memory auth state reflects the failure.
+  function authenticate() {
+    _authState = 'connecting';
+    _lastError = null;
+    return requestToken(true)
+      .then(response => {
+        applyTokenResponse(response);
+        return fetchCurrentUser(_accessToken).then(user => {
+          _currentUser = user;
+          savePersistedHint(user || {});
+          return getStatus();
+        });
+      })
+      .catch(err => {
+        _authState = 'error';
+        _lastError = (err && err.message) || String(err);
+        return Promise.reject(err);
+      });
+  }
+
+  // User-initiated sign-out. Revokes the in-memory token with Google, clears
+  // cached identity, and clears the persisted connection hint — returns the
+  // app to pure-local mode. Never touches tasks, log entries, or sync queues.
+  function disconnect() {
+    const token = _accessToken;
+    if (_refreshTimer) { clearTimeout(_refreshTimer); _refreshTimer = null; }
+    _accessToken = null;
+    _tokenExpiresAt = null;
+    _currentUser = null;
+    _authState = 'disconnected';
+    _lastError = null;
+    clearPersistedHint();
+    try {
+      if (token && window.google && google.accounts && google.accounts.oauth2) {
+        google.accounts.oauth2.revoke(token, () => {});
+      }
+    } catch (e) {}
+    return Promise.resolve(getStatus());
+  }
+
+  // Local-only check: is there a token right now, and is it not already known
+  // to be expired? Never makes a network call itself (see validateAuthentication()
+  // below for the network-backed check) — matches GOOGLE_DRIVE_CLIENT.md's
+  // Authenticate operation contract exactly.
+  function isAuthenticated() {
+    return !!_accessToken && !!_tokenExpiresAt && Date.now() < _tokenExpiresAt;
+  }
+
+  // Cached identity for display only (Settings UI). Never triggers a network
+  // call itself — identity is fetched once at connect/refresh time and cached.
+  function getCurrentUser() {
+    return _currentUser ? Object.assign({}, _currentUser) : null;
+  }
+
+  // Deliberate, low-cost round-trip confirming the token is actually accepted
+  // by Drive right now (distinct from isAuthenticated()'s local-only check),
+  // per GOOGLE_DRIVE_CLIENT.md's Validate Authentication operation. Intended
+  // to be used sparingly (e.g. after a long idle period), not on every call.
+  // A network failure is reported as "inconclusive" and never downgrades
+  // authentication state on its own.
+  function validateAuthentication() {
+    if (!_accessToken) return Promise.resolve({ result: 'invalid', reason: 'not-authenticated' });
+    return fetch('https://www.googleapis.com/drive/v3/about?fields=user', {
+      headers: { Authorization: 'Bearer ' + _accessToken }
+    }).then(res => {
+      if (res.ok) return { result: 'valid' };
+      if (res.status === 401 || res.status === 403) {
+        _authState = 'expired';
+        return { result: 'invalid', reason: 'rejected', status: res.status };
+      }
+      return { result: 'inconclusive', reason: 'http-' + res.status };
+    }).catch(() => ({ result: 'inconclusive', reason: 'network-unreachable' }));
+  }
+
+  // Silent re-authentication — used both proactively (scheduled ahead of
+  // expiry) and reactively (e.g. a future Cloud Adapter call reporting an
+  // authentication-shaped failure). Never shows an interactive prompt; if the
+  // silent request fails, authentication simply degrades to "expired" without
+  // blocking the app or surfacing a hard error (GOOGLE_DRIVE_API.md §2 Refresh
+  // Strategy / Authentication Failures). Local data and sync queues are
+  // untouched regardless of outcome.
+  function refreshAuthentication() {
+    return requestToken(false)
+      .then(response => {
+        applyTokenResponse(response);
+        return fetchCurrentUser(_accessToken).then(user => {
+          if (user) { _currentUser = user; savePersistedHint(user); }
+          return getStatus();
+        });
+      })
+      .catch(err => {
+        _accessToken = null;
+        _tokenExpiresAt = null;
+        _authState = 'expired';
+        _lastError = (err && err.message) || String(err);
+        // Deliberately does NOT clear the persisted hint here — a failed
+        // silent refresh means "needs an interactive reconnect next time,"
+        // not "the user disconnected."
+        return getStatus();
+      });
+  }
+
+  // Attempted once at startup, only if a previous session was connected (per
+  // the persisted hint) and a Client ID is configured. Never interactive,
+  // never blocks app startup — a failure here simply leaves the app in
+  // disconnected/offline mode exactly as if authentication were never
+  // available (requirement 10, backward compatibility).
+  function attemptSilentReconnectOnLoad() {
+    const hint = loadPersistedHint();
+    if (!hint || !hint.connected || !GOOGLE_AUTH_CLIENT_ID) return Promise.resolve(getStatus());
+    if (hint.email || hint.name) _currentUser = { email: hint.email || null, name: hint.name || null, picture: null };
+    _authState = 'connecting';
+    return refreshAuthentication();
+  }
+
+  function getStatus() {
+    return {
+      state: _authState, // disconnected | connecting | connected | expired | error
+      authenticated: isAuthenticated(),
+      provider: isAuthenticated() ? 'Google Drive' : null,
+      user: getCurrentUser(),
+      lastError: _lastError
+    };
+  }
+
+  return {
+    authenticate,
+    disconnect,
+    isAuthenticated,
+    getCurrentUser,
+    validateAuthentication,
+    refreshAuthentication,
+    attemptSilentReconnectOnLoad,
+    getStatus
+  };
+})();
+// ── End Google Authentication Manager (Phase 5) ──────────────────────────────────
+
 // ── Persistence ───────────────────────────────────────────────────────────────
 function saveState() {
   try {
@@ -1884,6 +2906,19 @@ function loadState() {
     if (rp) { try { recurringPlans = JSON.parse(rp) || []; } catch(e) { recurringPlans = []; } }
     if (rpCounter) recurringPlanIdCounter = parseInt(rpCounter) || 0;
     if (t) tasks = JSON.parse(t);
+    // Phase 1 migration: back-fill synchronization metadata on every task loaded from
+    // localStorage. Tasks saved before Phase 1 have no `_sync` field at all; tasks saved
+    // after it already have one and are left untouched except for recomputed hashes.
+    // Runs unconditionally, every load, with no user interaction and no data loss.
+    if (Array.isArray(tasks)) tasks.forEach(ensureSyncMetadata);
+    // Phase 3 (Local Queue Engine): load persisted queue contents, then
+    // reconcile — ensures every task that's dirty (including tasks that were
+    // already dirty under Phase 1/2, before this queue existed) has a
+    // matching Upload Queue entry. Must run after the ensureSyncMetadata
+    // backfill above (needs task._sync.syncId) and after `tasks` itself is
+    // populated (reconcileUploadQueue() reads the live tasks array).
+    loadQueues();
+    reconcileUploadQueue();
     if (l) {
       const allEntries = JSON.parse(l);
       // Keep only last 3 months
@@ -2044,6 +3079,10 @@ function freezeAllTimers() {
   saveState();
   // Keep break segment open — it will auto-accumulate until a task resumes.
   // (Break currentStart is already a wall-clock timestamp.)
+  // Future synchronization shutdown hook (also covers browser unload, since
+  // beforeunload/pagehide both call this function)
+  // No implementation in Phase 0.5A
+  shutdownSyncInfrastructure();
 }
 
 const SLEEP_AUTO_PAUSE_MS = 15 * 60 * 1000; // 15 minutes
@@ -2076,6 +3115,8 @@ document.addEventListener('visibilitychange', () => {
           }
           task.status = 'paused';
           clearInterval(intervals[task.id]); delete intervals[task.id];
+          // Phase 1: auto-pause is a business-data edit — update sync metadata only.
+          touchSyncMetadata(task);
           // Sync any open log entry
           const openEntry = logEntries.find(e => e.taskId === task.id && e.endTs === null);
           if (openEntry) { /* will be finalized on completion */ }
@@ -2425,8 +3466,13 @@ function addTask() {
     // Use current time-of-day on the selected date so ordering stays sensible
     createdAt = new Date(y, m-1, d, now.getHours(), now.getMinutes(), now.getSeconds()).getTime();
   }
-  tasks.unshift({ id, heading:'', project:'', nature:'', module:'', ticket:'',
-    status:'idle', accumulatedMs:0, segmentStart:null, startedAt:null, createdAt, customFields:{} });
+  const newTask = { id, heading:'', project:'', nature:'', module:'', ticket:'',
+    status:'idle', accumulatedMs:0, segmentStart:null, startedAt:null, createdAt, customFields:{} };
+  // Phase 1: every newly created task automatically receives synchronization metadata.
+  createSyncMetadata(newTask);
+  tasks.unshift(newTask);
+  // Future synchronization integration point: Task creation (TASK_CREATED)
+  // Sync metadata now populated as of Phase 1; event dispatch remains a future phase.
   saveState(); renderList();
   setTimeout(() => { const i = document.getElementById('inp-'+id); if(i) i.focus(); }, 40);
 }
@@ -2444,6 +3490,8 @@ function pauseOthersExcept(exceptId) {
       t.status = 'paused';
       clearInterval(intervals[t.id]);
       delete intervals[t.id];
+      // Phase 1: status/time change is a business-data edit — update sync metadata only.
+      touchSyncMetadata(t);
       renderRow(t.id);
     }
   });
@@ -2487,6 +3535,8 @@ function startTask(id) {
     updateLogTable();
   }, 1000);
 
+  // Phase 1: starting a task is a business-data edit — update sync metadata only.
+  touchSyncMetadata(task);
   saveState(); renderRow(id); updateLogPanel();
 }
 
@@ -2497,6 +3547,8 @@ function pauseTask(id) {
   if (task.segmentStart !== null) { task.accumulatedMs += Date.now()-task.segmentStart; task.segmentStart=null; }
   task.status = 'paused';
   clearInterval(intervals[id]); delete intervals[id];
+  // Phase 1: pausing a task is a business-data edit — update sync metadata only.
+  touchSyncMetadata(task);
   saveState(); renderRow(id); updateLogPanel();
 }
 
@@ -2512,6 +3564,8 @@ function resumeTask(id) {
     if (el) { el.textContent = fmt(liveElapsedSecs(task)); el.className='timer-display running'; }
     updateLogTable();
   }, 1000);
+  // Phase 1: resuming a task is a business-data edit — update sync metadata only.
+  touchSyncMetadata(task);
   saveState(); renderRow(id); updateLogPanel();
 }
 
@@ -2985,6 +4039,8 @@ function submitComplete() {
     Object.assign(task.customFields, customValues);
     task.customFields.description = desc;
     task.customFields.remark = remark;
+    // Phase 1: task completion is a business-data change — update sync metadata only.
+    touchSyncMetadata(task);
     const entry = openEntry;
     if (entry) {
       entry.endTs = customEnd || Date.now();
@@ -3027,6 +4083,8 @@ function submitComplete() {
       }
     }
     closeCompleteModal();
+    // Future synchronization integration point: Task completion (TASK_UPDATED)
+    // No implementation in Phase 0.5A
     saveState();
     // Auto-remove completed card from task list
     const doneRow = document.getElementById('row-' + id);
@@ -3118,7 +4176,7 @@ function confirmCarryForward() {
   const carryTs = new Date(yy, mm - 1, dd, w.startH, w.startM, 0, 0).getTime();
 
   const newId = ++taskIdCounter;
-  tasks.unshift({
+  const carriedTask = {
     id: newId,
     heading, project, nature, module, ticket, customFields,
     status: 'idle',
@@ -3127,8 +4185,14 @@ function confirmCarryForward() {
     startedAt: null,
     createdAt: carryTs,
     carriedOver: true       // flag so the card shows a "Carried" badge
-  });
+  };
+  // Phase 1: a Carry Forward-created task must receive fresh synchronization metadata.
+  createSyncMetadata(carriedTask);
+  tasks.unshift(carriedTask);
 
+  // Future synchronization integration point: Carry-forward generation
+  // (TASK_CREATED)
+  // Sync metadata now populated as of Phase 1; event dispatch remains a future phase.
   saveState();
   updateLogTable();
   closeCarryForwardModal();
@@ -3556,10 +4620,18 @@ function deleteTask(id) {
     data[dateStr] = day;
     saveBreakData(data);
   }
+  // Phase 1: stamp the Deleted Flag + bump Version on the task's sync metadata exactly
+  // as SYNC_DATA_MODEL.md §3/§5 defines a deletion event, before it's removed from the
+  // in-memory/localStorage array below. This does NOT implement cloud deletion or
+  // soft-delete retention (the row still disappears immediately, same as before) —
+  // that's a Sync Manager / Storage Adapter concern for a later phase.
+  if (task) markSyncMetadataDeleted(task);
   tasks = tasks.filter(t => t.id !== id);
   logEntries = logEntries.filter(e => e.taskId !== id);
   const row = document.getElementById('row-'+id);
   if (row) row.remove();
+  // Future synchronization integration point: Task deletion (TASK_DELETED)
+  // No implementation in Phase 0.5A
   saveState(); updateEmptyState(); updateLogPanel();
 }
 
@@ -3574,6 +4646,10 @@ function updateTaskField(id, field, val) {
   // Sync open (in-progress) log entry so table reflects instantly
   const openEntry = [...logEntries].reverse().find(e => e.taskId === id && e.endTs === null);
   if (openEntry && field in openEntry) openEntry[field] = val;
+  // Phase 1: field edit is a business-data change — update sync metadata only.
+  touchSyncMetadata(task);
+  // Future synchronization integration point: Task update (TASK_UPDATED)
+  // No implementation in Phase 0.5A
   saveState();
   updateLogTable();
 }
@@ -3604,6 +4680,10 @@ function updateTaskCustomField(id, colKey, val) {
       openEntry.customFields[colKey] = val;
     }
   }
+  // Phase 1: custom-field edit is a business-data change — update sync metadata only.
+  touchSyncMetadata(task);
+  // Future synchronization integration point: Task update (TASK_UPDATED)
+  // No implementation in Phase 0.5A
   saveState();
   updateLogTable();
 }
@@ -3653,6 +4733,8 @@ function enforcePastDateAutoPause() {
       task.status = 'paused';
       clearInterval(intervals[task.id]);
       delete intervals[task.id];
+      // Phase 1: auto-pause is a business-data edit — update sync metadata only.
+      touchSyncMetadata(task);
       changed = true;
     }
   });
@@ -4631,7 +5713,7 @@ function closeMasters() {
 }
 function switchTab(tab) {
   activeMastersTab = tab;
-  const TAB_ORDER = ['user','lists','columns','weekends','workhours','email','data'];
+  const TAB_ORDER = ['user','lists','columns','weekends','workhours','email','data','sync'];
   document.querySelectorAll('.tab-btn').forEach((b,i) => {
     b.classList.toggle('active', TAB_ORDER[i] === tab);
   });
@@ -4986,8 +6068,171 @@ function renderMastersContent() {
     `;
     return;
   }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Synchronization tab — Phase 0.5A UI preparation ONLY.
+  // ══════════════════════════════════════════════════════════════════════════
+  // Every value below is a hardcoded placeholder string. Nothing here reads
+  // from or writes to `masters`, `TTLSync`, or localStorage, and every control
+  // is rendered disabled. No click handlers, no timers, no network calls.
+  // This block exists purely so the Settings UI has a home for the sync
+  // feature once it is actually implemented in a later phase. See
+  // SYNC_ARCHITECTURE.md, GOOGLE_DRIVE_API.md, GOOGLE_DRIVE_CLIENT.md,
+  // SYNC_DATA_MODEL.md, LOCAL_SYNC_ENGINE.md, CONFLICT_RESOLUTION.md,
+  // BACKGROUND_SYNC.md, ATTACHMENT_SYNC.md and IMPLEMENTATION_ROADMAP.md.
+  if (activeMastersTab === 'sync') {
+    // Phase 5: the Connection card below now reflects live authentication
+    // state via GoogleAuthManager. Everything else in this tab (Enable
+    // Synchronization toggle, Device ID, Last Synchronization, Synchronization
+    // Status, Queue, Diagnostics) remains exactly the Phase 0.5A placeholder
+    // it was — those describe synchronization, not authentication, and are
+    // explicitly out of scope for this phase.
+    const authStatus = (typeof GoogleAuthManager !== 'undefined')
+      ? GoogleAuthManager.getStatus()
+      : { state: 'disconnected', authenticated: false, provider: null, user: null, lastError: null };
+    const AUTH_STATE_LABELS = {
+      disconnected: 'Disconnected',
+      connecting:   'Connecting…',
+      connected:    'Connected',
+      expired:      'Session Expired — Reconnect',
+      error:        'Connection Error'
+    };
+    const connectionStatusLabel = AUTH_STATE_LABELS[authStatus.state] || 'Disconnected';
+    const providerLabel = authStatus.authenticated ? 'Google Drive' : 'Not Connected';
+    const authenticatedUserLabel = authStatus.authenticated && authStatus.user
+      ? (authStatus.user.email || authStatus.user.name || 'Signed In')
+      : 'Not Signed In';
+    const connectionButtonHtml = authStatus.authenticated
+      ? `<button class="btn" onclick="disconnectGoogleDrive()"><i class="ti ti-plug-connected-x"></i> Disconnect</button>`
+      : `<button class="btn" onclick="connectGoogleDrive()" ${authStatus.state === 'connecting' ? 'disabled' : ''}><i class="ti ti-brand-google-drive"></i> ${authStatus.state === 'connecting' ? 'Connecting…' : 'Connect Google Drive'}</button>`;
+    const authErrorHtml = authStatus.lastError
+      ? `<div style="font-size:11px;color:var(--red-dark);margin-top:8px">${esc(authStatus.lastError)}</div>`
+      : '';
+
+    content.innerHTML = `
+      <div style="font-size:12px;color:var(--text-secondary);margin-bottom:16px">
+        Synchronize your tasks and log history to Google Drive so they're available across devices.
+        Sign in below to connect your account — synchronization itself is not yet available.
+      </div>
+
+      <!-- Future: this checkbox will eventually kick off actual sync behavior
+           once the Local Sync Engine's push/pull pipeline exists (see
+           LOCAL_SYNC_ENGINE.md). It remains a disabled placeholder with no
+           handler attached — Phase 5 is authentication only. -->
+      <div style="border:1px solid var(--border-md);border-radius:var(--radius-md);padding:14px;margin-bottom:14px">
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-secondary)">
+          <input type="checkbox" id="sync-enable-toggle" disabled style="width:14px;height:14px" />
+          Enable Synchronization
+        </label>
+      </div>
+
+      <!-- Phase 5: Connection card — Cloud Provider, Connection Status, and
+           Authenticated User now reflect live GoogleAuthManager state. Device
+           ID, Last Synchronization, and Synchronization Status stay Phase
+           0.5A placeholders — those are synchronization concerns, not
+           authentication, and are explicitly out of scope here. -->
+      <div style="border:1px solid var(--border-md);border-radius:var(--radius-md);padding:14px;margin-bottom:14px">
+        <div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:10px"><i class="ti ti-cloud" style="vertical-align:-2px;margin-right:5px;color:var(--blue-mid)"></i>Connection</div>
+        <div class="complete-row">
+          <div class="complete-field">
+            <label class="complete-label">Cloud Provider</label>
+            <input class="complete-input" value="${esc(providerLabel)}" disabled style="width:100%" />
+          </div>
+          <div class="complete-field">
+            <label class="complete-label">Connection Status</label>
+            <input class="complete-input" value="${esc(connectionStatusLabel)}" disabled style="width:100%" />
+          </div>
+        </div>
+        <div class="complete-row" style="margin-top:10px">
+          <div class="complete-field" style="flex:1 1 100%">
+            <label class="complete-label">Authenticated User</label>
+            <input class="complete-input" value="${esc(authenticatedUserLabel)}" disabled style="width:100%" />
+          </div>
+        </div>
+        <div class="complete-row" style="margin-top:10px">
+          <div class="complete-field">
+            <label class="complete-label">Device ID</label>
+            <input class="complete-input" value="Not Generated" disabled style="width:100%" />
+          </div>
+          <div class="complete-field">
+            <label class="complete-label">Last Synchronization</label>
+            <input class="complete-input" value="Never" disabled style="width:100%" />
+          </div>
+        </div>
+        <div style="margin-top:10px">
+          <label class="complete-label">Synchronization Status</label>
+          <input class="complete-input" value="Disabled" disabled style="width:100%" />
+        </div>
+        ${authErrorHtml}
+        <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+          ${connectionButtonHtml}
+          <button class="btn btn-primary" disabled><i class="ti ti-refresh"></i> Synchronize Now</button>
+        </div>
+      </div>
+
+      <!-- Future: queue statistics — will surface counts from TTLSync.Runtime
+           once BackgroundSync and the upload/download queues exist
+           (see BACKGROUND_SYNC.md §Queue Statistics). Reserved space only. -->
+      <div style="border:1px solid var(--border-md);border-radius:var(--radius-md);padding:14px;margin-bottom:14px">
+        <div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:10px"><i class="ti ti-list-details" style="vertical-align:-2px;margin-right:5px;color:var(--text-tertiary)"></i>Queue</div>
+        <div style="display:flex;gap:12px;flex-wrap:wrap">
+          <div style="background:var(--bg-secondary);border:1px solid var(--border-md);border-radius:var(--radius-md);padding:10px 16px;flex:1;min-width:120px">
+            <div style="font-size:11px;color:var(--text-tertiary)">Pending Uploads</div>
+            <div style="font-size:14px;font-weight:600;color:var(--text-primary)">Not Available</div>
+          </div>
+          <div style="background:var(--bg-secondary);border:1px solid var(--border-md);border-radius:var(--radius-md);padding:10px 16px;flex:1;min-width:120px">
+            <div style="font-size:11px;color:var(--text-tertiary)">Pending Downloads</div>
+            <div style="font-size:14px;font-weight:600;color:var(--text-primary)">Not Available</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Future: conflict reporting — will list unresolved conflicts once
+           ConflictResolver exists (see CONFLICT_RESOLUTION.md). Reserved space only. -->
+      <!-- Future: retry queue diagnostics — will list failed operations awaiting
+           retry once the retry/backoff logic exists (see BACKGROUND_SYNC.md §Retry). -->
+      <!-- Future: background sync diagnostics — will show scheduler state once
+           background sync scheduling exists (see BACKGROUND_SYNC.md). -->
+      <div style="border:1px solid var(--border-md);border-radius:var(--radius-md);padding:14px">
+        <div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:10px"><i class="ti ti-bug" style="vertical-align:-2px;margin-right:5px;color:var(--text-tertiary)"></i>Diagnostics</div>
+        <div style="display:flex;gap:12px;flex-wrap:wrap">
+          <div style="background:var(--bg-secondary);border:1px solid var(--border-md);border-radius:var(--radius-md);padding:10px 16px;flex:1;min-width:120px">
+            <div style="font-size:11px;color:var(--text-tertiary)">Conflicts</div>
+            <div style="font-size:14px;font-weight:600;color:var(--text-primary)">Not Available</div>
+          </div>
+          <div style="background:var(--bg-secondary);border:1px solid var(--border-md);border-radius:var(--radius-md);padding:10px 16px;flex:1;min-width:120px">
+            <div style="font-size:11px;color:var(--text-tertiary)">Retry Queue</div>
+            <div style="font-size:14px;font-weight:600;color:var(--text-primary)">Not Available</div>
+          </div>
+          <div style="background:var(--bg-secondary);border:1px solid var(--border-md);border-radius:var(--radius-md);padding:10px 16px;flex:1;min-width:120px">
+            <div style="font-size:11px;color:var(--text-tertiary)">Background Sync</div>
+            <div style="font-size:14px;font-weight:600;color:var(--text-primary)">Not Available</div>
+          </div>
+        </div>
+      </div>
+    `;
+    return;
+  }
 }
 
+
+// ── Phase 5: Synchronization tab click handlers ─────────────────────────────
+// Thin UI glue only — all real authentication logic lives in GoogleAuthManager
+// above. Neither function touches tasks, log entries, or sync queues.
+function connectGoogleDrive() {
+  const p = GoogleAuthManager.authenticate();
+  // authenticate() flips state to 'connecting' synchronously before any
+  // network activity begins, so re-rendering immediately reflects that.
+  if (activeMastersTab === 'sync') renderMastersContent();
+  p.then(() => { if (activeMastersTab === 'sync') renderMastersContent(); })
+   .catch(() => { if (activeMastersTab === 'sync') renderMastersContent(); });
+}
+
+function disconnectGoogleDrive() {
+  GoogleAuthManager.disconnect().then(() => {
+    if (activeMastersTab === 'sync') renderMastersContent();
+  });
+}
 
 function saveWorkHours() {
   const startVal = document.getElementById('wh-start').value;
@@ -5683,6 +6928,8 @@ function exportBackup() {
     logTableColPinned,
     weekendOverrides
   };
+  // Future synchronization integration point: Export
+  // No implementation in Phase 0.5A
   const json = JSON.stringify(backup, null, 2);
   const blob = new Blob([json], { type: 'application/json' });
   const url  = URL.createObjectURL(blob);
@@ -5696,6 +6943,8 @@ function exportBackup() {
 }
 
 function importBackup(event) {
+  // Future synchronization integration point: Import
+  // No implementation in Phase 0.5A
   const file = event.target.files[0];
   if (!file) return;
   const status = document.getElementById('import-backup-status');
@@ -5714,6 +6963,10 @@ function importBackup(event) {
       // Restore all state
       tasks                   = b.tasks                   || [];
       logEntries              = b.logEntries              || [];
+      // Phase 1: a backup exported before Phase 1 existed has no _sync field on its
+      // tasks at all; back-fill it the same way loadState() does, so older exported
+      // data still imports correctly with no user interaction and no data loss.
+      tasks.forEach(ensureSyncMetadata);
       masters                 = b.masters                 || masters;
       taskIdCounter           = b.taskIdCounter           ?? taskIdCounter;
       importIdCounter         = b.importIdCounter         ?? importIdCounter;
@@ -6597,14 +7850,17 @@ function materializeRecurringTasksUpTo(throughDateStr) {
         const w = (typeof getWorkHours === 'function') ? getWorkHours() : { startH: 9, startM: 30 };
         const createdAt = new Date(y, m-1, d, w.startH, w.startM, 0, 0).getTime();
         const newId = ++taskIdCounter;
-        tasks.unshift({
+        const generatedTask = {
           id: newId,
           heading: plan.heading, project: plan.project, nature: plan.nature,
           module: plan.module, ticket: plan.ticket,
           customFields: { ...(plan.customFields || {}) },
           status: 'idle', accumulatedMs: 0, segmentStart: null, startedAt: null,
           createdAt, recurringPlanId: plan.id
-        });
+        };
+        // Phase 1: a task generated by a recurring plan must receive fresh sync metadata.
+        createSyncMetadata(generatedTask);
+        tasks.unshift(generatedTask);
         plan.generatedDates.push(cursor);
         changed = true;
       }
@@ -6612,6 +7868,9 @@ function materializeRecurringTasksUpTo(throughDateStr) {
     }
   });
 
+  // Future synchronization integration point: Recurring task generation
+  // (TASK_CREATED, one per generated instance)
+  // No implementation in Phase 0.5A
   if (changed) saveState();
 }
 
@@ -6630,7 +7889,12 @@ function disableRecurringPlanFrom(planId, fromDateStr) {
     if (t.status !== 'idle') return true; // never touch started/paused/running/done instances
     const d = new Date(t.createdAt);
     const ds = dateToStr(d);
-    if (ds >= fromDateStr) return false; // remove
+    if (ds >= fromDateStr) {
+      // Phase 1: this instance is being deleted — stamp sync metadata the same way
+      // deleteTask() does before it's dropped from the array below.
+      markSyncMetadataDeleted(t);
+      return false; // remove
+    }
     return true;
   });
   // Also forget those dates so re-enabling later (if ever) won't think they're already generated
@@ -7026,9 +8290,116 @@ function initTheme() {
   applyTheme(getStoredTheme());
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// Synchronization Infrastructure — Phase 0.5A (preparation only)
+// ════════════════════════════════════════════════════════════════════════════
+// This section defines a placeholder namespace, empty extension points, and
+// no-op lifecycle hooks for a FUTURE Google Drive synchronization feature.
+// Nothing in this section performs synchronization, network access, OAuth,
+// queuing, retries, conflict resolution, or attachment handling — every
+// function below is intentionally empty, and the application behaves
+// identically to the pre-Phase-0.5A version. See SYNC_ARCHITECTURE.md,
+// GOOGLE_DRIVE_API.md, GOOGLE_DRIVE_CLIENT.md, SYNC_DATA_MODEL.md,
+// LOCAL_SYNC_ENGINE.md, CONFLICT_RESOLUTION.md, BACKGROUND_SYNC.md,
+// ATTACHMENT_SYNC.md and IMPLEMENTATION_ROADMAP.md for the finalized design
+// these placeholders are reserved for.
+
+// ── Namespace ────────────────────────────────────────────────────────────────
+// Single global namespace for all future sync code. All sections start empty.
+window.TTLSync = window.TTLSync || {
+  Configuration: {},  // future: Drive folder id, sync interval, feature flags, etc.
+  Runtime: {},        // future: in-memory sync state (last sync time, in-flight ops, etc.)
+  Modules: {},        // future: GoogleDriveClient, LocalSyncEngine, ConflictResolver, etc.
+  Events: {},         // future: event bus for sync lifecycle events
+  Constants: {},      // future: namespaced copies of the constants declared below, etc.
+  Utilities: {},      // future: shared helpers (id generation, hashing, etc.)
+  Diagnostics: {}     // future: sync logging / debug counters
+};
+
+// ── Placeholder constants ────────────────────────────────────────────────────
+// Declarations only — not referenced anywhere yet.
+const SYNC_NAMESPACE  = 'TTLSync';
+const SYNC_VERSION     = '0.5A';
+const SYNC_MODULE_NAME = 'task-logger-sync';
+
+// ── Placeholder event names ──────────────────────────────────────────────────
+// Declarations only — no listeners, no handlers, no logic attached.
+const SYNC_EVENT_TASK_CREATED      = 'TASK_CREATED';
+const SYNC_EVENT_TASK_UPDATED      = 'TASK_UPDATED';
+const SYNC_EVENT_TASK_DELETED      = 'TASK_DELETED';
+const SYNC_EVENT_SYNC_STARTED      = 'SYNC_STARTED';
+const SYNC_EVENT_SYNC_COMPLETED    = 'SYNC_COMPLETED';
+const SYNC_EVENT_SYNC_FAILED       = 'SYNC_FAILED';
+const SYNC_EVENT_NETWORK_AVAILABLE = 'NETWORK_AVAILABLE';
+const SYNC_EVENT_NETWORK_LOST      = 'NETWORK_LOST';
+// Future integration point: the app currently has no online/offline
+// listeners at all. NETWORK_AVAILABLE / NETWORK_LOST are reserved for
+// whenever such listeners are introduced alongside background sync.
+// Future integration point: the app currently has no attachment feature
+// (creation or deletion) at all. Attachment-related events and hooks are
+// reserved for whenever that feature is introduced (see ATTACHMENT_SYNC.md).
+
+// ── Placeholder initialization functions ─────────────────────────────────────
+// These intentionally do nothing in Phase 0.5A. Only explanatory comments
+// are allowed inside them until a future phase implements sync.
+
+// Called once at application startup (see "── Init ──" below).
+function initializeSyncInfrastructure() {
+  // Phase 4: coordinate local synchronization state through the Local Sync
+  // Manager. Still no cloud provider, no network request, no synchronization —
+  // LocalSyncManager.initialize() only validates/recovers local metadata and
+  // queue structures already populated by loadState() (Phases 1–3).
+  window.TTLSync.Modules.LocalSyncManager = LocalSyncManager;
+  LocalSyncManager.initialize();
+
+  // Phase 5: register the Google Authentication Manager and, only through the
+  // reserved Extensions.AuthManager slot, make it discoverable to a future
+  // phase. No sync logic reads from it yet — this is registration only.
+  window.TTLSync.Modules.GoogleAuthManager = GoogleAuthManager;
+  LocalSyncManager.Extensions.AuthManager = GoogleAuthManager;
+
+  // Phase 5: attempt a silent, non-interactive reconnect if a previous
+  // session was connected. Never interactive, never blocking — see
+  // attemptSilentReconnectOnLoad()'s own documentation. Refreshes the
+  // Synchronization settings tab afterward only if it happens to be the
+  // currently open Masters tab.
+  GoogleAuthManager.attemptSilentReconnectOnLoad().then(() => {
+    if (typeof activeMastersTab !== 'undefined' && activeMastersTab === 'sync' &&
+        typeof renderMastersContent === 'function') {
+      renderMastersContent();
+    }
+  });
+}
+
+// Called once at application startup, after initializeSyncInfrastructure().
+// Reserved for future per-module (Drive client, attachments, background
+// sync, etc.) bootstrapping.
+function initializeCloudModules() {
+  // No implementation in Phase 4 — reserved for a future phase (see
+  // LocalSyncManager.Extensions).
+}
+
+// Called on application shutdown / tab close (see freezeAllTimers() and the
+// beforeunload/pagehide handling below). Reserved for future flushing of
+// in-flight sync operations.
+function shutdownSyncInfrastructure() {
+  // Phase 4: allow the Local Sync Manager to perform local cleanup only.
+  // No cloud communication.
+  if (window.TTLSync && window.TTLSync.Modules && window.TTLSync.Modules.LocalSyncManager) {
+    window.TTLSync.Modules.LocalSyncManager.shutdown();
+  }
+}
+// ════════════════════════════════════════════════════════════════════════════
+// End Synchronization Infrastructure
+// ════════════════════════════════════════════════════════════════════════════
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 loadState();
 initTheme();
+// Future synchronization initialization
+// No implementation in Phase 0.5A
+initializeSyncInfrastructure();
+initializeCloudModules();
 if (typeof Notification !== 'undefined' && Notification.permission === 'default') { Notification.requestPermission(); }
 checkUserNamePrompt();
 initDatePicker();
