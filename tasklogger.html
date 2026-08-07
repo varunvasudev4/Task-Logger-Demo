@@ -1822,7 +1822,7 @@ let expandedTaskCardFields = new Set();
 let masters = {
   weekendDays: [...DEFAULT_WEEKEND_DAYS],
   workHours: { startH: DEFAULT_WORK_START_H, startM: DEFAULT_WORK_START_M, endH: DEFAULT_WORK_END_H, endM: DEFAULT_WORK_END_M },
-  flags: { sleepAutoPause: true }, // future flags can be added here
+  flags: { sleepAutoPause: true, backgroundSyncEnabled: true }, // future flags can be added here
   logColumns: DEFAULT_LOG_COLUMNS.map(c => ({ ...c })),
   // Single consolidated store for every list-type column's options — Projects, Nature of
   // Task, Status, and any custom list the user creates all live here side by side and are
@@ -2554,6 +2554,24 @@ const LocalSyncManager = (function () {
       : { status: 'idle', lastRun: null };
   }
 
+  // ── Phase 12: Incremental Synchronization Engine exposure ───────────────────
+  // Thin delegations only — all real planning logic lives in
+  // IncrementalSyncEngine, below. Coordinates rather than duplicates, exactly
+  // like the Phase 9/11 exposures just above. Never executes the plan it
+  // returns — building a plan and acting on it remain two separate steps,
+  // per this phase's own "no execution" requirement.
+  function buildSyncPlan() {
+    return (typeof IncrementalSyncEngine !== 'undefined')
+      ? IncrementalSyncEngine.buildSyncPlan()
+      : Promise.resolve({ ok: false, reason: 'sync-engine-unavailable', plan: [], statistics: null });
+  }
+
+  function getSyncPlanStatus() {
+    return (typeof IncrementalSyncEngine !== 'undefined')
+      ? IncrementalSyncEngine.getSyncPlanStatus()
+      : { status: 'idle', lastPlan: null };
+  }
+
   return {
     initialize,
     shutdown,
@@ -2568,6 +2586,9 @@ const LocalSyncManager = (function () {
     // Phase 11: Batch Cloud Merge — see functions defined just above.
     processBatchMerge,
     getBatchMergeSummary,
+    // Phase 12: Incremental Synchronization Engine — see functions defined just above.
+    buildSyncPlan,
+    getSyncPlanStatus,
     // ── Reserved extension points (requirement 8) ──────────────────────────────
     // Placeholders only. Nothing here is implemented, referenced, or called by
     // this phase — reserved so a future phase can attach a real implementation
@@ -4596,6 +4617,988 @@ const BatchCloudMerge = (function () {
 })();
 // ── End Batch Cloud Merge (Phase 11) ──────────────────────────────────────────
 
+// ── Incremental Synchronization Engine (Phase 12) ───────────────────────────────
+// Implements ONLY this phase's brief — an engine that determines exactly what
+// needs synchronization (Upload / Download / Skip / Create / a placeholder-only
+// Delete) WITHOUT performing any conflict resolution, and WITHOUT uploading,
+// downloading, retrying, or touching any business data itself. It downloads
+// Tasks/state.json exactly once per call (requirement 1), compares it against
+// the current local `tasks` array using synchronization identity (Sync ID)
+// ONLY — never titles (requirement 2) — and produces a Synchronization Plan:
+// one action per task, with a reason and both sides' version numbers
+// (requirement 3/5), plus plan-level statistics (requirement 7). Nothing here
+// executes an upload or a download (requirement 8); execution is explicitly
+// left to a later phase.
+//
+// Everything this engine needs already exists:
+//   - downloading + checksum-validating Tasks/state.json exactly once:
+//     SingleTaskMerge.downloadCurrentState() (Phase 10, itself built on Phase
+//     7's findStateFile()/downloadStateFileContent()/computeStatePayloadChecksum())
+//   - per-task remote shape/checksum validation: SingleTaskMerge.validateRemoteTask()
+//   - the existing Version/Modified-At "which side is newer" comparison:
+//     SingleTaskMerge.isRemoteNewer() (Phase 10)
+//   - business-data-only content hashing: computeTaskChecksum() (Phase 1)
+//   - local dirty state: isTaskDirty() (Phase 2)
+//   - local metadata completeness: ensureSyncMetadata() (Phase 1)
+// No comparison model is reinvented — this phase strictly reuses the existing
+// Version/Modified At/Checksum/Deleted Flag/Device ID metadata already defined
+// by SYNC_DATA_MODEL.md §3 and already implemented by the phases above
+// (requirement 4). Reason strings are internal diagnostics only, never shown
+// to the user as raw sync jargon, per SYNC_DATA_MODEL.md §11 design principle 2.
+const IncrementalSyncEngine = (function () {
+  let _status = 'idle';   // idle | downloading | comparing | complete | failed
+  let _lastPlan = null;   // most recent buildSyncPlan() result, for UI display only
+
+  // ── Extension points (requirement 9) — reserved, not implemented ──────────
+  // Mirrors LocalSyncManager's own Extensions slot pattern (Phase 4). Nothing
+  // here is called by this module; a future phase can attach a real
+  // implementation without any structural change to this engine.
+  const Extensions = {
+    ConflictDetector: null,    // future: real conflict detection (CONFLICT_RESOLUTION.md)
+    RetryEngine: null,         // future: backoff/retry handling for failed plan items
+    BackgroundScheduler: null  // future: automatic/periodic plan execution
+  };
+
+  // downloadCurrentState(): requirement 1 — downloads Tasks/state.json exactly
+  // ONCE per buildSyncPlan() call. Delegates entirely to SingleTaskMerge's
+  // existing read path (itself already authentication-checked, workspace-checked,
+  // and checksum-validated) — no new Drive call shape is introduced here, exactly
+  // like BatchCloudMerge.downloadCurrentState() (Phase 11) already does.
+  function downloadCurrentState() {
+    if (typeof SingleTaskMerge === 'undefined') {
+      return Promise.resolve({ ok: false, reason: 'merge-unavailable' });
+    }
+    return SingleTaskMerge.downloadCurrentState();
+  }
+
+  // compareTaskStates(): requirement 4/5 — the single comparison primitive
+  // every classification below reads from. Never mutates either task. Reuses
+  // SingleTaskMerge.isRemoteNewer() for the Version/Modified-At comparison
+  // (never re-derives it) and computeTaskChecksum() for a business-data-only
+  // equality check, so "identical content" can be distinguished from "same
+  // version number" without assuming they always coincide.
+  function compareTaskStates(localTask, remoteTask) {
+    const ls = (localTask && localTask._sync) || null;
+    const rs = (remoteTask && remoteTask._sync) || null;
+    const localVersion  = (ls && typeof ls.version === 'number') ? ls.version : null;
+    const remoteVersion = (rs && typeof rs.version === 'number') ? rs.version : null;
+    const localDeleted  = !!(ls && ls.deleted);
+    const remoteDeleted = !!(rs && rs.deleted);
+    const localChecksum  = localTask  ? computeTaskChecksum(localTask)  : null;
+    // Only trust a remote checksum that has already passed shape validation —
+    // an unvalidated remote task's own `_sync.checksum` field is untrusted
+    // input, never fed into a content-equality decision.
+    const remoteChecksum = (remoteTask && SingleTaskMerge.validateRemoteTask(remoteTask))
+      ? computeTaskChecksum(remoteTask) : null;
+    const contentEqual = (localTask && remoteTask && remoteChecksum !== null)
+      ? (localChecksum === remoteChecksum) : false;
+    const remoteIsNewer = (localTask && remoteTask)
+      ? SingleTaskMerge.isRemoteNewer(localTask, remoteTask) : false;
+    return {
+      localVersion, remoteVersion,
+      localModifiedAt: (ls && ls.modifiedAt) || null,
+      remoteModifiedAt: (rs && rs.modifiedAt) || null,
+      localDeleted, remoteDeleted,
+      localChecksum, remoteChecksum,
+      contentEqual, remoteIsNewer
+    };
+  }
+
+  // determineSyncAction(): requirement 3/4 — exactly ONE action for a given
+  // local/remote pair (or singleton, when one side is absent), plus a reason.
+  // Deletion outcomes (DELETE_REMOTE / DELETE_LOCAL) are PLACEHOLDERS ONLY —
+  // classified here, per requirement 3's own example list, but never executed
+  // by this phase or any function in this module (requirement "Do NOT ...
+  // Implement conflict resolution" and the roadmap's explicit "(future
+  // placeholder)" marker on both). No divergence-from-a-common-ancestor
+  // reasoning is performed anywhere below — every decision is a plain
+  // Version/Modified-At/Checksum read, exactly like Phase 10/11's own
+  // isRemoteNewer()-based comparisons, never conflict detection.
+  function determineSyncAction(localTask, remoteTask) {
+    if (!localTask && !remoteTask) {
+      return { action: 'SKIP', reason: 'no-task-on-either-side' };
+    }
+
+    // Remote task present but shape/checksum-invalid: never trusted enough to
+    // classify further (mirrors Phase 10/11's own "malformed-remote-task"
+    // discard, before ever reasoning about newer/older).
+    if (remoteTask && !SingleTaskMerge.validateRemoteTask(remoteTask)) {
+      return { action: 'SKIP', reason: 'malformed-remote-task' };
+    }
+
+    // Remote-only: no local counterpart at all.
+    if (!localTask && remoteTask) {
+      const rs = remoteTask._sync;
+      if (rs && rs.deleted) {
+        return { action: 'SKIP', reason: 'deleted-remotely-no-local-copy' };
+      }
+      return { action: 'CREATE_LOCAL', reason: 'remote-only' };
+    }
+
+    // Local-only: no remote counterpart at all.
+    if (localTask && !remoteTask) {
+      ensureSyncMetadata(localTask);
+      if (localTask._sync.deleted) {
+        return { action: 'SKIP', reason: 'deleted-locally-never-synced' };
+      }
+      return { action: 'CREATE_REMOTE', reason: 'local-only' };
+    }
+
+    // Both sides present.
+    ensureSyncMetadata(localTask);
+    const cmp = compareTaskStates(localTask, remoteTask);
+
+    if (cmp.localDeleted && cmp.remoteDeleted) {
+      return { action: 'SKIP', reason: 'already-deleted-both-sides' };
+    }
+    if (cmp.localDeleted && !cmp.remoteDeleted) {
+      // Placeholder classification only — per requirement 3's own list
+      // ("DELETE_REMOTE (placeholder only)"). If the remote side has since
+      // moved ahead of our delete, the newer edit wins instead (same
+      // newer-wins posture Phase 10/11 already use), same as any other
+      // Upload/Download decision below.
+      return cmp.remoteIsNewer
+        ? { action: 'DOWNLOAD', reason: 'remote-newer-supersedes-local-delete' }
+        : { action: 'DELETE_REMOTE', reason: 'local-deleted-remote-unchanged' };
+    }
+    if (cmp.remoteDeleted && !cmp.localDeleted) {
+      // Placeholder classification only — per requirement 3's own list
+      // ("DELETE_LOCAL (placeholder only)"). If the local side has since
+      // moved ahead of the remote delete (e.g. it's dirty/newer), the newer
+      // edit wins instead of the delete.
+      if (cmp.remoteIsNewer) {
+        return { action: 'DELETE_LOCAL', reason: 'remote-deleted-local-unchanged' };
+      }
+      return { action: 'UPLOAD', reason: 'local-newer-supersedes-remote-delete' };
+    }
+
+    // Neither side deleted — ordinary Upload / Download / Skip decision.
+    if (cmp.contentEqual && cmp.localVersion === cmp.remoteVersion) {
+      return { action: 'SKIP', reason: 'in-sync' };
+    }
+    if (cmp.remoteIsNewer) {
+      return { action: 'DOWNLOAD', reason: 'remote-newer' };
+    }
+    if (isTaskDirty(localTask)) {
+      return { action: 'UPLOAD', reason: 'local-dirty' };
+    }
+    if (typeof cmp.localVersion === 'number' && typeof cmp.remoteVersion === 'number' && cmp.localVersion > cmp.remoteVersion) {
+      return { action: 'UPLOAD', reason: 'local-newer' };
+    }
+    return { action: 'SKIP', reason: 'in-sync' };
+  }
+
+  // buildSyncPlan(): the single public entry point (requirement 1/5/8).
+  // Downloads Tasks/state.json exactly once, indexes both sides by Sync ID
+  // ONLY (requirement 2 — never title), and produces one plan entry per task
+  // known to either side. Never uploads, never downloads business data,
+  // never mutates a task's business fields — the only local write is
+  // ensureSyncMetadata()'s existing, idempotent metadata backfill (Phase 1),
+  // which every other read-only sync module in this file already performs
+  // freely (e.g. SingleTaskMerge.mergeSingleTask()'s own use of it before any
+  // comparison). Returns a rejection-free Promise: every failure path
+  // resolves with `ok: false` and a reason, exactly like every other sync
+  // module's public entry point in this file (uploadSingleTask(),
+  // mergeSingleTask(), mergeTaskCollection(), processUploadQueue()).
+  function buildSyncPlan() {
+    if (_status === 'downloading' || _status === 'comparing') {
+      // Reentrancy guard — same pattern BatchCloudMerge.mergeTaskCollection()
+      // and BatchTaskUpload.processUploadQueue() already use.
+      return Promise.resolve({ ok: false, reason: 'already-building' });
+    }
+
+    _status = 'preparing';
+    if (typeof SingleTaskMerge === 'undefined') {
+      _status = 'failed';
+      const result = { ok: false, reason: 'merge-unavailable', plan: [], statistics: emptyStatistics() };
+      _lastPlan = result;
+      return Promise.resolve(result);
+    }
+
+    _status = 'downloading';
+    return downloadCurrentState().then(downloadResult => {
+      if (!downloadResult || !downloadResult.ok) {
+        // Every failure reason (not-authenticated / no-remote-file /
+        // corrupt-json / checksum-mismatch / workspace-not-ready / error) is
+        // already distinguished upstream by fetchAndValidateStateFile() —
+        // nothing has been touched locally at this point (download is
+        // read-only), same posture as Phase 10/11.
+        _status = 'failed';
+        const result = Object.assign(
+          { ok: false, plan: [], statistics: emptyStatistics() },
+          downloadResult || { reason: 'unknown-error' }
+        );
+        _lastPlan = result;
+        return result;
+      }
+
+      _status = 'comparing';
+      const remoteTasks = (downloadResult.parsed && Array.isArray(downloadResult.parsed.tasks))
+        ? downloadResult.parsed.tasks : [];
+
+      // Index both sides by Sync ID ONLY (requirement 2). Ensures every
+      // local task has well-formed metadata before it's indexed, exactly
+      // like every other comparison module in this file already does before
+      // reasoning about a task's _sync block.
+      const localBySyncId = {};
+      (Array.isArray(tasks) ? tasks : []).forEach(t => {
+        if (!t) return;
+        ensureSyncMetadata(t);
+        if (t._sync && t._sync.syncId) localBySyncId[t._sync.syncId] = t;
+      });
+      const remoteBySyncId = {};
+      remoteTasks.forEach(rt => {
+        if (rt && rt._sync && rt._sync.syncId) remoteBySyncId[rt._sync.syncId] = rt;
+      });
+
+      const allSyncIds = Object.keys(Object.assign({}, localBySyncId, remoteBySyncId));
+      const plan = allSyncIds.map(syncId => {
+        const localTask = localBySyncId[syncId] || null;
+        const remoteTask = remoteBySyncId[syncId] || null;
+        const decision = determineSyncAction(localTask, remoteTask);
+        return {
+          taskId: localTask ? localTask.id : null,
+          syncId: syncId,
+          action: decision.action,
+          reason: decision.reason,
+          currentVersion: (localTask && localTask._sync && typeof localTask._sync.version === 'number') ? localTask._sync.version : null,
+          remoteVersion: (remoteTask && remoteTask._sync && typeof remoteTask._sync.version === 'number') ? remoteTask._sync.version : null
+        };
+      });
+
+      // ── Phase 14: Conflict Detection ─────────────────────────────────────
+      // Evaluates the plan just built, strictly AFTER it's built and BEFORE
+      // anything below ever applies a merge (nothing in this function
+      // uploads/downloads — this simply mirrors the same "after plan, before
+      // merge" boundary the roadmap specifies). Routed through the reserved
+      // Extensions.ConflictDetector slot (never called directly by name) so
+      // this integration point matches exactly what that slot was documented
+      // for. Wrapped defensively: a conflict-detection failure of any kind
+      // must never break synchronization for the rest of the plan
+      // (requirement 9) — it can only ever add/refresh records in the
+      // separate Conflict Queue, never change `plan`/`statistics` themselves
+      // or anything else already computed above.
+      try {
+        if (Extensions.ConflictDetector && typeof Extensions.ConflictDetector.scanForConflicts === 'function') {
+          Extensions.ConflictDetector.scanForConflicts(plan, localBySyncId, remoteBySyncId, remoteTasks);
+        }
+      } catch (err) {
+        // Never let a conflict-detection failure interrupt the sync plan.
+      }
+
+      _status = 'complete';
+      const result = {
+        ok: true,
+        fileId: downloadResult.fileId,
+        modifiedTime: downloadResult.modifiedTime,
+        plan: plan,
+        statistics: summarizeSyncPlan(plan)
+      };
+      _lastPlan = result;
+      return result;
+    }).catch(err => {
+      _status = 'failed';
+      const result = {
+        ok: false, reason: 'error', error: (err && err.message) || String(err),
+        plan: [], statistics: emptyStatistics()
+      };
+      _lastPlan = result;
+      return result;
+    });
+  }
+
+  // getPendingSyncActions(): requirement 6 helper — every plan entry that
+  // actually requires future work, i.e. everything except SKIP. Pure filter,
+  // never re-derives a decision.
+  function getPendingSyncActions(plan) {
+    const p = Array.isArray(plan) ? plan : (_lastPlan && _lastPlan.plan) || [];
+    return p.filter(item => item && item.action !== 'SKIP');
+  }
+
+  // Shape shared by summarizeSyncPlan() and the empty/failure-path
+  // statistics object, so callers never have to special-case a missing plan.
+  function emptyStatistics() {
+    return {
+      uploadsRequired: 0,
+      downloadsRequired: 0,
+      alreadySynchronized: 0,
+      skipped: 0,
+      pendingDeletes: 0,
+      createLocal: 0,
+      createRemote: 0
+    };
+  }
+
+  // summarizeSyncPlan(): requirement 7 — informational statistics only,
+  // derived purely from a plan already produced by buildSyncPlan()/
+  // determineSyncAction() above. Never recomputes a decision, never touches
+  // business data or the network.
+  function summarizeSyncPlan(plan) {
+    const p = Array.isArray(plan) ? plan : (_lastPlan && _lastPlan.plan) || [];
+    const stats = emptyStatistics();
+    p.forEach(item => {
+      if (!item) return;
+      switch (item.action) {
+        case 'UPLOAD':        stats.uploadsRequired++;   break;
+        case 'DOWNLOAD':      stats.downloadsRequired++; break;
+        case 'CREATE_LOCAL':  stats.createLocal++;       break;
+        case 'CREATE_REMOTE': stats.createRemote++;      break;
+        case 'DELETE_REMOTE': stats.pendingDeletes++;    break;
+        case 'DELETE_LOCAL':  stats.pendingDeletes++;    break;
+        case 'SKIP':
+          stats.skipped++;
+          if (item.reason === 'in-sync' || item.reason === 'already-deleted-both-sides') stats.alreadySynchronized++;
+          break;
+        default: break;
+      }
+    });
+    return stats;
+  }
+
+  // getSyncPlanStatus(): read-only status for the Synchronization settings
+  // tab, matching every other sync module's status getter in this file
+  // (getMergeStatus(), getBatchMergeSummary(), getUploadProgress()). Always
+  // a fresh object — never a live reference to this module's internal state.
+  function getSyncPlanStatus() {
+    return { status: _status, lastPlan: _lastPlan ? Object.assign({}, _lastPlan) : null };
+  }
+
+  return {
+    downloadCurrentState,
+    compareTaskStates,
+    determineSyncAction,
+    buildSyncPlan,
+    getPendingSyncActions,
+    summarizeSyncPlan,
+    getSyncPlanStatus,
+    Extensions
+  };
+})();
+// ── End Incremental Synchronization Engine (Phase 12) ───────────────────────────
+
+// ── Conflict Detection (Phase 14) ────────────────────────────────────────────────
+// Implements ONLY this phase's brief (CONFLICT_RESOLUTION.md §2/§3): identify
+// and record synchronization conflicts. This module NEVER resolves anything —
+// no field is ever merged, no side is ever chosen, no business data is ever
+// touched. It evaluates the Synchronization Plan IncrementalSyncEngine.
+// buildSyncPlan() (Phase 12) already produced, after that plan is built and
+// strictly before any upload/download/merge is ever applied to it — it does
+// not change what the plan says to do, it only flags entries that plan's own
+// Upload/Download/Skip classification cannot safely be trusted for without a
+// human decision.
+//
+// Reuses, never reinvents:
+//   - the five-queue Local Queue Engine (Phase 3) — QUEUE_NAMES already
+//     reserves a 'conflict' queue, and getQueueStatistics() already reports
+//     pendingConflicts; this phase is what finally populates that queue.
+//   - upsertQueueEntry() / findQueueEntry() / hasQueueEntry() /
+//     removeQueueEntry() (Phase 3) — no new persistence mechanism, no new
+//     localStorage key. Conflict records persist under the exact same
+//     ttl_sync_queues key Phase 3 already writes to (saveQueues()).
+//   - computeTaskChecksum() (Phase 1), isTaskDirty() (Phase 2),
+//     SingleTaskMerge.validateRemoteTask() (Phase 10) — the same
+//     Version/Checksum/Modified At/Deleted Flag signals CONFLICT_RESOLUTION.md
+//     §3 defines, never a parallel comparison model.
+//
+// Known limitation (documented, not silently assumed away): SYNC_DATA_MODEL.md
+// §8's "Previous Version" (the exact shared ancestor both sides diverged from)
+// is not yet a persisted field anywhere in this app. Detection below uses each
+// task's own `_sync.lastSync` timestamp (Phase 8/9/10/11 already stamp this on
+// every confirmed upload/merge) as the best available stand-in for "the last
+// point local and remote were known to agree" — if the remote's business
+// Modified At is after this device's lastSync AND this device is independently
+// dirty, both sides changed since they were last known to agree. A future
+// phase that adds a real Previous Version field can tighten this without
+// changing this module's public shape.
+const CONFLICT_TYPES = {
+  BOTH_MODIFIED: 'BOTH_MODIFIED',
+  VERSION_MISMATCH: 'VERSION_MISMATCH',
+  TIMESTAMP_INCONSISTENCY: 'TIMESTAMP_INCONSISTENCY',
+  DELETED_LOCAL_MODIFIED_REMOTE: 'DELETED_LOCAL_MODIFIED_REMOTE',
+  DELETED_REMOTE_MODIFIED_LOCAL: 'DELETED_REMOTE_MODIFIED_LOCAL',
+  MISSING_METADATA: 'MISSING_METADATA',
+  CORRUPTED_METADATA: 'CORRUPTED_METADATA',
+  DUPLICATE_SYNC_IDENTITY: 'DUPLICATE_SYNC_IDENTITY',
+  UNKNOWN_SYNC_STATE: 'UNKNOWN_SYNC_STATE'
+};
+
+// detectConflict(): the single comparison primitive every scan below reads
+// from (mirrors IncrementalSyncEngine.compareTaskStates()'s role for the
+// planner). Never mutates either task. Returns null when there is no
+// conflict, or { type, suggestedResolution, detail } when there is one.
+// suggestedResolution is always a placeholder string only (requirement 3) —
+// nothing here ever acts on it. Never throws (requirement 9) — any internal
+// comparison failure is itself reported as an UNKNOWN_SYNC_STATE conflict
+// rather than propagating an exception into the sync pipeline.
+function detectConflict(localTask, remoteTask) {
+  try {
+    if (!localTask && !remoteTask) return null;
+
+    // Missing metadata: a task object exists on one side but its _sync block
+    // is entirely absent. Defensive — this module never assumes
+    // ensureSyncMetadata() has already run on whatever it's given.
+    const localMissing = !!localTask && (!localTask._sync || typeof localTask._sync !== 'object');
+    const remoteMissing = !!remoteTask && (!remoteTask._sync || typeof remoteTask._sync !== 'object');
+    if (localMissing || remoteMissing) {
+      return {
+        type: CONFLICT_TYPES.MISSING_METADATA,
+        suggestedResolution: null,
+        detail: (localMissing ? 'Local' : 'Remote') + ' task has no _sync metadata block'
+      };
+    }
+    if (!localTask || !remoteTask) return null; // singleton — CREATE_LOCAL/CREATE_REMOTE, not a conflict
+
+    const ls = localTask._sync, rs = remoteTask._sync;
+
+    // Corrupted synchronization metadata: a _sync block exists but a
+    // required field is malformed.
+    const localCorrupt = (typeof ls.version !== 'number' || ls.version < 1 || typeof ls.modifiedAt !== 'number' || !ls.syncId);
+    const remoteCorrupt = (typeof rs.version !== 'number' || rs.version < 1 || typeof rs.modifiedAt !== 'number' || !rs.syncId);
+    if (localCorrupt || remoteCorrupt) {
+      return {
+        type: CONFLICT_TYPES.CORRUPTED_METADATA,
+        suggestedResolution: null,
+        detail: (localCorrupt ? 'Local' : 'Remote') + ' _sync block has an invalid or missing required field'
+      };
+    }
+
+    // Unknown synchronization state: local syncStatus outside the states
+    // this app's Sync Manager currently recognizes (SYNC_DATA_MODEL.md §7).
+    const KNOWN_STATUSES = ['local_only', 'pending', 'synced', 'dirty', 'conflict', 'failed'];
+    if (ls.syncStatus && KNOWN_STATUSES.indexOf(ls.syncStatus) === -1) {
+      return {
+        type: CONFLICT_TYPES.UNKNOWN_SYNC_STATE,
+        suggestedResolution: null,
+        detail: 'Local syncStatus "' + ls.syncStatus + '" is not a recognized state'
+      };
+    }
+
+    // Timestamp inconsistency: an impossible timestamp relationship — not a
+    // routine "who is newer" question (that's IncrementalSyncEngine's job).
+    const now = Date.now();
+    const CLOCK_SKEW_TOLERANCE_MS = 5 * 60 * 1000;
+    const localFuture = ls.modifiedAt > now + CLOCK_SKEW_TOLERANCE_MS;
+    const remoteFuture = rs.modifiedAt > now + CLOCK_SKEW_TOLERANCE_MS;
+    const localBeforeCreated = typeof ls.createdAt === 'number' && ls.modifiedAt < ls.createdAt;
+    // A lower version claiming a strictly later edit time than a higher
+    // version on the other side contradicts monotonic versioning.
+    const versionTimeContradiction =
+      (ls.version > rs.version && ls.modifiedAt < rs.modifiedAt) ||
+      (rs.version > ls.version && rs.modifiedAt < ls.modifiedAt);
+    if (localFuture || remoteFuture || localBeforeCreated || versionTimeContradiction) {
+      return {
+        type: CONFLICT_TYPES.TIMESTAMP_INCONSISTENCY,
+        suggestedResolution: null,
+        detail: 'Modified At / Version relationship is not internally consistent'
+      };
+    }
+
+    const localDeleted = !!ls.deleted;
+    const remoteDeleted = !!rs.deleted;
+    const remoteValid = (typeof SingleTaskMerge !== 'undefined') ? SingleTaskMerge.validateRemoteTask(remoteTask) : true;
+    const localChecksum = computeTaskChecksum(localTask);
+    const remoteChecksum = remoteValid ? computeTaskChecksum(remoteTask) : null;
+    const contentEqual = remoteChecksum !== null && localChecksum === remoteChecksum;
+    const localDirty = isTaskDirty(localTask);
+
+    // Deleted-vs-edited (CONFLICT_RESOLUTION.md §2/§5) — flagged only, never
+    // resolved in either direction here.
+    if (localDeleted && !remoteDeleted && rs.modifiedAt > (ls.lastSync || 0)) {
+      return {
+        type: CONFLICT_TYPES.DELETED_LOCAL_MODIFIED_REMOTE,
+        suggestedResolution: 'placeholder: ask user to restore or confirm deletion',
+        detail: "Deleted on this device; the remote copy was modified after this device's last sync"
+      };
+    }
+    if (remoteDeleted && !localDeleted && localDirty) {
+      return {
+        type: CONFLICT_TYPES.DELETED_REMOTE_MODIFIED_LOCAL,
+        suggestedResolution: 'placeholder: ask user to restore or confirm deletion',
+        detail: 'Deleted remotely; the local copy has unsynced edits'
+      };
+    }
+    if (localDeleted && remoteDeleted) return null; // both sides agree — not a conflict
+
+    // Both modified since the last confirmed sync — the classic content
+    // conflict (CONFLICT_RESOLUTION.md §2, "same task edited on multiple
+    // devices"). See the module header note on lastSync standing in for
+    // Previous Version.
+    if (localDirty && ls.lastSync && rs.modifiedAt > ls.lastSync && !contentEqual) {
+      return {
+        type: CONFLICT_TYPES.BOTH_MODIFIED,
+        suggestedResolution: 'placeholder: ask user to keep local or keep cloud',
+        detail: "Local has unsynced edits and the remote copy changed after this device's last sync"
+      };
+    }
+
+    // Version mismatch: versions disagree even though content already
+    // converged — a bookkeeping-only divergence (CONFLICT_RESOLUTION.md §3,
+    // Checksum short-circuit), still recorded since this module never
+    // auto-reconciles anything itself.
+    if (ls.version !== rs.version && contentEqual) {
+      return {
+        type: CONFLICT_TYPES.VERSION_MISMATCH,
+        suggestedResolution: 'placeholder: reconcile version bookkeeping (content already matches)',
+        detail: 'Local version ' + ls.version + ' vs remote version ' + rs.version + ' — content is identical'
+      };
+    }
+
+    return null;
+  } catch (err) {
+    // Unexpected comparison failure (requirement 9) — recorded as a
+    // diagnostic conflict rather than thrown, so a single malformed pair
+    // never interrupts scanning the rest of the plan.
+    return {
+      type: CONFLICT_TYPES.UNKNOWN_SYNC_STATE,
+      suggestedResolution: null,
+      detail: 'Comparison failed: ' + ((err && err.message) || String(err))
+    };
+  }
+}
+
+// enqueueConflict(): creates or refreshes a Conflict Queue record for
+// `syncId`, reusing Phase 3's upsertQueueEntry() against the existing
+// 'conflict' queue. Preserves the original detectedAt/status on repeat
+// detections (a conflict that's still present isn't "detected again", it's
+// still outstanding) — only the comparison-derived fields refresh.
+function enqueueConflict(syncId, data) {
+  if (!syncId) return null;
+  const existing = findQueueEntry(syncId, 'conflict');
+  const payload = Object.assign({}, data);
+  if (!existing) {
+    payload.detectedAt = Date.now();
+    payload.status = 'pending';
+  }
+  return upsertQueueEntry('conflict', syncId, payload);
+}
+
+// getConflictQueue(): a copy of the current Conflict Queue (never the live
+// array), matching getUploadQueue()'s (Phase 3) existing contract.
+function getConflictQueue() {
+  return syncQueues.conflict.slice();
+}
+
+// hasConflict() / clearConflict(): thin, named wrappers over Phase 3's
+// generic hasQueueEntry()/removeQueueEntry(), scoped to the 'conflict' queue
+// per requirement 5's explicit helper list. clearConflict() only removes this
+// diagnostic record — it never touches task data, business logic, or any
+// other queue (requirement 6); scanForConflicts() below calls it when a
+// re-scan finds a previously-recorded divergence no longer present.
+function hasConflict(syncId) {
+  return hasQueueEntry(syncId, 'conflict');
+}
+function clearConflict(syncId) {
+  return removeQueueEntry(syncId, 'conflict');
+}
+
+// getConflictStatistics(): requirement 7 — read-only diagnostics, matching
+// every other status/statistics getter already in this file (always a fresh
+// object, never a live reference).
+function getConflictStatistics() {
+  const q = syncQueues.conflict;
+  const pending = q.filter(e => e.status !== 'completed');
+  const conflictTypes = {};
+  pending.forEach(e => {
+    const t = e.conflictType || 'UNKNOWN';
+    conflictTypes[t] = (conflictTypes[t] || 0) + 1;
+  });
+  let latest = null;
+  q.forEach(e => { if (!latest || (e.detectedAt || 0) > (latest.detectedAt || 0)) latest = e; });
+  return {
+    pendingConflicts: pending.length,
+    conflictTypes: conflictTypes,
+    latestConflict: latest ? Object.assign({}, latest) : null,
+    conflictQueueSize: q.length
+  };
+}
+
+// scanForConflicts(): requirement 1 — the single public entry point,
+// evaluating synchronization candidates AFTER a plan is built and BEFORE any
+// merge is applied. Takes the plan and the same by-Sync-ID indexes
+// IncrementalSyncEngine.buildSyncPlan() already built (never re-downloads,
+// never rebuilds the plan itself). Also scans the raw remote task array
+// directly for entries a by-Sync-ID index can't represent at all — a remote
+// entry with no usable Sync ID, or more than one remote entry sharing the
+// same Sync ID — since those never make it into `remoteBySyncId`.
+//
+// Never mutates `plan`, task data, the Upload/Download/Delete/Retry queues,
+// or any business logic (requirement 6) — its only side effect is upserting
+// records into the 'conflict' queue via enqueueConflict()/clearConflict().
+function scanForConflicts(plan, localBySyncId, remoteBySyncId, remoteTasksRaw) {
+  const planItems = Array.isArray(plan) ? plan : [];
+  const remoteRaw = Array.isArray(remoteTasksRaw) ? remoteTasksRaw : [];
+  let newConflicts = 0, clearedConflicts = 0;
+
+  planItems.forEach(item => {
+    if (!item || !item.syncId) return;
+    const localTask = (localBySyncId && localBySyncId[item.syncId]) || null;
+    const remoteTask = (remoteBySyncId && remoteBySyncId[item.syncId]) || null;
+    let result;
+    try {
+      result = detectConflict(localTask, remoteTask);
+    } catch (err) {
+      result = {
+        type: CONFLICT_TYPES.UNKNOWN_SYNC_STATE,
+        suggestedResolution: null,
+        detail: 'scanForConflicts comparison failed: ' + ((err && err.message) || String(err))
+      };
+    }
+    if (result) {
+      const wasNew = !hasConflict(item.syncId);
+      enqueueConflict(item.syncId, {
+        taskId: item.taskId,
+        localVersion: (localTask && localTask._sync && typeof localTask._sync.version === 'number') ? localTask._sync.version : (typeof item.currentVersion === 'number' ? item.currentVersion : null),
+        remoteVersion: (remoteTask && remoteTask._sync && typeof remoteTask._sync.version === 'number') ? remoteTask._sync.version : (typeof item.remoteVersion === 'number' ? item.remoteVersion : null),
+        conflictType: result.type,
+        suggestedResolution: result.suggestedResolution || null,
+        detail: result.detail || null
+      });
+      if (wasNew) newConflicts++;
+    } else if (hasConflict(item.syncId)) {
+      // Previously recorded, no longer present on this scan — clear the
+      // stale diagnostic record only (requirement 6 — never resolution).
+      clearConflict(item.syncId);
+      clearedConflicts++;
+    }
+  });
+
+  // Duplicate synchronization identity: more than one remote entry sharing
+  // the same Sync ID (raw array — remoteBySyncId can only ever keep one).
+  const remoteSyncIdCounts = {};
+  remoteRaw.forEach(rt => {
+    const sid = rt && rt._sync && rt._sync.syncId;
+    if (sid) remoteSyncIdCounts[sid] = (remoteSyncIdCounts[sid] || 0) + 1;
+  });
+  Object.keys(remoteSyncIdCounts).forEach(sid => {
+    if (remoteSyncIdCounts[sid] <= 1) return;
+    const wasNew = !hasConflict(sid);
+    enqueueConflict(sid, {
+      taskId: null, localVersion: null, remoteVersion: null,
+      conflictType: CONFLICT_TYPES.DUPLICATE_SYNC_IDENTITY,
+      suggestedResolution: null,
+      detail: remoteSyncIdCounts[sid] + ' remote entries share this Sync ID'
+    });
+    if (wasNew) newConflicts++;
+  });
+
+  // Missing/corrupted metadata on raw remote entries that never obtained a
+  // Sync ID at all — invisible to the by-Sync-ID index above, so diagnosed
+  // directly here against a fallback identifier.
+  remoteRaw.forEach((rt, idx) => {
+    if (!rt) return;
+    const hasSyncBlock = !!(rt._sync && typeof rt._sync === 'object');
+    if (hasSyncBlock && rt._sync.syncId) return; // already handled above
+    const fallbackId = 'remote-raw:' + (rt.id !== undefined && rt.id !== null ? rt.id : idx);
+    const wasNew = !hasConflict(fallbackId);
+    enqueueConflict(fallbackId, {
+      taskId: rt.id !== undefined ? rt.id : null,
+      localVersion: null,
+      remoteVersion: (hasSyncBlock && typeof rt._sync.version === 'number') ? rt._sync.version : null,
+      conflictType: hasSyncBlock ? CONFLICT_TYPES.CORRUPTED_METADATA : CONFLICT_TYPES.MISSING_METADATA,
+      suggestedResolution: null,
+      detail: 'Remote task entry has no usable Sync ID'
+    });
+    if (wasNew) newConflicts++;
+  });
+
+  return { scanned: planItems.length, newConflicts: newConflicts, clearedConflicts: clearedConflicts, statistics: getConflictStatistics() };
+}
+
+// Registers this module against IncrementalSyncEngine's own reserved
+// extension point (Phase 12's `Extensions.ConflictDetector`, previously
+// null) — buildSyncPlan() below calls through this slot rather than naming
+// scanForConflicts() directly, so the wiring matches exactly the "future
+// phase can attach a real implementation without any structural change"
+// contract that slot was documented with.
+if (typeof IncrementalSyncEngine !== 'undefined' && IncrementalSyncEngine.Extensions) {
+  IncrementalSyncEngine.Extensions.ConflictDetector = {
+    scanForConflicts: scanForConflicts,
+    detectConflict: detectConflict,
+    getConflictQueue: getConflictQueue,
+    getConflictStatistics: getConflictStatistics,
+    hasConflict: hasConflict,
+    clearConflict: clearConflict
+  };
+}
+// ── End Conflict Detection (Phase 14) ──────────────────────────────────────────
+
+// ── Background Synchronization Scheduler (Phase 13) ─────────────────────────────
+// Implements ONLY this phase's brief: a scheduler that decides WHEN a
+// synchronization pass should run and coordinates running it. It NEVER
+// compares local and remote tasks itself and NEVER decides an individual
+// task's synchronization action — every plan it acts on comes from
+// LocalSyncManager.buildSyncPlan() (Phase 12's IncrementalSyncEngine,
+// unchanged). It NEVER uploads or downloads business data itself — actual
+// data movement is always delegated to the existing whole-collection
+// pipelines already used by their own manual buttons: Batch Task Upload
+// (LocalSyncManager.processUploadQueue(), Phase 9) and Batch Cloud Merge
+// (LocalSyncManager.processBatchMerge(), Phase 11). This module purely
+// supervises *when* those two calls happen and reports the outcome — the
+// "coordinates, never determines" role BACKGROUND_SYNC.md §1 requires.
+//
+// Out of scope for this phase (per the brief) and intentionally absent
+// below: conflict detection/resolution, attachment synchronization, a retry
+// engine, and a diagnostics panel. A stalled/failed pass here is simply
+// reported as Failed (requirement 9) — nothing further is attempted
+// automatically until the next trigger fires.
+const BackgroundScheduler = (function () {
+  // ── In-memory scheduler state only. Nothing here is durable on its own —
+  // every fact this module reasons about (dirty tasks, queue contents, sync
+  // metadata) already lives in Phase 1-3's persisted structures; a page
+  // reload simply starts this module's own state clean, exactly as
+  // BACKGROUND_SYNC.md §5 "Page refresh" already anticipates. ───────────────
+  let _status = 'idle'; // idle | waiting | scheduled | synchronizing | paused | completed | failed
+  let _running = false;
+  let _lastResult = null;
+  let _lastSyncAt = null;
+  let _lastTrigger = null;
+  let _cancelRequested = false;
+  let _intervalTimerId = null;
+  let _initialized = false;
+
+  // Fallback trigger only, not the primary mechanism (requirement 3;
+  // BACKGROUND_SYNC.md §3 "Periodic synchronization... the fallback
+  // trigger, not the primary one").
+  const SCHEDULED_SYNC_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+
+  // ── Gating (requirement 6) ───────────────────────────────────────────────
+  // Each check below reuses an existing status getter — no new
+  // authentication, workspace, or connectivity logic is introduced here.
+  function isSyncEnabled() {
+    return !!(typeof masters !== 'undefined' && masters && masters.flags && masters.flags.backgroundSyncEnabled !== false);
+  }
+  function isAuthenticatedNow() {
+    return (typeof GoogleAuthManager !== 'undefined') && !!GoogleAuthManager.getStatus().authenticated;
+  }
+  function isWorkspaceReadyNow() {
+    return (typeof GoogleDriveWorkspace !== 'undefined') && !!GoogleDriveWorkspace.getWorkspaceStatus().ready;
+  }
+  function isNetworkAvailable() {
+    return (typeof navigator === 'undefined') || navigator.onLine !== false;
+  }
+
+  // gatingBlockReason(): the single reason AUTOMATIC synchronization should
+  // be skipped right now, or null if none apply (requirement 6). Manual
+  // Sync never consults this — it is the explicit release valve
+  // BACKGROUND_SYNC.md §1/§2 describes, and is gated separately below.
+  function gatingBlockReason() {
+    if (!isSyncEnabled())       return 'sync-disabled';
+    if (!isNetworkAvailable())  return 'network-unavailable';
+    if (!isAuthenticatedNow())  return 'not-authenticated';
+    if (!isWorkspaceReadyNow()) return 'workspace-unavailable';
+    return null;
+  }
+
+  // ── Core pass (requirements 1, 2, 7) ─────────────────────────────────────
+  // Always: ask the existing planning engine for a plan, then, only if the
+  // plan says there is work, hand execution to the existing upload/download
+  // pipelines. No comparison logic and no upload/merge logic is duplicated
+  // anywhere in this function.
+  function runSynchronizationPass(trigger) {
+    _running = true;
+    _cancelRequested = false;
+    _status = 'synchronizing';
+    _lastTrigger = trigger;
+
+    if (typeof LocalSyncManager === 'undefined') {
+      _running = false;
+      _status = 'failed';
+      _lastResult = { ok: false, reason: 'sync-manager-unavailable', trigger };
+      return Promise.resolve(_lastResult);
+    }
+
+    // Requirement 2: always call the existing planning engine — never
+    // compare local and remote tasks directly in this module.
+    return LocalSyncManager.buildSyncPlan().then(planResult => {
+      if (_cancelRequested) {
+        _running = false;
+        _status = 'idle';
+        _lastResult = { ok: false, reason: 'cancelled', trigger };
+        return _lastResult;
+      }
+      if (!planResult || !planResult.ok) {
+        // Planning itself failed — every reason (not-authenticated /
+        // no-remote-file / corrupt-json / checksum-mismatch /
+        // workspace-not-ready / error) is already distinguished by the
+        // planning engine (Phase 12). Nothing has been uploaded or
+        // downloaded; local data is untouched (requirement 9).
+        _running = false;
+        _status = 'failed';
+        _lastResult = Object.assign({ ok: false, trigger }, planResult || { reason: 'unknown-error' });
+        return _lastResult;
+      }
+
+      const stats = planResult.statistics || {};
+      const needsUpload   = (stats.uploadsRequired > 0)   || (stats.createRemote > 0);
+      const needsDownload = (stats.downloadsRequired > 0) || (stats.createLocal > 0);
+
+      if (!needsUpload && !needsDownload) {
+        // Nothing for the existing pipelines to do — the cheapest possible
+        // wake-up: a plan was built, but neither upload nor download is
+        // invoked (BACKGROUND_SYNC.md §10 CPU usage).
+        _running = false;
+        _lastSyncAt = new Date().toISOString();
+        _status = 'completed';
+        _lastResult = { ok: true, trigger, plan: planResult, uploaded: null, merged: null, noop: true };
+        return _lastResult;
+      }
+
+      // Upload local changes before pulling remote ones — same ordering
+      // already implied by this file's own card layout (Batch Task Upload
+      // precedes Batch Cloud Merge). Reuses each pipeline exactly as its
+      // own manual button already calls it (requirement 7) — nothing here
+      // reimplements either.
+      const uploadStep = needsUpload ? LocalSyncManager.processUploadQueue() : Promise.resolve(null);
+
+      return uploadStep.then(uploadResult => {
+        if (_cancelRequested) {
+          _running = false;
+          _status = 'idle';
+          _lastResult = { ok: false, reason: 'cancelled', trigger, uploaded: uploadResult };
+          return _lastResult;
+        }
+        const downloadStep = needsDownload ? LocalSyncManager.processBatchMerge() : Promise.resolve(null);
+
+        return downloadStep.then(mergeResult => {
+          _running = false;
+          const uploadOk = !uploadResult || uploadResult.ok !== false;
+          const mergeOk = !mergeResult || mergeResult.ok !== false;
+          _lastSyncAt = new Date().toISOString();
+          _status = (uploadOk && mergeOk) ? 'completed' : 'failed';
+          _lastResult = { ok: uploadOk && mergeOk, trigger, plan: planResult, uploaded: uploadResult, merged: mergeResult };
+          return _lastResult;
+        });
+      });
+    }).catch(err => {
+      // Unexpected exception anywhere in the pass (requirement 9) — fails
+      // safely. Nothing here writes to `tasks`/`masters` directly, so no
+      // local data can be corrupted by a failure at this level.
+      _running = false;
+      _status = 'failed';
+      _lastResult = { ok: false, reason: 'error', error: (err && err.message) || String(err), trigger };
+      return _lastResult;
+    });
+  }
+
+  // ── scheduleSync(): the single gate every trigger passes through
+  // (requirement 4, 6). Ignores a trigger outright when a pass is already
+  // running, and skips automatic triggers when gating blocks apply. ───────
+  function scheduleSync(trigger, opts) {
+    const manual = !!(opts && opts.manual);
+    if (_running) {
+      // Overlap prevention (requirement 4) — additional triggers are
+      // ignored, not queued, until the in-flight pass completes.
+      return Promise.resolve({ ok: false, reason: 'already-running', trigger });
+    }
+    if (!manual) {
+      const blockReason = gatingBlockReason();
+      if (blockReason) {
+        _status = (blockReason === 'sync-disabled') ? 'paused' : 'waiting';
+        return Promise.resolve({ ok: false, reason: blockReason, trigger });
+      }
+    } else if (!isAuthenticatedNow() || !isWorkspaceReadyNow()) {
+      // Manual Sync bypasses the automatic-only gating above (it's the
+      // explicit release valve), but still can't function without a
+      // connected workspace — reports the same reason codes every other
+      // manual card in this file already surfaces, rather than pretending
+      // to succeed.
+      _status = 'failed';
+      _lastResult = { ok: false, reason: !isAuthenticatedNow() ? 'not-authenticated' : 'workspace-unavailable', trigger };
+      return Promise.resolve(_lastResult);
+    }
+    _status = 'scheduled';
+    return runSynchronizationPass(trigger);
+  }
+
+  // startSynchronization(): the Manual Sync entry point (requirement 3) —
+  // bypasses automatic gating exactly as BACKGROUND_SYNC.md §1/§2 describes,
+  // but never bypasses the overlap guard in scheduleSync() above.
+  function startSynchronization(trigger) {
+    return scheduleSync(trigger || 'manual', { manual: true });
+  }
+
+  // cancelSynchronization(): best-effort only. The reused pipelines
+  // (BatchTaskUpload/BatchCloudMerge) don't expose a way to abort an
+  // in-flight network call, so a pass already talking to the Cloud Adapter
+  // finishes on its own; this flips a flag so its result is reported as
+  // cancelled rather than acted on further, and prevents anything queued
+  // but not yet started from beginning.
+  function cancelSynchronization() {
+    _cancelRequested = true;
+    if (!_running) _status = 'idle';
+    return getSchedulerStatus();
+  }
+
+  function isSynchronizationRunning() {
+    return _running;
+  }
+
+  // getSchedulerStatus(): read-only status (requirement 8), matching every
+  // other sync module's status getter in this file. Always a fresh object.
+  function getSchedulerStatus() {
+    return {
+      status: _status,
+      running: _running,
+      enabled: isSyncEnabled(),
+      blockReason: gatingBlockReason(),
+      lastTrigger: _lastTrigger,
+      lastSyncAt: _lastSyncAt,
+      lastResult: _lastResult ? Object.assign({}, _lastResult) : null
+    };
+  }
+
+  // ── Trigger wiring (requirement 3) ───────────────────────────────────────
+  // Reuses the browser's own lifecycle events directly — the only new
+  // recurring work introduced is the single Scheduled Interval fallback
+  // timer below; every other trigger costs nothing until it actually fires.
+  // Thin re-render glue only, mirroring every manual sync button's own
+  // existing "re-render if the sync tab happens to be open" pattern
+  // elsewhere in this file (e.g. batchUploadClick(), batchMergeClick()) —
+  // no new status display mechanism is invented for trigger-driven passes.
+  function refreshSyncTabIfOpen() {
+    if (typeof activeMastersTab !== 'undefined' && activeMastersTab === 'sync' &&
+        typeof renderMastersContent === 'function') {
+      renderMastersContent();
+    }
+  }
+
+  function initializeScheduler() {
+    if (_initialized) return getSchedulerStatus(); // idempotent — safe to call more than once
+    _initialized = true;
+
+    // Browser regains focus.
+    window.addEventListener('focus', () => scheduleSync('focus').then(refreshSyncTabIfOpen));
+
+    // Browser tab becomes visible.
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') scheduleSync('visibility').then(refreshSyncTabIfOpen);
+    });
+
+    // Network becomes available — short-circuits anything that was only
+    // waiting on connectivity (BACKGROUND_SYNC.md §2, §4).
+    window.addEventListener('online', () => scheduleSync('network-restored').then(refreshSyncTabIfOpen));
+
+    // Scheduled interval — the fallback trigger, not the primary one.
+    _intervalTimerId = setInterval(() => scheduleSync('interval').then(refreshSyncTabIfOpen), SCHEDULED_SYNC_INTERVAL_MS);
+
+    // Application startup — called last so every listener above is already
+    // registered before the first pass could possibly resolve.
+    scheduleSync('startup').then(refreshSyncTabIfOpen);
+
+    return getSchedulerStatus();
+  }
+
+  return {
+    initializeScheduler,
+    scheduleSync,
+    startSynchronization,
+    cancelSynchronization,
+    isSynchronizationRunning,
+    getSchedulerStatus
+  };
+})();
+// ── End Background Synchronization Scheduler (Phase 13) ──────────────────────────
+
 // ── Persistence ───────────────────────────────────────────────────────────────
 function saveState() {
   try {
@@ -4661,8 +5664,9 @@ function loadState() {
       masters = { ...masters, ...parsed };
       if (!masters.weekendDays) masters.weekendDays = [...DEFAULT_WEEKEND_DAYS];
       if (!masters.workHours) masters.workHours = { startH: DEFAULT_WORK_START_H, startM: DEFAULT_WORK_START_M, endH: DEFAULT_WORK_END_H, endM: DEFAULT_WORK_END_M };
-      if (!masters.flags) masters.flags = { sleepAutoPause: true };
+      if (!masters.flags) masters.flags = { sleepAutoPause: true, backgroundSyncEnabled: true };
       if (masters.flags.sleepAutoPause === undefined) masters.flags.sleepAutoPause = true;
+      if (masters.flags.backgroundSyncEnabled === undefined) masters.flags.backgroundSyncEnabled = true;
       if (!masters.logColumns || !Array.isArray(masters.logColumns) || masters.logColumns.length === 0) {
         masters.logColumns = DEFAULT_LOG_COLUMNS.map(c => ({ ...c }));
         masters.migratedDescRemarkTextarea = true; // fresh config already matches the defaults
@@ -8023,19 +9027,81 @@ function renderMastersContent() {
     }
     const batchMergeResultLabel = describeBatchMergeResult(batchMergeSummary.lastRun);
 
+    // Phase 13: Background Synchronization Scheduler card state — reflects
+    // BackgroundScheduler's own status/last-run summary. Computed the same
+    // read-only way as every other card above; never mutates anything.
+    const schedulerStatus = (typeof BackgroundScheduler !== 'undefined')
+      ? BackgroundScheduler.getSchedulerStatus()
+      : { status: 'idle', running: false, enabled: true, blockReason: null, lastTrigger: null, lastSyncAt: null, lastResult: null };
+    const SCHEDULER_STATUS_LABELS = {
+      idle: 'Idle',
+      waiting: 'Waiting',
+      scheduled: 'Scheduled',
+      synchronizing: 'Synchronizing…',
+      paused: 'Paused',
+      completed: 'Completed',
+      failed: 'Failed'
+    };
+    const schedulerStatusLabel = SCHEDULER_STATUS_LABELS[schedulerStatus.status] || 'Idle';
+    const SCHEDULER_BLOCK_REASON_LABELS = {
+      'sync-disabled': 'Synchronization is turned off.',
+      'network-unavailable': 'Waiting for network connection.',
+      'not-authenticated': 'Not signed in to Google Drive.',
+      'workspace-unavailable': 'Waiting for Drive workspace to be ready.'
+    };
+    const schedulerLastSyncLabel = schedulerStatus.lastSyncAt
+      ? new Date(schedulerStatus.lastSyncAt).toLocaleString()
+      : 'Never';
+    // Reuses MERGE_REASON_LABELS (Phase 10) for any reason code the plan
+    // itself surfaced (not-authenticated / no-remote-file / corrupt-json /
+    // etc.) rather than inventing a second label map for the same codes.
+    function describeSchedulerResult(result) {
+      if (!result) return 'Never Run';
+      if (!result.ok) {
+        const label = SCHEDULER_BLOCK_REASON_LABELS[result.reason] || MERGE_REASON_LABELS[result.reason] || result.reason || 'failed';
+        return '✗ ' + label + (result.error ? (': ' + result.error) : '');
+      }
+      if (result.noop) return '✓ Already up to date (' + (result.trigger || 'trigger unknown') + ')';
+      const parts = [];
+      if (result.uploaded && typeof result.uploaded.completed === 'number') parts.push(result.uploaded.completed + ' uploaded');
+      if (result.merged && typeof result.merged.tasksDownloaded === 'number') parts.push(result.merged.tasksDownloaded + ' downloaded');
+      return '✓ Synchronized' + (parts.length ? (' — ' + parts.join(', ')) : '') + (result.trigger ? (' (' + result.trigger + ')') : '');
+    }
+    const schedulerResultLabel = describeSchedulerResult(schedulerStatus.lastResult);
+    const schedulerBlockHintHtml = (!schedulerStatus.running && schedulerStatus.blockReason && schedulerStatus.blockReason !== 'sync-disabled')
+      ? `<div style="font-size:11px;color:var(--text-tertiary);margin-top:8px">${esc(SCHEDULER_BLOCK_REASON_LABELS[schedulerStatus.blockReason] || schedulerStatus.blockReason)}</div>`
+      : '';
+    const manualSyncDisabledAttr = (!workspaceStatus.ready || schedulerStatus.running) ? 'disabled' : '';
+    const manualSyncButtonLabel = schedulerStatus.running ? 'Synchronizing…' : 'Synchronize Now';
+    // Pending counts come from the most recent plan the scheduler itself
+    // already built (Phase 12) — never recomputed here.
+    const schedulerPlanStats = (schedulerStatus.lastResult && schedulerStatus.lastResult.plan && schedulerStatus.lastResult.plan.statistics)
+      ? schedulerStatus.lastResult.plan.statistics : null;
+    const pendingUploadsLabel = schedulerPlanStats ? String(schedulerPlanStats.uploadsRequired + schedulerPlanStats.createRemote) : 'Not Available';
+    const pendingDownloadsLabel = schedulerPlanStats ? String(schedulerPlanStats.downloadsRequired + schedulerPlanStats.createLocal) : 'Not Available';
+
+    // Phase 14: Conflict Detection card state — read-only, from
+    // getConflictStatistics() (Phase 14) only. Never recomputed here, and
+    // this tab never offers a way to resolve a conflict (requirement 8 —
+    // display only, no Resolve buttons; resolution is a future phase).
+    const conflictStats = (typeof getConflictStatistics === 'function') ? getConflictStatistics() : null;
+    const pendingConflictsLabel = conflictStats ? String(conflictStats.pendingConflicts) : 'Not Available';
+    const conflictDetectedLabel = conflictStats ? (conflictStats.pendingConflicts > 0 ? 'Yes' : 'No') : 'Not Available';
+
     content.innerHTML = `
       <div style="font-size:12px;color:var(--text-secondary);margin-bottom:16px">
         Synchronize your tasks and log history to Google Drive so they're available across devices.
         Sign in below to connect your account — synchronization itself is not yet available.
       </div>
 
-      <!-- Future: this checkbox will eventually kick off actual sync behavior
-           once the Local Sync Engine's push/pull pipeline exists (see
-           LOCAL_SYNC_ENGINE.md). It remains a disabled placeholder with no
-           handler attached — Phase 5 is authentication only. -->
+      <!-- Phase 13: now wired to masters.flags.backgroundSyncEnabled — this
+           is the exact hook this placeholder was left for (see the Phase
+           0.5A comment this replaces). Toggling it only changes whether
+           BackgroundScheduler's AUTOMATIC triggers run (requirement 6);
+           Manual Sync below always remains available regardless. -->
       <div style="border:1px solid var(--border-md);border-radius:var(--radius-md);padding:14px;margin-bottom:14px">
         <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-secondary)">
-          <input type="checkbox" id="sync-enable-toggle" disabled style="width:14px;height:14px" />
+          <input type="checkbox" id="sync-enable-toggle" ${schedulerStatus.enabled ? 'checked' : ''} onchange="toggleBackgroundSync(this.checked)" style="width:14px;height:14px" />
           Enable Synchronization
         </label>
       </div>
@@ -8070,17 +9136,19 @@ function renderMastersContent() {
           </div>
           <div class="complete-field">
             <label class="complete-label">Last Synchronization</label>
-            <input class="complete-input" value="Never" disabled style="width:100%" />
+            <input class="complete-input" value="${esc(schedulerLastSyncLabel)}" disabled style="width:100%" />
           </div>
         </div>
         <div style="margin-top:10px">
           <label class="complete-label">Synchronization Status</label>
-          <input class="complete-input" value="Disabled" disabled style="width:100%" />
+          <input class="complete-input" value="${esc(schedulerStatusLabel)}" disabled style="width:100%" />
         </div>
+        <div style="font-size:11px;color:var(--text-secondary);margin-top:8px">${esc(schedulerResultLabel)}</div>
+        ${schedulerBlockHintHtml}
         ${authErrorHtml}
         <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
           ${connectionButtonHtml}
-          <button class="btn btn-primary" disabled><i class="ti ti-refresh"></i> Synchronize Now</button>
+          <button class="btn btn-primary" id="manual-sync-btn" onclick="manualSyncClick()" ${manualSyncDisabledAttr}><i class="ti ti-refresh"></i> ${esc(manualSyncButtonLabel)}</button>
         </div>
       </div>
 
@@ -8275,43 +9343,61 @@ function renderMastersContent() {
         </div>
       </div>
 
-      <!-- Future: queue statistics — will surface counts from TTLSync.Runtime
-           once BackgroundSync and the upload/download queues exist
-           (see BACKGROUND_SYNC.md §Queue Statistics). Reserved space only. -->
+      <!-- Phase 13: counts now reflect the most recent plan BackgroundScheduler
+           itself built via the existing planning engine (Phase 12) — never
+           recomputed here (see BACKGROUND_SYNC.md §Queue Statistics). -->
       <div style="border:1px solid var(--border-md);border-radius:var(--radius-md);padding:14px;margin-bottom:14px">
         <div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:10px"><i class="ti ti-list-details" style="vertical-align:-2px;margin-right:5px;color:var(--text-tertiary)"></i>Queue</div>
         <div style="display:flex;gap:12px;flex-wrap:wrap">
           <div style="background:var(--bg-secondary);border:1px solid var(--border-md);border-radius:var(--radius-md);padding:10px 16px;flex:1;min-width:120px">
             <div style="font-size:11px;color:var(--text-tertiary)">Pending Uploads</div>
-            <div style="font-size:14px;font-weight:600;color:var(--text-primary)">Not Available</div>
+            <div style="font-size:14px;font-weight:600;color:var(--text-primary)">${esc(pendingUploadsLabel)}</div>
           </div>
           <div style="background:var(--bg-secondary);border:1px solid var(--border-md);border-radius:var(--radius-md);padding:10px 16px;flex:1;min-width:120px">
             <div style="font-size:11px;color:var(--text-tertiary)">Pending Downloads</div>
-            <div style="font-size:14px;font-weight:600;color:var(--text-primary)">Not Available</div>
+            <div style="font-size:14px;font-weight:600;color:var(--text-primary)">${esc(pendingDownloadsLabel)}</div>
           </div>
         </div>
       </div>
 
-      <!-- Future: conflict reporting — will list unresolved conflicts once
-           ConflictResolver exists (see CONFLICT_RESOLUTION.md). Reserved space only. -->
+      <!-- Phase 14: Conflict Detection card — display only, per requirement 8
+           ("Display only: Conflict Detected, Pending Conflicts. Do not
+           provide any Resolve buttons."). Values come from
+           getConflictStatistics() (Phase 14) only, never recomputed here.
+           Resolving a conflict is explicitly out of scope for this phase —
+           see CONFLICT_RESOLUTION.md for the (not-yet-built) resolution UI. -->
+      <div style="border:1px solid var(--border-md);border-radius:var(--radius-md);padding:14px;margin-bottom:14px">
+        <div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:10px"><i class="ti ti-alert-triangle" style="vertical-align:-2px;margin-right:5px;color:var(--text-tertiary)"></i>Conflicts</div>
+        <div style="font-size:11px;color:var(--text-tertiary);margin-bottom:10px">
+          Detected automatically whenever a synchronization plan is built. Nothing is resolved automatically — this is a read-only record.
+        </div>
+        <div style="display:flex;gap:12px;flex-wrap:wrap">
+          <div style="background:var(--bg-secondary);border:1px solid var(--border-md);border-radius:var(--radius-md);padding:10px 16px;flex:1;min-width:120px">
+            <div style="font-size:11px;color:var(--text-tertiary)">Conflict Detected</div>
+            <div style="font-size:14px;font-weight:600;color:var(--text-primary)">${esc(conflictDetectedLabel)}</div>
+          </div>
+          <div style="background:var(--bg-secondary);border:1px solid var(--border-md);border-radius:var(--radius-md);padding:10px 16px;flex:1;min-width:120px">
+            <div style="font-size:11px;color:var(--text-tertiary)">Pending Conflicts</div>
+            <div style="font-size:14px;font-weight:600;color:var(--text-primary)">${esc(pendingConflictsLabel)}</div>
+          </div>
+        </div>
+      </div>
+
       <!-- Future: retry queue diagnostics — will list failed operations awaiting
            retry once the retry/backoff logic exists (see BACKGROUND_SYNC.md §Retry). -->
-      <!-- Future: background sync diagnostics — will show scheduler state once
-           background sync scheduling exists (see BACKGROUND_SYNC.md). -->
+      <!-- Phase 14: Conflicts now reflects real ConflictDetection state (see
+           card above). Retry Queue remains "Not Available" — no retry
+           engine exists yet; explicitly out of scope for this phase. -->
       <div style="border:1px solid var(--border-md);border-radius:var(--radius-md);padding:14px">
         <div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:10px"><i class="ti ti-bug" style="vertical-align:-2px;margin-right:5px;color:var(--text-tertiary)"></i>Diagnostics</div>
         <div style="display:flex;gap:12px;flex-wrap:wrap">
-          <div style="background:var(--bg-secondary);border:1px solid var(--border-md);border-radius:var(--radius-md);padding:10px 16px;flex:1;min-width:120px">
-            <div style="font-size:11px;color:var(--text-tertiary)">Conflicts</div>
-            <div style="font-size:14px;font-weight:600;color:var(--text-primary)">Not Available</div>
-          </div>
           <div style="background:var(--bg-secondary);border:1px solid var(--border-md);border-radius:var(--radius-md);padding:10px 16px;flex:1;min-width:120px">
             <div style="font-size:11px;color:var(--text-tertiary)">Retry Queue</div>
             <div style="font-size:14px;font-weight:600;color:var(--text-primary)">Not Available</div>
           </div>
           <div style="background:var(--bg-secondary);border:1px solid var(--border-md);border-radius:var(--radius-md);padding:10px 16px;flex:1;min-width:120px">
             <div style="font-size:11px;color:var(--text-tertiary)">Background Sync</div>
-            <div style="font-size:14px;font-weight:600;color:var(--text-primary)">Not Available</div>
+            <div style="font-size:14px;font-weight:600;color:var(--text-primary)">${esc(schedulerStatusLabel)}</div>
           </div>
         </div>
       </div>
@@ -8422,6 +9508,36 @@ function mergeSelectedTaskClick() {
 function batchMergeClick() {
   if (activeMastersTab === 'sync') renderMastersContent();
   BatchCloudMerge.mergeTaskCollection().then(() => {
+    if (activeMastersTab === 'sync') renderMastersContent();
+  });
+}
+
+// ── Phase 13: Background Synchronization Scheduler click handlers ───────────
+// Thin UI glue only — all real scheduling/coordination logic lives in
+// BackgroundScheduler above. Neither function performs comparison, upload,
+// or download logic itself.
+//
+// Toggling this only changes whether BackgroundScheduler's AUTOMATIC
+// triggers (startup, focus, visibility, network, interval) run going
+// forward (requirement 6) — it never touches business data, and Manual
+// Sync below always stays available regardless of this setting.
+function toggleBackgroundSync(enabled) {
+  if (!masters.flags) masters.flags = {};
+  masters.flags.backgroundSyncEnabled = !!enabled;
+  saveState();
+  if (activeMastersTab === 'sync') renderMastersContent();
+}
+
+// The Manual Sync release valve (requirement 3) — bypasses automatic
+// gating exactly as BackgroundScheduler.startSynchronization() already
+// implements, and is blocked only by the overlap guard (a pass already
+// running) or an unready workspace, same as every other manual card here.
+// Re-renders immediately on click (so the button disables and shows
+// "Synchronizing…" right away) and again once the pass settles, mirroring
+// batchMergeClick()/batchUploadClick()'s existing pattern.
+function manualSyncClick() {
+  if (activeMastersTab === 'sync') renderMastersContent();
+  BackgroundScheduler.startSynchronization('manual').then(() => {
     if (activeMastersTab === 'sync') renderMastersContent();
   });
 }
@@ -10559,6 +11675,21 @@ function initializeSyncInfrastructure() {
   // "Upload This Task" button (uploadSingleTaskClick()).
   window.TTLSync.Modules.SingleTaskUpload = SingleTaskUpload;
 
+  // Phase 13: register the Background Synchronization Scheduler, and, only
+  // through the reserved Extensions.BackgroundScheduler slots already
+  // reserved by Phase 4 (Local Sync Manager) and Phase 12 (Incremental
+  // Synchronization Engine), make it discoverable — the same registration
+  // pattern Phase 5's AuthManager already established just above. Nothing
+  // here starts a synchronization pass yet; that happens only once the
+  // Drive workspace attempt below has resolved (see initializeScheduler()
+  // call further down), so Startup synchronization never blocks the
+  // initial local load/render this function's caller already completed.
+  window.TTLSync.Modules.BackgroundScheduler = BackgroundScheduler;
+  LocalSyncManager.Extensions.BackgroundScheduler = BackgroundScheduler;
+  if (typeof IncrementalSyncEngine !== 'undefined') {
+    IncrementalSyncEngine.Extensions.BackgroundScheduler = BackgroundScheduler;
+  }
+
   // Phase 5: attempt a silent, non-interactive reconnect if a previous
   // session was connected. Never interactive, never blocking — see
   // attemptSilentReconnectOnLoad()'s own documentation. Refreshes the
@@ -10573,6 +11704,15 @@ function initializeSyncInfrastructure() {
       ? GoogleDriveWorkspace.initializeWorkspace()
       : null;
   }).then(() => {
+    // Phase 13: start the scheduler (registers its focus/visibility/online/
+    // interval listeners and fires the Startup trigger) only after the
+    // workspace attempt above has settled either way — whether or not
+    // authentication/workspace actually succeeded, BackgroundScheduler's
+    // own gating (requirement 6) already handles a not-yet-ready workspace
+    // by skipping automatic synchronization until it is.
+    if (typeof BackgroundScheduler !== 'undefined') {
+      BackgroundScheduler.initializeScheduler();
+    }
     if (typeof activeMastersTab !== 'undefined' && activeMastersTab === 'sync' &&
         typeof renderMastersContent === 'function') {
       renderMastersContent();
