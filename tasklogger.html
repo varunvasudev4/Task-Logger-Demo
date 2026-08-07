@@ -2521,6 +2521,22 @@ const LocalSyncManager = (function () {
     return getManagerStatus();
   }
 
+  // ── Phase 9: Batch Task Upload exposure (requirement 7) ─────────────────────
+  // Thin delegations only — all real batch-upload logic lives in
+  // BatchTaskUpload, below. Coordinates rather than duplicates, exactly like
+  // every other function in this module.
+  function processUploadQueue() {
+    return (typeof BatchTaskUpload !== 'undefined')
+      ? BatchTaskUpload.processUploadQueue()
+      : Promise.resolve({ ok: false, reason: 'batch-upload-unavailable' });
+  }
+
+  function getUploadProgress() {
+    return (typeof BatchTaskUpload !== 'undefined')
+      ? BatchTaskUpload.getUploadProgress()
+      : { status: 'idle', queued: 0, counts: { pending: 0, uploading: 0, completed: 0, failed: 0 }, items: [], lastRun: null };
+  }
+
   return {
     initialize,
     shutdown,
@@ -2529,6 +2545,9 @@ const LocalSyncManager = (function () {
     prepareQueue,
     getManagerStatus,
     validateSynchronizationState,
+    // Phase 9: Batch Task Upload — see functions defined just above.
+    processUploadQueue,
+    getUploadProgress,
     // ── Reserved extension points (requirement 8) ──────────────────────────────
     // Placeholders only. Nothing here is implemented, referenced, or called by
     // this phase — reserved so a future phase can attach a real implementation
@@ -3435,14 +3454,16 @@ const GoogleDriveWorkspace = (function () {
     });
   }
 
-  // Manual "test pull" trigger (IMPLEMENTATION_ROADMAP.md Phase 7). Downloads
-  // and validates `Tasks/state.json` — parses it, verifies its checksum — and
-  // reports the result for display only. Deliberately does NOT apply the
-  // downloaded content to the running app's `tasks`/`logEntries`/`masters` in
-  // this phase: this phase establishes the read mechanics only, per its
-  // stated purpose. Wiring a pull's result into the live app state is a Local
-  // Sync Engine responsibility reserved for a later milestone.
-  function pullStateFromStateFile() {
+  // ── Phase 10 prep: shared download+validate primitive ───────────────────
+  // Extracted from pullStateFromStateFile() below with NO behavior change to
+  // that function — it still returns exactly the same summary-only shape it
+  // always has. This exists so Phase 10's Single Task Merge (which needs the
+  // FULL parsed payload to locate one task by Sync ID, not just a summary)
+  // can reuse the exact same Find File → Download File → parse →
+  // Checksum-validate pipeline (GOOGLE_DRIVE_CLIENT.md §7) instead of
+  // duplicating it. Never applies anything to local data itself — purely a
+  // read+validate step, exactly as pullStateFromStateFile always was.
+  function fetchAndValidateStateFile() {
     if (typeof GoogleAuthManager === 'undefined' || !GoogleAuthManager.isAuthenticated()) {
       return Promise.resolve({ ok: false, reason: 'not-authenticated' });
     }
@@ -3450,7 +3471,6 @@ const GoogleDriveWorkspace = (function () {
       return Promise.resolve({ ok: false, reason: 'workspace-not-ready' });
     }
     getOrCreateStateSyncId();
-    _pullStatus = 'pulling';
 
     return findStateFile().then(existing => {
       if (!existing) {
@@ -3463,8 +3483,8 @@ const GoogleDriveWorkspace = (function () {
         try {
           parsed = JSON.parse(text);
         } catch (e) {
-          // Corrupt Download (GOOGLE_DRIVE_CLIENT.md §7, §8): discarded
-          // entirely — never handed to any local write path.
+          // Corrupt Download / Invalid JSON (GOOGLE_DRIVE_CLIENT.md §7, §8):
+          // discarded entirely — never handed to any local write path.
           return { ok: false, reason: 'corrupt-json' };
         }
         if (!parsed || typeof parsed !== 'object' || !parsed._syncMeta) {
@@ -3485,6 +3505,35 @@ const GoogleDriveWorkspace = (function () {
           ok: true,
           fileId: existing.id,
           modifiedTime: existing.modifiedTime,
+          // Full parsed payload (business fields + _syncMeta) — needed by
+          // Phase 10's downloadCurrentState() below. pullStateFromStateFile()
+          // still reduces this to its own existing summary shape itself.
+          parsed: parsed
+        };
+      });
+    });
+  }
+
+  // Manual "test pull" trigger (IMPLEMENTATION_ROADMAP.md Phase 7). Downloads
+  // and validates `Tasks/state.json` — parses it, verifies its checksum — and
+  // reports the result for display only. Deliberately does NOT apply the
+  // downloaded content to the running app's `tasks`/`logEntries`/`masters` in
+  // this phase: this phase establishes the read mechanics only, per its
+  // stated purpose. Wiring a pull's result into the live app state is a Local
+  // Sync Engine responsibility reserved for a later milestone. (Phase 10
+  // note: this function's own behavior and return shape are UNCHANGED by the
+  // fetchAndValidateStateFile() extraction above — it still never applies
+  // anything locally; only Single Task Merge, a distinct opt-in action, does.)
+  function pullStateFromStateFile() {
+    _pullStatus = 'pulling';
+    return fetchAndValidateStateFile()
+      .then(fetchResult => {
+        if (!fetchResult.ok) return fetchResult;
+        const parsed = fetchResult.parsed;
+        return {
+          ok: true,
+          fileId: fetchResult.fileId,
+          modifiedTime: fetchResult.modifiedTime,
           remoteVersion: parsed._syncMeta.version,
           remoteDeviceId: parsed._syncMeta.deviceId,
           remoteModifiedAt: parsed._syncMeta.modifiedAt,
@@ -3492,15 +3541,29 @@ const GoogleDriveWorkspace = (function () {
           logEntryCount: Array.isArray(parsed.logEntries) ? parsed.logEntries.length : null,
           checksumValid: true
         };
+      })
+      .then(result => { _pullStatus = result.ok ? 'idle' : 'error'; _lastPullResult = result; return result; })
+      .catch(err => {
+        _pullStatus = 'error';
+        const result = { ok: false, reason: 'error', error: (err && err.message) || String(err) };
+        _lastPullResult = result;
+        return result;
       });
-    })
-    .then(result => { _pullStatus = result.ok ? 'idle' : 'error'; _lastPullResult = result; return result; })
-    .catch(err => {
-      _pullStatus = 'error';
-      const result = { ok: false, reason: 'error', error: (err && err.message) || String(err) };
-      _lastPullResult = result;
-      return result;
-    });
+  }
+
+  // downloadCurrentState(): Phase 10 Requirement 1/8 — the read entry point
+  // Single Task Merge uses. A thin wrapper around fetchAndValidateStateFile()
+  // that hands back the FULL validated parsed payload instead of
+  // pullStateFromStateFile()'s summary-only shape, since locating one task by
+  // Sync ID needs the actual `tasks` array. Deliberately does NOT touch
+  // `_pullStatus`/`_lastPullResult` — those remain scoped to the existing
+  // Manual Test Sync "Pull" card only, so Phase 10's own progress tracking
+  // (in SingleTaskMerge) never interferes with Phase 7's. Never applies
+  // anything to local data itself — identical read-only posture as
+  // pullStateFromStateFile(); the caller decides what, if anything, to do
+  // with the result.
+  function downloadCurrentState() {
+    return fetchAndValidateStateFile();
   }
 
   // ── Lifecycle ───────────────────────────────────────────────────────────────
@@ -3579,7 +3642,9 @@ const GoogleDriveWorkspace = (function () {
     findStateFile,
     pushStateToStateFile,
     pullStateFromStateFile,
-    getFileSyncStatus
+    getFileSyncStatus,
+    // Phase 10: full-payload download+validate, for Single Task Merge
+    downloadCurrentState
   };
 })();
 // ── End Google Drive Workspace Initialization (Phase 6) / Core Read-Write (Phase 7) ──
@@ -3768,6 +3833,497 @@ const SingleTaskUpload = (function () {
   };
 })();
 // ── End Single Task Upload (Phase 8) ──────────────────────────────────────────────
+
+// ── Batch Task Upload (Phase 9) ─────────────────────────────────────────────────
+// Implements this project's Phase 9 brief — "Batch Task Upload": extend the
+// upload pipeline from Phase 8's single task to every entry currently sitting
+// in the Upload Queue (Phase 3), so multiple pending changes can be uploaded
+// in one pass instead of one at a time.
+//
+// Adaptation actually implemented, and why (same posture as Phase 8's own
+// header comment, and required by IMPLEMENTATION_ROADMAP.md §10 principle
+// 10 — a real conflict with the finalized architecture is flagged and
+// adapted around, never silently redesigned): this module is adapted to the
+// whole-blob storage model GOOGLE_DRIVE_CLIENT.md finalizes. §5/§6 there
+// establish "there is no per-task Drive file... every update is a
+// full-content replace," and §10 Performance Strategy is decisive for THIS
+// phase specifically: "The core payload naturally produces one file write
+// per sync pass rather than many discrete record writes... 'batching' at
+// the Client's level means nothing more than accepting one already-debounced
+// payload," and "Core-state operations are inherently single-file and
+// sequential (one state.json push or pull at a time)."
+//
+// So "batch upload" here means: exactly ONE call to
+// GoogleDriveWorkspace.pushStateToStateFile() per processUploadQueue() pass
+// — that single write already contains every dirty task's current data,
+// since the whole state is always serialized together (buildStatePayload())
+// — followed by independent, per-entry verification and finalization for
+// EVERY Upload Queue entry, walked in the queue's own existing deterministic
+// order (requirement 2; getUploadQueue() from Phase 3 already returns a
+// stable, insertion-ordered copy — nothing here reorders it).
+//
+// This is the literal meaning requirement 1 ("each task uploaded
+// independently... one task failure must never stop remaining uploads") can
+// have without inventing a per-task Drive file the rest of the architecture
+// doesn't share: the one shared network write either succeeds or fails as a
+// single atomic unit (LOCAL_SYNC_ENGINE.md §13 design principle 5,
+// "operations are atomic whenever possible... there is no accepted
+// half-written intermediate state") — if it fails, nothing in this pass can
+// have actually reached Drive, so every queued entry is correctly left
+// exactly as it was, untouched, for the next pass to retry (requirement 4).
+// If it succeeds, each queue entry is THEN verified and completed
+// independently against that one confirmed write (requirement 1/3), reusing
+// Phase 8's own per-task verifyUploadedTask() checksum check — so one task's
+// stale or corrupted in-memory state failing verification never prevents any
+// other task's entry from completing.
+//
+// Duplicate uploads are already prevented the same way Phase 7/8 prevent
+// them (requirement 5): pushStateToStateFile() always performs Find File
+// before Upload/Update File, so a cloud file that already exists is updated,
+// never recreated — this module adds no new file-creation path of its own.
+//
+// This module never downloads, never merges, never retries a failed pass on
+// its own initiative (retry/backoff is a future Retry Engine's job —
+// LOCAL_SYNC_ENGINE.md §6, already reserved as Phase 4's
+// LocalSyncManager.Extensions.RetryEngine slot), and never resolves
+// conflicts — pushStateToStateFile()'s existing Overwrite Policy
+// (GOOGLE_DRIVE_CLIENT.md §5) already refuses to blind-overwrite a remote
+// revision that moved since it was last observed, and this module relies on
+// that exactly as Phase 8 does (requirement 9).
+const BatchTaskUpload = (function () {
+  let _status = 'idle';   // idle | uploading | complete | failed
+  let _lastRun = null;    // summary of the most recent processUploadQueue() call, for UI display only
+  // syncId -> { localId, status } where status is 'pending' | 'uploading' |
+  // 'completed' | 'failed' (requirement 7). Populated at the start of each
+  // processUploadQueue() pass and updated in place as each entry resolves.
+  // Deliberately NOT cleared when an entry completes (and its Upload Queue
+  // entry is removed) — getUploadProgress() needs to keep reporting
+  // "Completed" for entries from the run that just finished, not just the
+  // ones still outstanding.
+  let _progress = {};
+
+  // ── Internal helpers ────────────────────────────────────────────────────
+
+  // Looks up the live task object a given Upload Queue entry refers to, by
+  // Sync ID only — never by array position or local id (SYNC_DATA_MODEL.md
+  // §4 rule 3), matching how Phase 3's queue entries are already keyed.
+  // Returns null for an orphan entry (a queue entry whose task no longer
+  // exists) — the same condition LocalSyncManager.validateQueueIntegrity()
+  // already detects and reports; never auto-repaired here.
+  function findTaskForEntry(entry) {
+    if (!entry || !entry.syncId || !Array.isArray(tasks)) return null;
+    return tasks.find(t => t && t._sync && t._sync.syncId === entry.syncId) || null;
+  }
+
+  function setProgress(entry, status) {
+    if (!entry || !entry.syncId) return;
+    _progress[entry.syncId] = { localId: entry.localId, status: status };
+  }
+
+  // Resets progress to 'pending' for exactly the entries about to be
+  // processed in this pass.
+  function resetProgress(entries) {
+    const next = {};
+    entries.forEach(e => { next[e.syncId] = { localId: e.localId, status: 'pending' }; });
+    _progress = next;
+  }
+
+  // ── Requirement 6 helper functions ──────────────────────────────────────
+
+  // completeUpload(): the success path for ONE queued entry (requirement 3).
+  // Mirrors SingleTaskUpload.markTaskUploaded() exactly, reusing Phase 8's
+  // own metadata-update helper rather than re-deriving it, but scoped to a
+  // single queue entry within a larger batch rather than the sole-dirty-task
+  // case Phase 8 restricts itself to. Updates ONLY this task's
+  // synchronization metadata, clears ONLY its dirty flag, removes ONLY its
+  // Upload Queue entry — every other task/entry is untouched.
+  function completeUpload(task, entry, pushResult) {
+    SingleTaskUpload.updateTaskSyncMetadata(task, pushResult);
+    clearTaskDirty(task);
+    removeQueueEntry(entry.syncId, 'upload');
+    setProgress(entry, 'completed');
+    return { ok: true, syncId: entry.syncId, taskId: task.id };
+  }
+
+  // failUpload(): the failure path for ONE queued entry (requirement 4).
+  // Deliberately touches nothing on the task's synchronization metadata,
+  // nothing on its dirty flag, and nothing on its Upload Queue entry — the
+  // entry is left exactly as it was so the next batch pass picks it up again
+  // automatically. No retry/backoff logic of its own (out of scope —
+  // requirement 9; that belongs to a future Retry Engine).
+  function failUpload(entry, reason, extra) {
+    setProgress(entry, 'failed');
+    return Object.assign({ ok: false, syncId: entry.syncId, reason: reason }, extra || {});
+  }
+
+  // uploadQueuedTask(): processes ONE Upload Queue entry against a push that
+  // has ALREADY completed successfully (pushResult), per this module's
+  // one-write-per-pass adaptation (see header comment). Verifies this
+  // specific task's data actually made it into that write intact (reusing
+  // Phase 8's verifyUploadedTask() — the same checksum-against-live-array
+  // check, no second network round-trip), then completes or fails this
+  // entry alone, never touching any other entry (requirement 1). A missing
+  // task (orphan queue entry) fails safely rather than throwing.
+  function uploadQueuedTask(entry, pushResult) {
+    const task = findTaskForEntry(entry);
+    if (!task) return failUpload(entry, 'task-not-found');
+    setProgress(entry, 'uploading');
+    if (!SingleTaskUpload.verifyUploadedTask(task)) {
+      return failUpload(entry, 'verification-failed', { taskId: task.id });
+    }
+    return completeUpload(task, entry, pushResult);
+  }
+
+  // processUploadQueue(): the single public entry point (requirement 6/8).
+  // Processes every entry currently in the Upload Queue, in the queue's own
+  // existing deterministic order (requirement 2). Performs exactly one push
+  // (this module's documented adaptation, above), then finalizes every entry
+  // independently against that single result (requirement 1/3/4).
+  function processUploadQueue() {
+    if (_status === 'uploading') {
+      // Reentrancy guard: a pass is already in flight. Refusing a second,
+      // overlapping call is what keeps this idempotent (LOCAL_SYNC_ENGINE.md
+      // §13 design principle 4) — nothing about the outstanding queue is
+      // touched by this early return.
+      return Promise.resolve({ ok: false, reason: 'already-uploading' });
+    }
+
+    const entries = getUploadQueue(); // Phase 3 — deterministic, insertion-ordered copy
+    resetProgress(entries);
+
+    if (entries.length === 0) {
+      _status = 'idle';
+      const result = { ok: true, processed: 0, completed: 0, failed: 0, results: [] };
+      _lastRun = result;
+      return Promise.resolve(result);
+    }
+
+    if (typeof GoogleDriveWorkspace === 'undefined') {
+      entries.forEach(e => failUpload(e, 'workspace-unavailable'));
+      _status = 'failed';
+      const result = { ok: false, processed: entries.length, completed: 0, failed: entries.length, reason: 'workspace-unavailable' };
+      _lastRun = result;
+      return Promise.resolve(result);
+    }
+
+    _status = 'uploading';
+    return GoogleDriveWorkspace.pushStateToStateFile().then(pushResult => {
+      if (!pushResult || !pushResult.ok) {
+        // Network-level failure: the shared write never happened, so per
+        // Design Principle 5 (LOCAL_SYNC_ENGINE.md §13) it is treated as if
+        // it never happened for every queued entry — none of them can have
+        // succeeded (requirement 4), and every entry is left untouched to be
+        // retried on a future pass.
+        const reason = (pushResult && pushResult.reason) || 'unknown-error';
+        const extra = (pushResult && pushResult.error) ? { error: pushResult.error } : null;
+        entries.forEach(e => failUpload(e, reason, extra));
+        _status = 'failed';
+        const result = { ok: false, processed: entries.length, completed: 0, failed: entries.length, reason: reason };
+        _lastRun = result;
+        return result;
+      }
+
+      // Push confirmed — finalize every queue entry independently
+      // (requirement 1). completeUpload()'s removeQueueEntry() already
+      // persists the queue on every entry it removes; one saveState() below
+      // covers every task's updated metadata/dirty flag together, matching
+      // the same save-once-after-the-work pattern SingleTaskUpload.
+      // markTaskUploaded() already uses.
+      const results = entries.map(entry => uploadQueuedTask(entry, pushResult));
+      const completed = results.filter(r => r.ok).length;
+      const failed = results.length - completed;
+      if (completed > 0) saveState();
+      _status = failed > 0 ? 'failed' : 'complete';
+      const result = { ok: failed === 0, processed: entries.length, completed: completed, failed: failed, results: results };
+      _lastRun = result;
+      return result;
+    }).catch(err => {
+      const reason = 'error';
+      const errMsg = (err && err.message) || String(err);
+      entries.forEach(e => failUpload(e, reason, { error: errMsg }));
+      _status = 'failed';
+      const result = { ok: false, processed: entries.length, completed: 0, failed: entries.length, reason: reason, error: errMsg };
+      _lastRun = result;
+      return result;
+    });
+  }
+
+  // getUploadProgress(): read-only progress/status report (requirement 7).
+  // Always a fresh object — never a live reference — matching every other
+  // status getter already in this file (getFileSyncStatus(),
+  // getSingleUploadStatus(), getManagerStatus()). Reports Pending /
+  // Uploading / Completed / Failed per entry: merges the most recent run's
+  // recorded outcomes (which still include entries already removed from the
+  // queue after completing) with whatever is currently in the Upload Queue
+  // (any entry not yet touched by a run reports as 'pending').
+  function getUploadProgress() {
+    const currentEntries = getUploadQueue();
+    const merged = {};
+    Object.keys(_progress).forEach(syncId => {
+      merged[syncId] = { syncId: syncId, localId: _progress[syncId].localId, status: _progress[syncId].status };
+    });
+    currentEntries.forEach(e => {
+      if (!merged[e.syncId]) merged[e.syncId] = { syncId: e.syncId, localId: e.localId, status: 'pending' };
+    });
+    const items = Object.keys(merged).map(k => merged[k]);
+    const counts = { pending: 0, uploading: 0, completed: 0, failed: 0 };
+    items.forEach(i => { if (counts[i.status] !== undefined) counts[i.status]++; });
+    return {
+      status: _status,
+      queued: currentEntries.length,
+      counts: counts,
+      items: items,
+      lastRun: _lastRun ? Object.assign({}, _lastRun) : null
+    };
+  }
+
+  return {
+    processUploadQueue,
+    uploadQueuedTask,
+    completeUpload,
+    failUpload,
+    getUploadProgress
+  };
+})();
+// ── End Batch Task Upload (Phase 9) ─────────────────────────────────────────────
+
+// ── Single Task Merge From Cloud (Phase 10) ─────────────────────────────────────
+// Implements this project's Phase 10 brief — "Single Task Merge From Cloud":
+// download the existing Tasks/state.json (reusing Phase 7's
+// GoogleDriveWorkspace read path via its new downloadCurrentState() — no new
+// storage format, no per-task cloud file), locate ONE requested task by its
+// synchronization identity (Sync ID, never by title/display text), and —
+// only if the remote copy is newer than the local copy per the existing
+// Version/Modified At model (SYNC_DATA_MODEL.md §3/§5) — replace the local
+// task's business fields with the remote ones. If the local copy is newer
+// (or tied), nothing is touched; the situation is simply reported. No
+// conflict resolution, no batch download, no background sync, no retry
+// logic — same manual-trigger-only, single-entity posture as Phase 8's
+// Single Task Upload, mirrored here for the download direction.
+//
+// Local ID note: a task's `id` field is a LOCAL, device-scoped identifier
+// that this device's own Log Entries reference directly
+// (`logEntries[].taskId === task.id`, see continueTomorrow()/
+// openCompleteModal()/editLogEntry()/etc.). SYNC_DATA_MODEL.md §3 explicitly
+// describes Local ID as "assigned once at local creation" and distinct from
+// Sync ID, which is the only identifier safe to carry across devices. A
+// merge therefore NEVER overwrites the local task's `id` — only its other
+// business fields — so this device's own Log Entry references are never
+// silently orphaned by pulling in another device's copy of the same task.
+//
+// This module never downloads more than one state.json per call, never
+// merges more than one task, never touches any other task, never uploads,
+// never retries on its own initiative, and never resolves a conflict —
+// "remote is newer" vs. "local is newer" is a plain Version/Modified-At
+// comparison, not conflict detection (no divergence-from-a-common-ancestor
+// reasoning is performed, per IMPLEMENTATION_ROADMAP.md §10's explicit
+// exclusion of Conflict Resolution from this phase).
+const SingleTaskMerge = (function () {
+  let _status = 'idle';    // idle | downloading | merging | complete | failed
+  let _lastResult = null;  // last mergeSingleTask() result, for UI display only
+
+  // downloadCurrentState(): Requirement 1 — reuses the existing Google Drive
+  // client. Delegates entirely to GoogleDriveWorkspace.downloadCurrentState(),
+  // which itself reuses Phase 7's findStateFile()/downloadStateFileContent()/
+  // computeStatePayloadChecksum() — no new Drive call shape, no new storage
+  // format is introduced here.
+  function downloadCurrentState() {
+    if (typeof GoogleAuthManager === 'undefined' || !GoogleAuthManager.isAuthenticated()) {
+      return Promise.resolve({ ok: false, reason: 'not-authenticated' });
+    }
+    if (typeof GoogleDriveWorkspace === 'undefined') {
+      return Promise.resolve({ ok: false, reason: 'workspace-unavailable' });
+    }
+    return GoogleDriveWorkspace.downloadCurrentState();
+  }
+
+  // findRemoteTask(): Requirement 2 — locates the requested task using ONLY
+  // its synchronization identity (Sync ID). Never searches by title, heading,
+  // or any other display text.
+  function findRemoteTask(parsedState, syncId) {
+    if (!parsedState || !Array.isArray(parsedState.tasks) || !syncId) return null;
+    return parsedState.tasks.find(t => t && t._sync && t._sync.syncId === syncId) || null;
+  }
+
+  // validateRemoteTask(): Requirement 10 (Malformed task) — confirms the
+  // located remote task actually has the synchronization metadata shape
+  // required to reason about it, and that its business content matches its
+  // own Checksum (SYNC_DATA_MODEL.md §3) before it is trusted at all. Reuses
+  // the exact same deterministic checksum computation every other sync
+  // helper in this file already uses (computeTaskChecksum) — no new
+  // validation model is invented.
+  function validateRemoteTask(remoteTask) {
+    if (!remoteTask || typeof remoteTask !== 'object') return false;
+    const s = remoteTask._sync;
+    if (!s || typeof s !== 'object') return false;
+    if (!s.syncId) return false;
+    if (typeof s.version !== 'number' || s.version < 1) return false;
+    if (typeof s.schemaVersion !== 'number') return false;
+    if (typeof s.checksum !== 'string' && typeof s.checksum !== 'number') return false;
+    return computeTaskChecksum(remoteTask) === s.checksum;
+  }
+
+  // isRemoteNewer(): Requirement 4/5 — compares local vs. remote
+  // synchronization metadata using ONLY the existing Version/Modified At
+  // model (SYNC_DATA_MODEL.md §3: Version is "the primary signal for has
+  // this changed... cheaper to compare than content"; Modified At is "what
+  // the Conflict Resolver actually reasons about" as a secondary signal).
+  // Version is the primary comparison; Modified At is a tie-break only, for
+  // the case where two independently-incremented per-device counters land
+  // on the same number. No new versioning system is introduced.
+  function isRemoteNewer(localTask, remoteTask) {
+    const lv = (localTask._sync && typeof localTask._sync.version === 'number') ? localTask._sync.version : 0;
+    const rv = (remoteTask._sync && typeof remoteTask._sync.version === 'number') ? remoteTask._sync.version : 0;
+    if (rv !== lv) return rv > lv;
+    const lm = (localTask._sync && localTask._sync.modifiedAt) || 0;
+    const rm = (remoteTask._sync && remoteTask._sync.modifiedAt) || 0;
+    return rm > lm;
+  }
+
+  // mergeRemoteTask(): Requirement 5/7 — the actual merge. Replaces every
+  // business-data field on the local task with the remote task's, EXCEPT the
+  // local `id` (see module header comment above — never touched, so this
+  // device's existing Log Entries stay correctly attached). Then adopts the
+  // remote's synchronization metadata (Version, Created At, Modified At,
+  // Device ID, Deleted Flag, Schema Version) onto the local task's `_sync`
+  // block, while Local ID/Cloud ID/Last Sync/Sync Status/Dirty remain this
+  // device's own bookkeeping — SYNC_DATA_MODEL.md §3 defines Local ID and
+  // Last Sync as device-scoped fields that a remote payload never supplies.
+  function mergeRemoteTask(localTask, remoteTask) {
+    const localId = localTask.id;
+    Object.keys(remoteTask).forEach(k => {
+      if (k === '_sync' || k === 'id') return;
+      localTask[k] = remoteTask[k];
+    });
+    localTask.id = localId;
+
+    ensureSyncMetadata(localTask);
+    const s = localTask._sync;
+    const rs = remoteTask._sync;
+    s.version = rs.version;
+    if (typeof rs.createdAt === 'number') s.createdAt = rs.createdAt;
+    s.modifiedAt = (typeof rs.modifiedAt === 'number') ? rs.modifiedAt : Date.now();
+    if (rs.deviceId) s.deviceId = rs.deviceId;
+    s.deleted = !!rs.deleted;
+    if (typeof rs.schemaVersion === 'number') s.schemaVersion = rs.schemaVersion;
+    s.checksum = computeTaskChecksum(localTask);
+    s.contentHash = computeTaskContentHash(localTask);
+    return localTask;
+  }
+
+  // completeTaskMerge(): Requirement 7 — coordinates the effects a
+  // successful merge must produce for this ONE task only: business fields +
+  // metadata merged (above), Last Sync stamped, Sync Status set to
+  // 'synced', Dirty cleared (local now matches the just-merged remote
+  // content, so nothing is pending to push), and any stale Upload Queue
+  // entry for this task removed ("Queue status", Requirement 7) — mirroring
+  // markTaskUploaded()'s existing effect-coordination pattern from Phase 8,
+  // for the download direction instead of upload. Persists through the
+  // existing saveState() path exactly like every other confirmed task
+  // mutation already does; the caller (mergeSingleTask) re-renders the UI.
+  function completeTaskMerge(localTask, remoteTask) {
+    mergeRemoteTask(localTask, remoteTask);
+    const s = localTask._sync;
+    s.lastSync = Date.now();
+    s.syncStatus = 'synced';
+    s.dirty = false;
+    removeQueueEntry(s.syncId, 'upload');
+    saveState();
+    return localTask;
+  }
+
+  // mergeSingleTask(): the single public entry point (mirrors Phase 8's
+  // uploadSingleTask()). Requirement 3: a task that does not exist remotely
+  // returns a standardized error and never touches local data. Requirement
+  // 6: a local task that is newer (or tied) is left completely unchanged —
+  // only the situation is reported, with no conflict handling of any kind.
+  function mergeSingleTask(localTask) {
+    if (!localTask) {
+      const result = { ok: false, reason: 'no-task-selected' };
+      _status = 'idle'; _lastResult = result;
+      return Promise.resolve(result);
+    }
+    ensureSyncMetadata(localTask);
+    const syncId = localTask._sync.syncId;
+    const taskId = localTask.id;
+
+    _status = 'downloading';
+    return downloadCurrentState().then(downloadResult => {
+      if (!downloadResult || !downloadResult.ok) {
+        // Requirement 3/10: no local data is touched on any failure path —
+        // downloadCurrentState()/fetchAndValidateStateFile() are read-only,
+        // and nothing below this point has run yet.
+        _status = 'failed';
+        const result = Object.assign({ ok: false, taskId: taskId, syncId: syncId }, downloadResult || { reason: 'unknown-error' });
+        _lastResult = result;
+        return result;
+      }
+
+      _status = 'merging';
+      const remoteTask = findRemoteTask(downloadResult.parsed, syncId);
+      if (!remoteTask) {
+        // Requirement 3: task does not exist remotely — standardized error,
+        // local data left completely unchanged.
+        _status = 'failed';
+        const result = { ok: false, taskId: taskId, syncId: syncId, reason: 'task-not-found-remotely' };
+        _lastResult = result;
+        return result;
+      }
+      if (!validateRemoteTask(remoteTask)) {
+        // Requirement 10 (Malformed task) — discarded before ever touching
+        // local data, exactly like a Corrupt Download.
+        _status = 'failed';
+        const result = { ok: false, taskId: taskId, syncId: syncId, reason: 'malformed-remote-task' };
+        _lastResult = result;
+        return result;
+      }
+      if (!isRemoteNewer(localTask, remoteTask)) {
+        // Requirement 6: local task is newer (or tied) — leave it unchanged,
+        // simply report the fact. No conflict handling of any kind.
+        _status = 'complete';
+        const result = {
+          ok: true, merged: false, taskId: taskId, syncId: syncId,
+          reason: 'local-newer',
+          localVersion: localTask._sync.version, remoteVersion: remoteTask._sync.version
+        };
+        _lastResult = result;
+        return result;
+      }
+
+      completeTaskMerge(localTask, remoteTask);
+      _status = 'complete';
+      const result = {
+        ok: true, merged: true, taskId: taskId, syncId: syncId,
+        remoteVersion: remoteTask._sync.version
+      };
+      _lastResult = result;
+      return result;
+    }).catch(err => {
+      _status = 'failed';
+      const result = { ok: false, taskId: taskId, syncId: syncId, reason: 'error', error: (err && err.message) || String(err) };
+      _lastResult = result;
+      return result;
+    });
+  }
+
+  // Read-only status for the Synchronization settings tab. Always a fresh
+  // object — never a live reference to this module's internal state.
+  function getMergeStatus() {
+    return { status: _status, lastResult: _lastResult ? Object.assign({}, _lastResult) : null };
+  }
+
+  return {
+    downloadCurrentState,
+    findRemoteTask,
+    validateRemoteTask,
+    isRemoteNewer,
+    mergeRemoteTask,
+    completeTaskMerge,
+    mergeSingleTask,
+    getMergeStatus
+  };
+})();
+// ── End Single Task Merge From Cloud (Phase 10) ───────────────────────────────
 
 // ── Persistence ───────────────────────────────────────────────────────────────
 function saveState() {
@@ -7092,6 +7648,75 @@ function renderMastersContent() {
       : (singleUploadStatus.status === 'complete' ? 'Upload Complete'
       : (singleUploadStatus.status === 'failed' ? 'Upload Failed' : 'Idle'));
 
+    // Phase 9: Batch Task Upload card state — reflects BatchTaskUpload's
+    // per-entry progress and last-run summary. Computed the same read-only
+    // way as singleUploadStatus above; never mutates anything.
+    const batchUploadProgress = (typeof BatchTaskUpload !== 'undefined')
+      ? BatchTaskUpload.getUploadProgress()
+      : { status: 'idle', queued: 0, counts: { pending: 0, uploading: 0, completed: 0, failed: 0 }, items: [], lastRun: null };
+    const batchUploadBusy = batchUploadProgress.status === 'uploading';
+    const batchUploadDisabledAttr = (!workspaceStatus.ready || testSyncBusy || singleUploadBusy || batchUploadBusy || batchUploadProgress.queued === 0) ? 'disabled' : '';
+    const batchUploadStatusLabel = batchUploadBusy ? 'Uploading…'
+      : (batchUploadProgress.status === 'complete' ? 'Batch Complete'
+      : (batchUploadProgress.status === 'failed' ? 'Batch Had Failures' : 'Idle'));
+    const batchUploadQueueLabel = batchUploadProgress.queued === 0
+      ? 'Nothing pending'
+      : (batchUploadProgress.queued + ' task' + (batchUploadProgress.queued === 1 ? '' : 's') + ' pending upload');
+    function describeBatchUploadResult(run) {
+      if (!run) return 'Never Run';
+      if (run.processed === 0) return 'Nothing to upload';
+      let label = run.completed + ' of ' + run.processed + ' uploaded';
+      if (run.failed > 0) label += ', ' + run.failed + ' failed';
+      if (run.reason) label += ' (' + run.reason + (run.error ? ': ' + run.error : '') + ')';
+      return (run.ok ? '✓ ' : (run.completed > 0 ? '⚠ ' : '✗ ')) + label;
+    }
+    const batchUploadResultLabel = describeBatchUploadResult(batchUploadProgress.lastRun);
+
+    // Phase 10: Single Task Merge From Cloud card state — reflects
+    // SingleTaskMerge's own status/last-result. Computed the same read-only
+    // way as singleUploadStatus/batchUploadProgress above; never mutates
+    // anything. Unlike Phase 8's Single Task Upload (which auto-selects the
+    // sole dirty task), Phase 10 needs a manual task selection — this is a
+    // download into an arbitrary chosen task, not gated by dirty state.
+    const mergeStatusObj = (typeof SingleTaskMerge !== 'undefined')
+      ? SingleTaskMerge.getMergeStatus()
+      : { status: 'idle', lastResult: null };
+    const mergeBusy = mergeStatusObj.status === 'downloading' || mergeStatusObj.status === 'merging';
+    const MERGE_STATUS_LABELS = {
+      downloading: 'Downloading…',
+      merging: 'Merging…',
+      complete: 'Completed',
+      failed: 'Failed'
+    };
+    const mergeStatusLabel = MERGE_STATUS_LABELS[mergeStatusObj.status] || 'Idle';
+    const MERGE_REASON_LABELS = {
+      'not-authenticated': 'Not signed in to Google Drive.',
+      'workspace-not-ready': 'Workspace not ready.',
+      'workspace-unavailable': 'Workspace unavailable.',
+      'no-remote-file': 'No state.json found on Drive yet.',
+      'corrupt-json': 'Remote state.json could not be parsed (invalid JSON).',
+      'invalid-shape': 'Remote state.json is missing sync metadata.',
+      'checksum-mismatch': 'Remote state.json failed checksum validation.',
+      'task-not-found-remotely': 'This task does not exist in the remote state.',
+      'malformed-remote-task': 'The remote copy of this task is malformed.',
+      'no-task-selected': 'No task selected.'
+    };
+    function describeMergeResult(result) {
+      if (!result) return 'Never Run';
+      if (result.ok && result.merged) {
+        return '✓ Merged task #' + result.taskId + ' — now at remote v' + result.remoteVersion;
+      }
+      if (result.ok && !result.merged) {
+        return 'ℹ Local copy is already current (local v' + result.localVersion + ' vs remote v' + result.remoteVersion + ') — nothing changed';
+      }
+      return '✗ ' + (MERGE_REASON_LABELS[result.reason] || result.reason || 'failed') + (result.error ? (': ' + result.error) : '');
+    }
+    const mergeResultLabel = describeMergeResult(mergeStatusObj.lastResult);
+    const mergeTaskOptionsHtml = tasks.length === 0
+      ? '<option value="">No tasks available</option>'
+      : tasks.map(t => '<option value="' + t.id + '">#' + t.id + ' — ' + esc(t.heading || t.description || 'Untitled task') + '</option>').join('');
+    const mergeControlsDisabledAttr = (!workspaceStatus.ready || testSyncBusy || singleUploadBusy || batchUploadBusy || mergeBusy || tasks.length === 0) ? 'disabled' : '';
+
     content.innerHTML = `
       <div style="font-size:12px;color:var(--text-secondary);margin-bottom:16px">
         Synchronize your tasks and log history to Google Drive so they're available across devices.
@@ -7247,6 +7872,76 @@ function renderMastersContent() {
         </div>
       </div>
 
+      <!-- Phase 9: Batch Task Upload card. Processes every entry currently in
+           the Upload Queue in one pass (requirement 1/2), adapted to the same
+           whole-blob storage model Phase 8 already adapts to: one push per
+           pass, then independent per-task verification/finalization — see
+           the BatchTaskUpload module header comment above for the full
+           adaptation rationale. Still no download, no conflict handling, no
+           retry-on-failure of its own — same manual-trigger-only posture as
+           Phases 7/8. -->
+      <div style="border:1px solid var(--border-md);border-radius:var(--radius-md);padding:14px;margin-bottom:14px">
+        <div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:4px"><i class="ti ti-cloud-upload" style="vertical-align:-2px;margin-right:5px;color:var(--blue-mid)"></i>Batch Task Upload</div>
+        <div style="font-size:11px;color:var(--text-tertiary);margin-bottom:10px">
+          Uploads every pending task change to <code>Tasks/state.json</code> in one pass. A failure on one task's verification never stops the others from completing.
+        </div>
+        <div class="complete-row">
+          <div class="complete-field" style="flex:1 1 100%">
+            <label class="complete-label">Upload Queue</label>
+            <input class="complete-input" value="${esc(batchUploadQueueLabel)}" disabled style="width:100%" />
+          </div>
+        </div>
+        <div class="complete-row" style="margin-top:10px">
+          <div class="complete-field">
+            <label class="complete-label">Status</label>
+            <input class="complete-input" value="${esc(batchUploadStatusLabel)}" disabled style="width:100%" />
+          </div>
+          <div class="complete-field">
+            <label class="complete-label">Last Result</label>
+            <input class="complete-input" value="${esc(batchUploadResultLabel)}" disabled style="width:100%" />
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+          <button class="btn btn-primary" id="batch-task-upload-btn" onclick="batchUploadClick()" ${batchUploadDisabledAttr}><i class="ti ti-cloud-upload"></i> Upload All Pending Tasks</button>
+        </div>
+      </div>
+
+      <!-- Phase 10: Single Task Merge From Cloud card. Downloads
+           Tasks/state.json and refreshes ONE selected task from the cloud
+           copy — but only when the cloud copy is newer than this device's
+           copy, per the existing Version/Modified At model. Local copy
+           newer (or tied): nothing changes, the card just reports that.
+           Still no batch download, no background sync, no conflict
+           handling — same manual-trigger-only, single-entity posture as
+           Phase 8/9's upload cards, mirrored for the download direction. -->
+      <div style="border:1px solid var(--border-md);border-radius:var(--radius-md);padding:14px;margin-bottom:14px">
+        <div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:4px"><i class="ti ti-cloud-download" style="vertical-align:-2px;margin-right:5px;color:var(--blue-mid)"></i>Single Task Merge From Cloud</div>
+        <div style="font-size:11px;color:var(--text-tertiary);margin-bottom:10px">
+          Downloads <code>Tasks/state.json</code> and refreshes ONE selected task from the cloud copy. Only replaces this device's copy when the cloud copy is newer.
+        </div>
+        <div class="complete-row">
+          <div class="complete-field" style="flex:1 1 100%">
+            <label class="complete-label">Task to Refresh</label>
+            <select class="complete-input" id="merge-task-select" style="width:100%" ${mergeControlsDisabledAttr}>
+              ${mergeTaskOptionsHtml}
+            </select>
+          </div>
+        </div>
+        <div class="complete-row" style="margin-top:10px">
+          <div class="complete-field">
+            <label class="complete-label">Status</label>
+            <input class="complete-input" value="${esc(mergeStatusLabel)}" disabled style="width:100%" />
+          </div>
+          <div class="complete-field">
+            <label class="complete-label">Last Result</label>
+            <input class="complete-input" value="${esc(mergeResultLabel)}" disabled style="width:100%" />
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+          <button class="btn btn-primary" id="single-task-merge-btn" onclick="mergeSelectedTaskClick()" ${mergeControlsDisabledAttr}><i class="ti ti-cloud-download"></i> Refresh This Task from Cloud</button>
+        </div>
+      </div>
+
       <!-- Future: queue statistics — will surface counts from TTLSync.Runtime
            once BackgroundSync and the upload/download queues exist
            (see BACKGROUND_SYNC.md §Queue Statistics). Reserved space only. -->
@@ -7351,6 +8046,36 @@ function testSyncPull() {
 function uploadSingleTaskClick() {
   if (activeMastersTab === 'sync') renderMastersContent();
   SingleTaskUpload.uploadSingleTask().then(() => {
+    if (activeMastersTab === 'sync') renderMastersContent();
+  });
+}
+
+// ── Phase 9: Batch Task Upload click handler ────────────────────────────────
+// Thin UI glue only — all real batch-upload logic lives in BatchTaskUpload
+// above. Re-renders immediately on click (so the button disables and shows
+// "Uploading…" right away) and again once the pass settles, exactly
+// mirroring uploadSingleTaskClick()/testSyncPush()'s existing pattern.
+function batchUploadClick() {
+  if (activeMastersTab === 'sync') renderMastersContent();
+  BatchTaskUpload.processUploadQueue().then(() => {
+    if (activeMastersTab === 'sync') renderMastersContent();
+  });
+}
+
+// ── Phase 10: Single Task Merge From Cloud click handler ────────────────────────
+// Thin UI glue only — all real download/merge logic lives in SingleTaskMerge
+// above. Reads the user's task selection from the <select>, resolves it
+// against the live `tasks` array (never by title — by the same task object
+// identity every other card here already uses), and re-renders immediately
+// on click (so the button disables and shows "Downloading…" right away) and
+// again once the merge settles, mirroring uploadSingleTaskClick()/
+// batchUploadClick()'s existing pattern.
+function mergeSelectedTaskClick() {
+  const sel = document.getElementById('merge-task-select');
+  const taskId = sel ? parseInt(sel.value, 10) : NaN;
+  const task = tasks.find(t => t.id === taskId) || null;
+  if (activeMastersTab === 'sync') renderMastersContent();
+  SingleTaskMerge.mergeSingleTask(task).then(() => {
     if (activeMastersTab === 'sync') renderMastersContent();
   });
 }
