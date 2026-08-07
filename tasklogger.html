@@ -2910,6 +2910,16 @@ const GOOGLE_WORKSPACE_SUBFOLDERS  = ['Tasks', 'Settings', 'Attachments', 'Backu
 const GOOGLE_DRIVE_FILES_ENDPOINT  = 'https://www.googleapis.com/drive/v3/files';
 const GOOGLE_DRIVE_FOLDER_MIME     = 'application/vnd.google-apps.folder';
 
+// ── Phase 7 additions: Core Read/Write for Tasks/state.json ────────────────
+// Manual-trigger only (IMPLEMENTATION_ROADMAP.md Phase 7). Nothing below
+// wires into any automatic schedule, queue, or retry mechanism — those are
+// reserved for later phases (Sync Manager, Local Sync Engine). No component
+// outside this module ever calls these directly except the two thin UI glue
+// functions (testSyncPush / testSyncPull) added near connectGoogleDrive().
+const GOOGLE_DRIVE_UPLOAD_ENDPOINT   = 'https://www.googleapis.com/upload/drive/v3/files';
+const GOOGLE_DRIVE_STATE_FILE_NAME   = 'state.json';
+const STATE_SYNC_META_STORAGE_KEY    = 'ttl_sync_state_meta';
+
 const GoogleDriveWorkspace = (function () {
   // ── In-memory workspace state ───────────────────────────────────────────────
   let _status        = 'not_initialized'; // not_initialized | initializing | ready | error
@@ -2917,6 +2927,23 @@ const GoogleDriveWorkspace = (function () {
   let _rootFolderId   = null;
   let _subfolderIds   = {}; // { Tasks: id, Settings: id, Attachments: id, Backups: id }
   let _initPromise    = null; // dedupes concurrent initializeWorkspace() calls
+
+  // ── Phase 7: in-memory state for Tasks/state.json read/write ────────────────
+  // _stateFileId / _stateFileRevision are the Client's own bookkeeping only —
+  // never part of the app's core data model (GOOGLE_DRIVE_API.md §12 principle 2).
+  // _stateFileRevision holds the last modifiedTime this device has actually
+  // observed on the remote file; every push re-checks it immediately before
+  // writing so a remote change that happened since is never blindly overwritten
+  // (GOOGLE_DRIVE_CLIENT.md §5 Overwrite Policy).
+  let _stateFileId       = null;
+  let _stateFileRevision = null;
+  let _stateSyncId       = null; // stable app-generated Sync ID for the state.json object (GOOGLE_DRIVE_API.md §7)
+  let _lastPushedVersion = 0;    // monotonically increasing Version counter (GOOGLE_DRIVE_API.md §7)
+  let _stateCreatedAt    = null; // first-push timestamp; never changes once set
+  let _pushStatus        = 'idle'; // idle | pushing | error
+  let _pullStatus        = 'idle'; // idle | pulling | error
+  let _lastPushResult    = null;   // last pushStateToStateFile() result, for UI display only
+  let _lastPullResult    = null;   // last pullStateFromStateFile() result, for UI display only
 
   // ── Minimal persisted workspace metadata (never a token, never app data) ───
   function loadPersisted() {
@@ -2953,6 +2980,51 @@ const GoogleDriveWorkspace = (function () {
     return false;
   }
 
+  // ── Phase 7: state.json bookkeeping persistence ─────────────────────────────
+  // Persists only Client-internal bookkeeping (Sync ID, last pushed Version,
+  // created timestamp, cached Drive file id/revision) — never application data
+  // and never an OAuth token (GOOGLE_DRIVE_API.md §10; GOOGLE_DRIVE_CLIENT.md §11).
+  function loadStateSyncMeta() {
+    try {
+      const raw = localStorage.getItem(STATE_SYNC_META_STORAGE_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      return (parsed && typeof parsed === 'object') ? parsed : null;
+    } catch (e) { return null; }
+  }
+
+  function saveStateSyncMeta() {
+    try {
+      localStorage.setItem(STATE_SYNC_META_STORAGE_KEY, JSON.stringify({
+        syncId: _stateSyncId,
+        lastPushedVersion: _lastPushedVersion,
+        createdAt: _stateCreatedAt,
+        stateFileId: _stateFileId,
+        stateFileRevision: _stateFileRevision
+      }));
+    } catch (e) {}
+  }
+
+  // Lazily restores (or creates, on first-ever use) the stable Sync ID for the
+  // state.json object, along with whatever bookkeeping this device last saw.
+  // Called at the top of both pushStateToStateFile() and
+  // pullStateFromStateFile() so either can run first without the other having
+  // run yet.
+  function getOrCreateStateSyncId() {
+    if (_stateSyncId) return _stateSyncId;
+    const meta = loadStateSyncMeta();
+    if (meta && meta.syncId) {
+      _stateSyncId       = meta.syncId;
+      _lastPushedVersion = meta.lastPushedVersion || 0;
+      _stateCreatedAt     = meta.createdAt || null;
+      _stateFileId        = meta.stateFileId || null;
+      _stateFileRevision  = meta.stateFileRevision || null;
+    } else {
+      _stateSyncId = generateSyncId();
+    }
+    return _stateSyncId;
+  }
+
   // ── Low-level Drive REST helper ─────────────────────────────────────────────
   // Requirement 1: verifies authentication (via GoogleAuthManager) before any
   // Drive operation is attempted. Never manages the token itself — only reads
@@ -2980,6 +3052,36 @@ const GoogleDriveWorkspace = (function () {
         });
       }
       return res.status === 204 ? null : res.json();
+    });
+  }
+
+  // Phase 7: identical auth/error handling to driveFetch(), but returns raw
+  // text instead of parsing JSON — required for Download File (`alt=media`),
+  // since the response body there is the file's own content (state.json's
+  // JSON text), not a Drive API response envelope.
+  function driveFetchText(url, options) {
+    const token = (typeof GoogleAuthManager !== 'undefined' && GoogleAuthManager.getAccessTokenForClient)
+      ? GoogleAuthManager.getAccessTokenForClient()
+      : null;
+    if (!token) {
+      const err = new Error('Not authenticated.');
+      err.authFailure = true;
+      return Promise.reject(err);
+    }
+    options = options || {};
+    options.headers = Object.assign({ Authorization: 'Bearer ' + token }, options.headers || {});
+    return fetch(url, options).then(res => {
+      if (res.status === 401 || res.status === 403) {
+        const err = new Error('Google Drive authentication failed (' + res.status + ').');
+        err.authFailure = true;
+        throw err;
+      }
+      if (!res.ok) {
+        return res.text().then(text => {
+          throw new Error('Google Drive request failed (' + res.status + '): ' + (text || res.statusText));
+        });
+      }
+      return res.text();
     });
   }
 
@@ -3023,6 +3125,60 @@ const GoogleDriveWorkspace = (function () {
       }
       return files[0];
     });
+  }
+
+  // Phase 7: locates a specific known FILE (as opposed to findFolder()'s
+  // folder-only lookup) by its fixed, well-known name within a given parent
+  // folder — the operation-level equivalent of GOOGLE_DRIVE_CLIENT.md's Find
+  // File / GOOGLE_DRIVE_API.md §6's Search File. Returns metadata only
+  // (id, modifiedTime, size) without downloading content. Distinguishes
+  // "not found" (resolves null) from "lookup failed" (rejects) exactly like
+  // findFolder(), so a lookup failure is never mistaken for "safe to create."
+  function findFileByName(name, parentId) {
+    const q = [
+      "mimeType!='" + GOOGLE_DRIVE_FOLDER_MIME + "'",
+      "trashed=false",
+      "name='" + escapeForQuery(name) + "'",
+      "'" + parentId + "' in parents"
+    ].join(' and ');
+    const url = GOOGLE_DRIVE_FILES_ENDPOINT
+      + '?spaces=appDataFolder'
+      + '&fields=' + encodeURIComponent('files(id,name,modifiedTime,size)')
+      + '&q=' + encodeURIComponent(q);
+    return driveFetch(url).then(data => {
+      const files = (data && data.files) || [];
+      if (files.length === 0) return null;
+      if (files.length > 1) {
+        // Duplicate File (GOOGLE_DRIVE_API.md §8): should not normally happen
+        // given a fixed, well-known name, but could arise from a race between
+        // two devices' first-ever push. The most recently modified is treated
+        // as authoritative; the other is left untouched rather than silently
+        // deleted — same posture as findFolder()'s duplicate handling. No
+        // Conflict Resolver exists yet to route this to, so it is only logged.
+        files.sort((a, b) => new Date(b.modifiedTime) - new Date(a.modifiedTime));
+        console.warn('[GoogleDriveWorkspace] Duplicate file "' + name + '" found under parent ' + parentId + '; using the most recently modified.');
+      }
+      return files[0];
+    });
+  }
+
+  // Phase 7: builds a multipart/related request body (Drive's required format
+  // for creating a file with both metadata and content in one request). Only
+  // used by Upload File — Update File uses a simpler media-only PATCH since
+  // the file's metadata (name, parent) never changes on update.
+  function buildMultipartBody(metadata, content) {
+    const boundary = 'ttl-sync-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+    const delimiter = '\r\n--' + boundary + '\r\n';
+    const closeDelimiter = '\r\n--' + boundary + '--';
+    const body =
+      delimiter +
+      'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
+      JSON.stringify(metadata) +
+      delimiter +
+      'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
+      content +
+      closeDelimiter;
+    return { body: body, boundary: boundary };
   }
 
   // Creates a single named folder under a given parent. Idempotent: always
@@ -3069,6 +3225,282 @@ const GoogleDriveWorkspace = (function () {
           });
       })
       .catch(err => ({ valid: false, reason: 'lookup-failed', error: (err && err.message) || String(err) }));
+  }
+
+  // ── Phase 7: Tasks/state.json file operations ───────────────────────────────
+  // Everything below this point implements Find File / Read File / Write File /
+  // Get Metadata for `Tasks/state.json` ONLY (GOOGLE_DRIVE_API.md §1, §7;
+  // GOOGLE_DRIVE_CLIENT.md §3 Upload/Download/Update File). No other file is
+  // ever touched. Nothing here is called automatically — the only entry points
+  // are pushStateToStateFile() and pullStateFromStateFile(), both invoked
+  // exclusively from the two manual "Test Sync" buttons in the Synchronization
+  // settings tab.
+
+  // Locates `state.json` within `Tasks/`. Rejects if the Tasks folder id isn't
+  // known yet (workspace not initialized) rather than silently treating that
+  // as "file not found."
+  function findStateFile() {
+    if (!_subfolderIds.Tasks) {
+      return Promise.reject(new Error('Workspace not initialized: Tasks folder unknown.'));
+    }
+    return findFileByName(GOOGLE_DRIVE_STATE_FILE_NAME, _subfolderIds.Tasks);
+  }
+
+  // Metadata-only equivalent of findStateFile(), named separately to match
+  // GOOGLE_DRIVE_CLIENT.md's "Get Metadata" operation name — used after an
+  // upload/update to confirm the write actually completed (Verification After
+  // Upload, GOOGLE_DRIVE_CLIENT.md §6) without re-reading the file's content.
+  function getStateFileMetadata() {
+    return findStateFile();
+  }
+
+  // Checksum (GOOGLE_DRIVE_API.md §7): a content hash of the business-data
+  // fields only, computed the same deterministic way as the existing per-task
+  // checksum (simpleHash over stableStringify) so a no-op re-save can never
+  // spuriously look like a content change.
+  function computeStatePayloadChecksum(businessFields) {
+    return simpleHash(stableStringify(businessFields));
+  }
+
+  // Assembles the Tasks/state.json payload: the same business-data shape
+  // exportBackup() already produces (GOOGLE_DRIVE_API.md §5 "matching the
+  // existing exportBackup() shape"), plus a `_syncMeta` envelope carrying the
+  // Synchronization Metadata fields GOOGLE_DRIVE_API.md §7 requires for the
+  // payload as a whole (Sync ID, Version, Checksum, Device ID, Created,
+  // Modified). Never includes sync-specific preferences (connected provider,
+  // auto-sync toggle) — those belong in Settings/preferences.json, out of
+  // scope for this phase.
+  function buildStatePayload() {
+    getOrCreateStateSyncId();
+    const business = {
+      tasks: tasks,
+      logEntries: logEntries,
+      masters: masters,
+      taskIdCounter: taskIdCounter,
+      importIdCounter: importIdCounter,
+      recurringPlans: recurringPlans,
+      recurringPlanIdCounter: recurringPlanIdCounter,
+      userName: userName
+    };
+    const nowIso = new Date().toISOString();
+    const meta = {
+      syncId: _stateSyncId,
+      schemaVersion: SYNC_SCHEMA_VERSION,
+      version: (_lastPushedVersion || 0) + 1,
+      checksum: computeStatePayloadChecksum(business),
+      deviceId: getDeviceId(),
+      createdAt: _stateCreatedAt || nowIso,
+      modifiedAt: nowIso
+    };
+    return Object.assign({ _syncMeta: meta }, business);
+  }
+
+  // Upload File (GOOGLE_DRIVE_CLIENT.md §3): creates `state.json` where none
+  // exists yet. Multipart request so metadata (name, parent) and content are
+  // written together — Drive has no separate "create empty file, then write
+  // content" step that could leave a half-written file visible in between.
+  function uploadStateFile(contentString) {
+    if (!_subfolderIds.Tasks) {
+      return Promise.reject(new Error('Workspace not initialized: Tasks folder unknown.'));
+    }
+    const multipart = buildMultipartBody(
+      { name: GOOGLE_DRIVE_STATE_FILE_NAME, parents: [_subfolderIds.Tasks] },
+      contentString
+    );
+    const url = GOOGLE_DRIVE_UPLOAD_ENDPOINT
+      + '?uploadType=multipart&fields=' + encodeURIComponent('id,name,modifiedTime,size');
+    return driveFetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'multipart/related; boundary="' + multipart.boundary + '"' },
+      body: multipart.body
+    });
+  }
+
+  // Update File (GOOGLE_DRIVE_CLIENT.md §3): replaces the content of an
+  // existing `state.json` — the only form of "update" Drive's whole-file-
+  // replace model supports. Media-only PATCH (no metadata change needed).
+  // The caller (pushStateToStateFile) is responsible for the fresh revision
+  // check immediately before calling this — this function itself performs no
+  // conflict detection, matching the Client/Sync-Manager division of
+  // responsibility in GOOGLE_DRIVE_CLIENT.md §9.
+  function updateStateFileContent(fileId, contentString) {
+    const url = GOOGLE_DRIVE_UPLOAD_ENDPOINT + '/' + encodeURIComponent(fileId)
+      + '?uploadType=media&fields=' + encodeURIComponent('id,name,modifiedTime,size');
+    return driveFetch(url, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json; charset=UTF-8' },
+      body: contentString
+    });
+  }
+
+  // Download File (GOOGLE_DRIVE_CLIENT.md §3): retrieves the full raw content
+  // of a known `state.json` file. Always a complete, single-shot retrieval —
+  // per Download Strategy (GOOGLE_DRIVE_CLIENT.md §7), an incomplete download
+  // is never resumed, only discarded and retried from scratch by the caller.
+  function downloadStateFileContent(fileId) {
+    const url = GOOGLE_DRIVE_FILES_ENDPOINT + '/' + encodeURIComponent(fileId) + '?alt=media';
+    return driveFetchText(url);
+  }
+
+  // Read-only status for the Synchronization settings tab. Always a fresh
+  // object — never a live reference to this module's internal state.
+  function getFileSyncStatus() {
+    return {
+      stateFileId: _stateFileId,
+      stateFileRevision: _stateFileRevision,
+      pushStatus: _pushStatus,
+      pullStatus: _pullStatus,
+      lastPushResult: _lastPushResult ? Object.assign({}, _lastPushResult) : null,
+      lastPullResult: _lastPullResult ? Object.assign({}, _lastPullResult) : null
+    };
+  }
+
+  // Manual "test push" trigger (IMPLEMENTATION_ROADMAP.md Phase 7 — "callable
+  // only from a manual test sync action, no automatic triggers yet"). Writes
+  // the app's current full state as `Tasks/state.json`, creating it on first
+  // use or replacing it thereafter — idempotent in the sense that repeated
+  // calls update the same file rather than creating duplicates (Find File is
+  // always checked first). Never merges, never touches local `tasks`/
+  // `logEntries`/`masters` — this is an upload-only operation.
+  function pushStateToStateFile() {
+    if (typeof GoogleAuthManager === 'undefined' || !GoogleAuthManager.isAuthenticated()) {
+      return Promise.resolve({ ok: false, reason: 'not-authenticated' });
+    }
+    if (_status !== 'ready') {
+      return Promise.resolve({ ok: false, reason: 'workspace-not-ready' });
+    }
+    getOrCreateStateSyncId();
+    _pushStatus = 'pushing';
+    const payload = buildStatePayload();
+    const contentString = JSON.stringify(payload, null, 2);
+
+    return findStateFile().then(existing => {
+      if (!existing) {
+        // First-ever push from this device/account (GOOGLE_DRIVE_API.md §8
+        // "Missing file… the local state becomes the initial upload").
+        return uploadStateFile(contentString).then(() =>
+          getStateFileMetadata().then(confirmed => {
+            // Verification After Upload (GOOGLE_DRIVE_CLIENT.md §6): an
+            // upload that appears to complete but cannot be re-confirmed via
+            // metadata is treated as failed, never as a success with unknown
+            // state.
+            if (!confirmed) throw new Error('Upload could not be confirmed.');
+            _stateFileId       = confirmed.id;
+            _stateFileRevision = confirmed.modifiedTime;
+            _lastPushedVersion = payload._syncMeta.version;
+            _stateCreatedAt     = payload._syncMeta.createdAt;
+            saveStateSyncMeta();
+            return { ok: true, mode: 'created', fileId: confirmed.id, modifiedTime: confirmed.modifiedTime, version: payload._syncMeta.version };
+          })
+        );
+      }
+
+      // Update File's fresh revision check (GOOGLE_DRIVE_CLIENT.md §5 Version
+      // Updates / Overwrite Policy): if the remote has moved since this device
+      // last observed it, the write is refused rather than blind-overwritten,
+      // and the situation is surfaced as conflict-relevant rather than
+      // silently resolved (GOOGLE_DRIVE_API.md §12 principle 5). No Conflict
+      // Resolver exists yet to route this to (that's a later phase) — this
+      // phase only refuses the write and reports it.
+      if (_stateFileRevision && existing.modifiedTime !== _stateFileRevision) {
+        _pushStatus = 'idle';
+        const result = { ok: false, reason: 'remote-changed', remoteModifiedTime: existing.modifiedTime };
+        _lastPushResult = result;
+        return result;
+      }
+
+      return updateStateFileContent(existing.id, contentString).then(() =>
+        getStateFileMetadata().then(confirmed => {
+          if (!confirmed || confirmed.modifiedTime === existing.modifiedTime) {
+            throw new Error('Update could not be confirmed.');
+          }
+          _stateFileId       = confirmed.id;
+          _stateFileRevision = confirmed.modifiedTime;
+          _lastPushedVersion = payload._syncMeta.version;
+          saveStateSyncMeta();
+          return { ok: true, mode: 'updated', fileId: confirmed.id, modifiedTime: confirmed.modifiedTime, version: payload._syncMeta.version };
+        })
+      );
+    })
+    .then(result => { _pushStatus = result.ok ? 'idle' : 'error'; _lastPushResult = result; return result; })
+    .catch(err => {
+      // Corrupt/Partial Upload (GOOGLE_DRIVE_CLIENT.md §8): any failure here
+      // is treated as if the write never happened — local data is completely
+      // untouched either way, since this function only ever sends data
+      // outward and never writes anything back to `tasks`/`logEntries`.
+      _pushStatus = 'error';
+      const result = { ok: false, reason: 'error', error: (err && err.message) || String(err) };
+      _lastPushResult = result;
+      return result;
+    });
+  }
+
+  // Manual "test pull" trigger (IMPLEMENTATION_ROADMAP.md Phase 7). Downloads
+  // and validates `Tasks/state.json` — parses it, verifies its checksum — and
+  // reports the result for display only. Deliberately does NOT apply the
+  // downloaded content to the running app's `tasks`/`logEntries`/`masters` in
+  // this phase: this phase establishes the read mechanics only, per its
+  // stated purpose. Wiring a pull's result into the live app state is a Local
+  // Sync Engine responsibility reserved for a later milestone.
+  function pullStateFromStateFile() {
+    if (typeof GoogleAuthManager === 'undefined' || !GoogleAuthManager.isAuthenticated()) {
+      return Promise.resolve({ ok: false, reason: 'not-authenticated' });
+    }
+    if (_status !== 'ready') {
+      return Promise.resolve({ ok: false, reason: 'workspace-not-ready' });
+    }
+    getOrCreateStateSyncId();
+    _pullStatus = 'pulling';
+
+    return findStateFile().then(existing => {
+      if (!existing) {
+        // Missing File (GOOGLE_DRIVE_API.md §8): "nothing has been synced
+        // yet" — not an error condition.
+        return { ok: false, reason: 'no-remote-file' };
+      }
+      return downloadStateFileContent(existing.id).then(text => {
+        let parsed;
+        try {
+          parsed = JSON.parse(text);
+        } catch (e) {
+          // Corrupt Download (GOOGLE_DRIVE_CLIENT.md §7, §8): discarded
+          // entirely — never handed to any local write path.
+          return { ok: false, reason: 'corrupt-json' };
+        }
+        if (!parsed || typeof parsed !== 'object' || !parsed._syncMeta) {
+          return { ok: false, reason: 'invalid-shape' };
+        }
+        const business = Object.assign({}, parsed);
+        delete business._syncMeta;
+        const recomputed = computeStatePayloadChecksum(business);
+        if (recomputed !== parsed._syncMeta.checksum) {
+          // Checksum mismatch: treated exactly like Corrupt Download — the
+          // content is untrustworthy and is never applied locally.
+          return { ok: false, reason: 'checksum-mismatch' };
+        }
+        _stateFileId       = existing.id;
+        _stateFileRevision = existing.modifiedTime;
+        saveStateSyncMeta();
+        return {
+          ok: true,
+          fileId: existing.id,
+          modifiedTime: existing.modifiedTime,
+          remoteVersion: parsed._syncMeta.version,
+          remoteDeviceId: parsed._syncMeta.deviceId,
+          remoteModifiedAt: parsed._syncMeta.modifiedAt,
+          taskCount: Array.isArray(parsed.tasks) ? parsed.tasks.length : null,
+          logEntryCount: Array.isArray(parsed.logEntries) ? parsed.logEntries.length : null,
+          checksumValid: true
+        };
+      });
+    })
+    .then(result => { _pullStatus = result.ok ? 'idle' : 'error'; _lastPullResult = result; return result; })
+    .catch(err => {
+      _pullStatus = 'error';
+      const result = { ok: false, reason: 'error', error: (err && err.message) || String(err) };
+      _lastPullResult = result;
+      return result;
+    });
   }
 
   // ── Lifecycle ───────────────────────────────────────────────────────────────
@@ -3142,10 +3574,15 @@ const GoogleDriveWorkspace = (function () {
     findFolder,
     createFolder,
     validateWorkspace,
-    getWorkspaceStatus
+    getWorkspaceStatus,
+    // Phase 7: Tasks/state.json core read/write (manual trigger only)
+    findStateFile,
+    pushStateToStateFile,
+    pullStateFromStateFile,
+    getFileSyncStatus
   };
 })();
-// ── End Google Drive Workspace Initialization (Phase 6) ──────────────────────────
+// ── End Google Drive Workspace Initialization (Phase 6) / Core Read-Write (Phase 7) ──
 
 // ── Persistence ───────────────────────────────────────────────────────────────
 function saveState() {
@@ -6408,6 +6845,32 @@ function renderMastersContent() {
       ? `<div style="font-size:11px;color:var(--red-dark);margin-top:8px">${esc(workspaceStatus.error)}</div>`
       : '';
 
+    // Phase 7: file sync status reflects GoogleDriveWorkspace's
+    // Tasks/state.json read/write state only (manual trigger). Deliberately
+    // does NOT touch the "Synchronization Status" placeholder above — that
+    // still describes automatic/orchestrated sync, which remains out of
+    // scope until the Sync Manager phase.
+    const fileSyncStatus = (typeof GoogleDriveWorkspace !== 'undefined')
+      ? GoogleDriveWorkspace.getFileSyncStatus()
+      : { stateFileId: null, stateFileRevision: null, pushStatus: 'idle', pullStatus: 'idle', lastPushResult: null, lastPullResult: null };
+    const remoteFileLabel = fileSyncStatus.stateFileId
+      ? ('state.json (' + new Date(fileSyncStatus.stateFileRevision).toLocaleString() + ')')
+      : 'Not Found';
+    function describePushPullResult(result) {
+      if (!result) return 'Never Run';
+      if (result.ok) {
+        return '✓ ' + (result.mode ? (result.mode === 'created' ? 'Created' : 'Updated') : 'OK')
+          + (typeof result.version === 'number' ? (' — v' + result.version) : '')
+          + (result.remoteVersion != null ? (' — remote v' + result.remoteVersion + ', ' + result.taskCount + ' tasks') : '')
+          + (result.modifiedTime ? (' at ' + new Date(result.modifiedTime).toLocaleString()) : '');
+      }
+      return '✗ ' + (result.reason || 'failed') + (result.error ? (': ' + result.error) : '');
+    }
+    const lastPushLabel = describePushPullResult(fileSyncStatus.lastPushResult);
+    const lastPullLabel = describePushPullResult(fileSyncStatus.lastPullResult);
+    const testSyncBusy = fileSyncStatus.pushStatus === 'pushing' || fileSyncStatus.pullStatus === 'pulling';
+    const testSyncDisabledAttr = (!workspaceStatus.ready || testSyncBusy) ? 'disabled' : '';
+
     content.innerHTML = `
       <div style="font-size:12px;color:var(--text-secondary);margin-bottom:16px">
         Synchronize your tasks and log history to Google Drive so they're available across devices.
@@ -6495,6 +6958,40 @@ function renderMastersContent() {
         ${workspaceErrorHtml}
       </div>
 
+      <!-- Phase 7: Manual Test Sync card — Core Read/Write for
+           Tasks/state.json, gated entirely behind these two explicit buttons.
+           Push writes the app's current full state to Drive; Pull downloads
+           and validates the remote file WITHOUT applying it locally (that
+           wiring is reserved for a later phase's Local Sync Engine). No
+           automatic trigger of any kind exists for either action. -->
+      <div style="border:1px solid var(--border-md);border-radius:var(--radius-md);padding:14px;margin-bottom:14px">
+        <div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:4px"><i class="ti ti-flask" style="vertical-align:-2px;margin-right:5px;color:var(--blue-mid)"></i>Manual Test Sync</div>
+        <div style="font-size:11px;color:var(--text-tertiary);margin-bottom:10px">
+          Diagnostic only — validates Drive read/write mechanics. Push writes your current data to <code>Tasks/state.json</code>. Pull downloads and checksum-validates the remote file but never changes anything on this device.
+        </div>
+        <div class="complete-row">
+          <div class="complete-field">
+            <label class="complete-label">Remote File</label>
+            <input class="complete-input" value="${esc(remoteFileLabel)}" disabled style="width:100%" />
+          </div>
+        </div>
+        <div class="complete-row" style="margin-top:10px">
+          <div class="complete-field">
+            <label class="complete-label">Last Push</label>
+            <input class="complete-input" value="${esc(lastPushLabel)}" disabled style="width:100%" />
+          </div>
+          <div class="complete-field">
+            <label class="complete-label">Last Pull</label>
+            <input class="complete-input" value="${esc(lastPullLabel)}" disabled style="width:100%" />
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+          <button class="btn" id="test-sync-push-btn" onclick="testSyncPush()" ${testSyncDisabledAttr}><i class="ti ti-cloud-upload"></i> Push to Drive (Test)</button>
+          <button class="btn" id="test-sync-pull-btn" onclick="testSyncPull()" ${testSyncDisabledAttr}><i class="ti ti-cloud-download"></i> Pull from Drive (Test)</button>
+        </div>
+        <div id="test-sync-status" style="font-size:11px;color:var(--text-secondary);margin-top:8px"></div>
+      </div>
+
       <!-- Future: queue statistics — will surface counts from TTLSync.Runtime
            once BackgroundSync and the upload/download queues exist
            (see BACKGROUND_SYNC.md §Queue Statistics). Reserved space only. -->
@@ -6564,6 +7061,29 @@ function connectGoogleDrive() {
 
 function disconnectGoogleDrive() {
   GoogleAuthManager.disconnect().then(() => {
+    if (activeMastersTab === 'sync') renderMastersContent();
+  });
+}
+
+// ── Phase 7: Manual Test Sync click handlers ────────────────────────────────
+// Thin UI glue only — all real read/write logic lives in GoogleDriveWorkspace
+// above. Neither function reads from or writes to `tasks`/`logEntries` beyond
+// what GoogleDriveWorkspace.pushStateToStateFile()/pullStateFromStateFile()
+// already do (push reads current state to send it; pull never writes back).
+function testSyncPush() {
+  const statusEl = document.getElementById('test-sync-status');
+  if (statusEl) statusEl.textContent = 'Pushing…';
+  if (activeMastersTab === 'sync') renderMastersContent();
+  GoogleDriveWorkspace.pushStateToStateFile().then(() => {
+    if (activeMastersTab === 'sync') renderMastersContent();
+  });
+}
+
+function testSyncPull() {
+  const statusEl = document.getElementById('test-sync-status');
+  if (statusEl) statusEl.textContent = 'Pulling…';
+  if (activeMastersTab === 'sync') renderMastersContent();
+  GoogleDriveWorkspace.pullStateFromStateFile().then(() => {
     if (activeMastersTab === 'sync') renderMastersContent();
   });
 }
