@@ -2537,6 +2537,23 @@ const LocalSyncManager = (function () {
       : { status: 'idle', queued: 0, counts: { pending: 0, uploading: 0, completed: 0, failed: 0 }, items: [], lastRun: null };
   }
 
+  // ── Phase 11: Batch Cloud Merge exposure (requirement 7) ────────────────────
+  // Thin delegations only — all real batch-merge logic lives in
+  // BatchCloudMerge, below. Coordinates rather than duplicates, exactly like
+  // every other function in this module (and exactly mirroring the Phase 9
+  // exposure just above).
+  function processBatchMerge() {
+    return (typeof BatchCloudMerge !== 'undefined')
+      ? BatchCloudMerge.mergeTaskCollection()
+      : Promise.resolve({ ok: false, reason: 'batch-merge-unavailable' });
+  }
+
+  function getBatchMergeSummary() {
+    return (typeof BatchCloudMerge !== 'undefined')
+      ? BatchCloudMerge.getBatchMergeSummary()
+      : { status: 'idle', lastRun: null };
+  }
+
   return {
     initialize,
     shutdown,
@@ -2548,6 +2565,9 @@ const LocalSyncManager = (function () {
     // Phase 9: Batch Task Upload — see functions defined just above.
     processUploadQueue,
     getUploadProgress,
+    // Phase 11: Batch Cloud Merge — see functions defined just above.
+    processBatchMerge,
+    getBatchMergeSummary,
     // ── Reserved extension points (requirement 8) ──────────────────────────────
     // Placeholders only. Nothing here is implemented, referenced, or called by
     // this phase — reserved so a future phase can attach a real implementation
@@ -4324,6 +4344,257 @@ const SingleTaskMerge = (function () {
   };
 })();
 // ── End Single Task Merge From Cloud (Phase 10) ───────────────────────────────
+
+// ── Batch Cloud Merge (Phase 11) ──────────────────────────────────────────────
+// Implements this project's Phase 11 brief — "Batch Cloud Merge": extends
+// Phase 10's Single Task Merge From Cloud so that every eligible task in the
+// downloaded Tasks/state.json can be synchronized in one pass, instead of
+// requiring one manual download+merge per task. Reuses the existing
+// whole-blob storage model exactly as-is (GOOGLE_DRIVE_CLIENT.md §6) — there
+// is still no per-task cloud file, and this phase does not introduce one.
+//
+// Adaptation actually implemented: Tasks/state.json is downloaded exactly
+// ONCE per call (requirement 1) via SingleTaskMerge.downloadCurrentState() —
+// the exact same read path Phase 10 already uses, itself built on Phase 7's
+// findStateFile()/downloadStateFileContent()/computeStatePayloadChecksum().
+// Every remote task in that single download is then matched to a local task
+// by synchronization identity (Sync ID) ONLY — never by title (requirement
+// 2) — and handled one of three ways: created locally if no local task
+// shares its Sync ID (requirement 4); merged in if a local match exists and
+// the remote copy is newer, reusing Phase 10's OWN comparison
+// (SingleTaskMerge.isRemoteNewer()) and merge (SingleTaskMerge.mergeRemoteTask()
+// via SingleTaskMerge.completeTaskMerge()) functions directly — no merge rule
+// is re-derived or duplicated here (requirement 3/5); or left completely
+// unchanged and recorded as skipped if the local copy is newer or tied
+// (requirement 6) — same "no conflict handling of any kind" posture Phase 10
+// already established.
+//
+// This module never downloads more than one state.json per call, never
+// uploads, never retries on its own initiative, and never resolves a
+// conflict. A failure merging any ONE remote task (malformed shape, checksum
+// mismatch, or an unexpected error) is caught and recorded against that task
+// alone — it never stops the remaining tasks in the batch from being
+// processed (requirement 10).
+const BatchCloudMerge = (function () {
+  let _status = 'idle';   // idle | preparing | downloading | merging | complete | failed
+  let _lastRun = null;    // summary of the most recent mergeTaskCollection() call, for UI display only
+
+  // downloadCurrentState(): Requirement 1/8 — the read entry point this
+  // phase uses. Delegates entirely to SingleTaskMerge.downloadCurrentState(),
+  // which itself already performs the authentication/workspace checks and
+  // the Find File → Download File → parse → checksum-validate pipeline —
+  // downloaded exactly once here, and reused throughout the whole batch
+  // (requirement 1), never re-downloaded per task.
+  function downloadCurrentState() {
+    if (typeof SingleTaskMerge === 'undefined') {
+      return Promise.resolve({ ok: false, reason: 'merge-unavailable' });
+    }
+    return SingleTaskMerge.downloadCurrentState();
+  }
+
+  // findLocalTaskBySyncId(): Requirement 2 — locates the local counterpart
+  // of a remote task using ONLY synchronization identity (Sync ID). Never
+  // matches by title/heading or any other display text, mirroring exactly
+  // how Phase 10's findRemoteTask() and Phase 9's findTaskForEntry() already
+  // key by Sync ID only.
+  function findLocalTaskBySyncId(syncId) {
+    if (!syncId || !Array.isArray(tasks)) return null;
+    return tasks.find(t => t && t._sync && t._sync.syncId === syncId) || null;
+  }
+
+  // createLocalTaskFromRemote(): Requirement 4 — a remote task with no local
+  // counterpart is created locally. A brand-new LOCAL id is assigned (the
+  // same `id` field every other task-creation path in this file assigns via
+  // ++taskIdCounter — see addTask()) because Local ID is a device-scoped
+  // identifier, per SingleTaskMerge's own module header note. The remote
+  // task's Sync ID — its provider-independent identity — is carried over
+  // UNCHANGED, so this device recognizes the same remote task on every
+  // future sync pass instead of re-creating it. Every other remote business
+  // field is copied as-is, exactly like SingleTaskMerge.mergeRemoteTask()
+  // already does for the update case.
+  function createLocalTaskFromRemote(remoteTask) {
+    const newTask = {};
+    Object.keys(remoteTask).forEach(k => { if (k !== '_sync') newTask[k] = remoteTask[k]; });
+    newTask.id = ++taskIdCounter;
+    tasks.unshift(newTask);
+
+    // ensureSyncMetadata() (Phase 1) gives the new task a well-formed _sync
+    // block; its freshly-generated Sync ID is then overwritten with the
+    // remote's own, exactly as this function's own header describes.
+    ensureSyncMetadata(newTask);
+    const s = newTask._sync;
+    const rs = remoteTask._sync;
+    s.syncId = rs.syncId;
+    s.version = rs.version;
+    if (typeof rs.createdAt === 'number') s.createdAt = rs.createdAt;
+    s.modifiedAt = (typeof rs.modifiedAt === 'number') ? rs.modifiedAt : Date.now();
+    if (rs.deviceId) s.deviceId = rs.deviceId;
+    s.deleted = !!rs.deleted;
+    if (typeof rs.schemaVersion === 'number') s.schemaVersion = rs.schemaVersion;
+    // Local-scoped bookkeeping (Local ID, Cloud ID, Last Sync, Sync Status,
+    // Dirty) is this device's own, never supplied by the remote payload —
+    // same division of responsibility SingleTaskMerge.mergeRemoteTask()/
+    // completeTaskMerge() already establish for the update case.
+    s.lastSync = Date.now();
+    s.syncStatus = 'synced';
+    s.dirty = false;
+    s.checksum = computeTaskChecksum(newTask);
+    s.contentHash = computeTaskContentHash(newTask);
+    // Defensive: a brand-new task has no queue entry yet, but this keeps the
+    // effect identical to the update path below in case one somehow exists.
+    removeQueueEntry(s.syncId, 'upload');
+    return newTask;
+  }
+
+  // mergeOneRemoteTask(): Requirement 2/3/4/5/6/10 — resolves ONE remote
+  // task against local data. Never throws: any unexpected failure is caught
+  // and reported as a failed outcome for this task alone (requirement 10),
+  // so it can never abort the rest of the batch.
+  function mergeOneRemoteTask(remoteTask) {
+    try {
+      if (!remoteTask || typeof remoteTask !== 'object' || !remoteTask._sync || !remoteTask._sync.syncId) {
+        return { syncId: null, outcome: 'failed', reason: 'invalid-task' };
+      }
+      const syncId = remoteTask._sync.syncId;
+      // Requirement 10 (Malformed task/Corrupted metadata) — reuses Phase
+      // 10's OWN validation (shape + checksum), never re-derived here.
+      if (!SingleTaskMerge.validateRemoteTask(remoteTask)) {
+        return { syncId: syncId, outcome: 'failed', reason: 'malformed-remote-task' };
+      }
+
+      const localTask = findLocalTaskBySyncId(syncId);
+      if (!localTask) {
+        // Requirement 4.
+        const created = createLocalTaskFromRemote(remoteTask);
+        return { syncId: syncId, outcome: 'created', taskId: created.id };
+      }
+
+      // Requirement 5/6 — reuses Phase 10's OWN comparison, never
+      // re-derived here.
+      if (!SingleTaskMerge.isRemoteNewer(localTask, remoteTask)) {
+        return { syncId: syncId, outcome: 'skipped', reason: 'local-newer', taskId: localTask.id };
+      }
+
+      // Requirement 3/5 — reuses Phase 10's OWN merge (mergeRemoteTask) and
+      // its own effect-coordination (Last Sync/Sync Status/Dirty/Queue),
+      // via the exact same completeTaskMerge() entry point Phase 10's own
+      // mergeSingleTask() calls. No merge rule is duplicated here.
+      SingleTaskMerge.completeTaskMerge(localTask, remoteTask);
+      return { syncId: syncId, outcome: 'updated', taskId: localTask.id };
+    } catch (err) {
+      return {
+        syncId: (remoteTask && remoteTask._sync && remoteTask._sync.syncId) || null,
+        outcome: 'failed', reason: 'error', error: (err && err.message) || String(err)
+      };
+    }
+  }
+
+  // mergeRemoteTasks(): Requirement 2/8 — iterates every remote task
+  // (requirement 2), resolving each independently via mergeOneRemoteTask()
+  // above. Nothing here downloads anything — `parsedState` is the single
+  // payload already retrieved once by mergeTaskCollection() below.
+  function mergeRemoteTasks(parsedState) {
+    const remoteTasks = (parsedState && Array.isArray(parsedState.tasks)) ? parsedState.tasks : [];
+    return remoteTasks.map(mergeOneRemoteTask);
+  }
+
+  // completeBatchMerge(): Requirement 7/8 — tallies per-task outcomes into
+  // the batch's summary statistics and persists once for the whole pass.
+  // Newly created tasks above are not individually saved, so this is their
+  // single persistence point; SingleTaskMerge.completeTaskMerge() already
+  // calls saveState() for each updated task on its own, so this call is
+  // simply the guaranteed single save for the created-task path, matching
+  // Phase 9's established save-once-per-pass pattern.
+  function completeBatchMerge(results, downloadResult) {
+    const summary = {
+      tasksDownloaded: (downloadResult && downloadResult.parsed && Array.isArray(downloadResult.parsed.tasks))
+        ? downloadResult.parsed.tasks.length : 0,
+      tasksCreated: results.filter(r => r.outcome === 'created').length,
+      tasksUpdated: results.filter(r => r.outcome === 'updated').length,
+      tasksSkipped: results.filter(r => r.outcome === 'skipped').length,
+      tasksFailed:  results.filter(r => r.outcome === 'failed').length
+    };
+    saveState();
+    return summary;
+  }
+
+  // mergeTaskCollection(): the single public entry point (requirement
+  // 6/8/9). Preparing → Downloading → Merging → Completed/Failed
+  // (requirement 9), reusing the same status-string mechanism every other
+  // sync module in this file already exposes (`_status`/getter), rather
+  // than inventing a new one.
+  function mergeTaskCollection() {
+    if (_status === 'downloading' || _status === 'merging') {
+      // Reentrancy guard — same pattern BatchTaskUpload.processUploadQueue()
+      // already uses.
+      return Promise.resolve({ ok: false, reason: 'already-merging' });
+    }
+
+    _status = 'preparing';
+    if (typeof SingleTaskMerge === 'undefined' || typeof GoogleDriveWorkspace === 'undefined') {
+      _status = 'failed';
+      const result = { ok: false, reason: 'workspace-unavailable', tasksDownloaded: 0, tasksCreated: 0, tasksUpdated: 0, tasksSkipped: 0, tasksFailed: 0, results: [] };
+      _lastRun = result;
+      return Promise.resolve(result);
+    }
+
+    _status = 'downloading';
+    return downloadCurrentState().then(downloadResult => {
+      if (!downloadResult || !downloadResult.ok) {
+        // Requirement 10 (Authentication expired / Missing state.json /
+        // Network failure / Malformed JSON) — every one of these is
+        // already distinguished by fetchAndValidateStateFile()'s existing
+        // reason codes (not-authenticated / no-remote-file / corrupt-json /
+        // checksum-mismatch / workspace-not-ready / error). Nothing has
+        // been touched locally at this point — downloadCurrentState() is
+        // read-only, same as Phase 10.
+        _status = 'failed';
+        const result = Object.assign(
+          { ok: false, tasksDownloaded: 0, tasksCreated: 0, tasksUpdated: 0, tasksSkipped: 0, tasksFailed: 0, results: [] },
+          downloadResult || { reason: 'unknown-error' }
+        );
+        _lastRun = result;
+        return result;
+      }
+
+      _status = 'merging';
+      const results = mergeRemoteTasks(downloadResult.parsed);
+      const summary = completeBatchMerge(results, downloadResult);
+      const failed = summary.tasksFailed;
+      _status = failed > 0 ? 'failed' : 'complete';
+      const result = Object.assign(
+        { ok: failed === 0, fileId: downloadResult.fileId, modifiedTime: downloadResult.modifiedTime, results: results },
+        summary
+      );
+      _lastRun = result;
+      return result;
+    }).catch(err => {
+      _status = 'failed';
+      const result = {
+        ok: false, reason: 'error', error: (err && err.message) || String(err),
+        tasksDownloaded: 0, tasksCreated: 0, tasksUpdated: 0, tasksSkipped: 0, tasksFailed: 0, results: []
+      };
+      _lastRun = result;
+      return result;
+    });
+  }
+
+  // getBatchMergeSummary(): Requirement 7/9 — read-only status for the
+  // Synchronization settings tab. Always a fresh object — never a live
+  // reference — matching every other status getter already in this file.
+  function getBatchMergeSummary() {
+    return { status: _status, lastRun: _lastRun ? Object.assign({}, _lastRun) : null };
+  }
+
+  return {
+    downloadCurrentState,
+    mergeRemoteTasks,
+    mergeTaskCollection,
+    completeBatchMerge,
+    getBatchMergeSummary
+  };
+})();
+// ── End Batch Cloud Merge (Phase 11) ──────────────────────────────────────────
 
 // ── Persistence ───────────────────────────────────────────────────────────────
 function saveState() {
@@ -7717,6 +7988,41 @@ function renderMastersContent() {
       : tasks.map(t => '<option value="' + t.id + '">#' + t.id + ' — ' + esc(t.heading || t.description || 'Untitled task') + '</option>').join('');
     const mergeControlsDisabledAttr = (!workspaceStatus.ready || testSyncBusy || singleUploadBusy || batchUploadBusy || mergeBusy || tasks.length === 0) ? 'disabled' : '';
 
+    // Phase 11: Batch Cloud Merge card state — reflects BatchCloudMerge's
+    // own status/last-run summary. Computed the same read-only way as every
+    // other card above; never mutates anything. Unlike Phase 10 (a single
+    // manually-selected task), this card has no task selector — it always
+    // targets every remote task in one download.
+    const batchMergeSummary = (typeof BatchCloudMerge !== 'undefined')
+      ? BatchCloudMerge.getBatchMergeSummary()
+      : { status: 'idle', lastRun: null };
+    const batchMergeBusy = batchMergeSummary.status === 'preparing' || batchMergeSummary.status === 'downloading' || batchMergeSummary.status === 'merging';
+    const BATCH_MERGE_STATUS_LABELS = {
+      preparing: 'Preparing…',
+      downloading: 'Downloading…',
+      merging: 'Merging…',
+      complete: 'Completed',
+      failed: 'Failed'
+    };
+    const batchMergeStatusLabel = BATCH_MERGE_STATUS_LABELS[batchMergeSummary.status] || 'Idle';
+    const batchMergeDisabledAttr = (!workspaceStatus.ready || testSyncBusy || singleUploadBusy || batchUploadBusy || mergeBusy || batchMergeBusy) ? 'disabled' : '';
+    // Reuses MERGE_REASON_LABELS (Phase 10, above) for the whole-download
+    // failure reasons they already share (not-authenticated, no-remote-file,
+    // corrupt-json, checksum-mismatch, workspace-not-ready/-unavailable) —
+    // no separate label map is invented for the same set of reason codes.
+    function describeBatchMergeResult(run) {
+      if (!run) return 'Never Run';
+      if (!run.ok && !run.tasksDownloaded) {
+        // Whole batch failed before any task could be evaluated (download
+        // never succeeded) — same reason codes Phase 10's card already labels.
+        return '✗ ' + (MERGE_REASON_LABELS[run.reason] || run.reason || 'failed') + (run.error ? (': ' + run.error) : '');
+      }
+      let label = run.tasksDownloaded + ' downloaded — ' + run.tasksCreated + ' created, ' + run.tasksUpdated + ' updated, ' + run.tasksSkipped + ' skipped';
+      if (run.tasksFailed > 0) label += ', ' + run.tasksFailed + ' failed';
+      return (run.ok ? '✓ ' : '⚠ ') + label;
+    }
+    const batchMergeResultLabel = describeBatchMergeResult(batchMergeSummary.lastRun);
+
     content.innerHTML = `
       <div style="font-size:12px;color:var(--text-secondary);margin-bottom:16px">
         Synchronize your tasks and log history to Google Drive so they're available across devices.
@@ -7942,6 +8248,33 @@ function renderMastersContent() {
         </div>
       </div>
 
+      <!-- Phase 11: Batch Cloud Merge card. Downloads Tasks/state.json ONCE
+           and merges every eligible remote task into this device in a
+           single pass, reusing Phase 10's Single Task Merge logic for every
+           existing-task comparison/merge — see the BatchCloudMerge module
+           header comment above for the full adaptation rationale. Still no
+           conflict handling, no retry engine, no background sync — same
+           manual-trigger-only posture as every other card here. -->
+      <div style="border:1px solid var(--border-md);border-radius:var(--radius-md);padding:14px;margin-bottom:14px">
+        <div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:4px"><i class="ti ti-cloud-download" style="vertical-align:-2px;margin-right:5px;color:var(--blue-mid)"></i>Batch Cloud Merge</div>
+        <div style="font-size:11px;color:var(--text-tertiary);margin-bottom:10px">
+          Downloads <code>Tasks/state.json</code> once and merges every eligible remote task into this device. Creates tasks missing locally; updates only tasks where the remote copy is newer; leaves newer local tasks untouched.
+        </div>
+        <div class="complete-row">
+          <div class="complete-field">
+            <label class="complete-label">Status</label>
+            <input class="complete-input" value="${esc(batchMergeStatusLabel)}" disabled style="width:100%" />
+          </div>
+          <div class="complete-field">
+            <label class="complete-label">Last Result</label>
+            <input class="complete-input" value="${esc(batchMergeResultLabel)}" disabled style="width:100%" />
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+          <button class="btn btn-primary" id="batch-cloud-merge-btn" onclick="batchMergeClick()" ${batchMergeDisabledAttr}><i class="ti ti-cloud-download"></i> Merge All Eligible Tasks From Cloud</button>
+        </div>
+      </div>
+
       <!-- Future: queue statistics — will surface counts from TTLSync.Runtime
            once BackgroundSync and the upload/download queues exist
            (see BACKGROUND_SYNC.md §Queue Statistics). Reserved space only. -->
@@ -8076,6 +8409,19 @@ function mergeSelectedTaskClick() {
   const task = tasks.find(t => t.id === taskId) || null;
   if (activeMastersTab === 'sync') renderMastersContent();
   SingleTaskMerge.mergeSingleTask(task).then(() => {
+    if (activeMastersTab === 'sync') renderMastersContent();
+  });
+}
+
+// ── Phase 11: Batch Cloud Merge click handler ────────────────────────────────
+// Thin UI glue only — all real batch-download/merge logic lives in
+// BatchCloudMerge above. Re-renders immediately on click (so the button
+// disables and shows "Preparing…"/"Downloading…"/"Merging…" right away) and
+// again once the pass settles, mirroring batchUploadClick()/
+// mergeSelectedTaskClick()'s existing pattern.
+function batchMergeClick() {
+  if (activeMastersTab === 'sync') renderMastersContent();
+  BatchCloudMerge.mergeTaskCollection().then(() => {
     if (activeMastersTab === 'sync') renderMastersContent();
   });
 }
