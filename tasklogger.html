@@ -3584,6 +3584,191 @@ const GoogleDriveWorkspace = (function () {
 })();
 // ── End Google Drive Workspace Initialization (Phase 6) / Core Read-Write (Phase 7) ──
 
+// ── Single Task Upload (Phase 8) ────────────────────────────────────────────────
+// Implements the first successful upload of ONE task to Google Drive — this
+// project's Phase 8 brief — adapted to the whole-blob storage model already
+// finalized in GOOGLE_DRIVE_API.md §5 and GOOGLE_DRIVE_CLIENT.md §6: "Tasks
+// are not stored as individual Drive files; they are a field within the
+// single Tasks/state.json blob," and "every update is a full-content replace."
+// There is no per-task Drive file anywhere in the architecture, and this
+// phase does not introduce one (IMPLEMENTATION_ROADMAP.md §10 principle 10:
+// the architecture is final; a real conflict with it is flagged, not
+// silently designed around).
+//
+// Adaptation actually implemented: this module gates the existing Phase 7
+// write path (GoogleDriveWorkspace.pushStateToStateFile()) so it only ever
+// fires when EXACTLY ONE task is currently dirty, and — on confirmed success
+// only — updates ONLY that one task's own synchronization metadata (Cloud
+// ID, Last Sync, Sync Status), clears ONLY its dirty flag, and removes ONLY
+// its Upload Queue entry. This validates the full upload pipeline end-to-end
+// for a single change, which is this phase's stated purpose, without
+// inventing a per-task file model the rest of the system doesn't share.
+//
+// This module never uploads more than one dirty task's worth of change in a
+// single call, never downloads, never merges, never retries, and never
+// resolves conflicts — pushStateToStateFile()'s existing Phase 7 mechanics
+// already refuse to blind-overwrite a remote revision that moved since it
+// was last observed (GOOGLE_DRIVE_CLIENT.md §5 Overwrite Policy), and this
+// module relies on that rather than duplicating it.
+const SingleTaskUpload = (function () {
+  let _status = 'idle';   // idle | uploading | complete | failed
+  let _lastResult = null; // last uploadSingleTask() result, for UI display only
+
+  // prepareTaskForUpload(): ensures the candidate has well-formed
+  // synchronization metadata and is actually dirty. Never touches
+  // business-data fields — reuses ensureSyncMetadata() (Phase 1) exactly as
+  // every other sync helper in this file already does. Returns the task
+  // unchanged, or null if it isn't a valid upload candidate.
+  function prepareTaskForUpload(task) {
+    if (!task) return null;
+    ensureSyncMetadata(task);
+    return isTaskDirty(task) ? task : null;
+  }
+
+  // getUploadCandidate(): selects the single task this phase is scoped to
+  // upload — either a manually-selected task (if passed in and itself
+  // dirty), or the sole currently-dirty task. Refuses (returns a reason
+  // instead of a task) whenever zero or more than one task is dirty, since a
+  // whole-blob push can't be scoped to "just one task" once more than one
+  // has changed — that case is explicitly reserved for a future multi-task
+  // sync phase, never silently uploaded here.
+  function getUploadCandidate(manuallySelectedTask) {
+    const dirty = getDirtyTasks();
+    if (dirty.length === 0) return { task: null, reason: 'nothing-dirty', count: 0 };
+    if (dirty.length > 1) return { task: null, reason: 'multiple-dirty', count: dirty.length };
+    const candidate = manuallySelectedTask
+      ? (dirty.find(t => t._sync && manuallySelectedTask._sync && t._sync.syncId === manuallySelectedTask._sync.syncId) || null)
+      : dirty[0];
+    if (!candidate) return { task: null, reason: 'selection-not-dirty', count: dirty.length };
+    return { task: prepareTaskForUpload(candidate), reason: null, count: 1 };
+  }
+
+  // verifyUploadedTask(): validates JSON integrity, required sync fields, and
+  // schema version for the exact task that was just pushed, BEFORE the
+  // upload is considered successful (matches this phase's Requirement 7).
+  // Checked against the live `tasks` array — the same array reference
+  // GoogleDriveWorkspace's buildStatePayload() just serialized — so this
+  // needs no second network round-trip / download (Requirement 9: no
+  // downloading). Recomputes the checksum the same deterministic way
+  // ensureSyncMetadata()/touchSyncMetadata() already do, so a corrupted or
+  // stale in-memory task is caught here rather than considered uploaded.
+  function verifyUploadedTask(task) {
+    if (!task || typeof task !== 'object') return false;
+    if (!task._sync || !task._sync.syncId) return false;
+    if (typeof task._sync.schemaVersion !== 'number') return false;
+    if (typeof task._sync.checksum !== 'string' && typeof task._sync.checksum !== 'number') return false;
+    if (!Array.isArray(tasks) || !tasks.includes(task)) return false;
+    return task._sync.checksum === computeTaskChecksum(task);
+  }
+
+  // updateTaskSyncMetadata(): applies a confirmed upload result to ONLY this
+  // one task's synchronization metadata — Cloud ID (the state.json file this
+  // task's data now lives inside; SYNC_DATA_MODEL.md §3 "lets the Cloud
+  // Adapter locate the remote object"), Last Sync, and Sync Status. Never
+  // touches any other task, never touches business-data fields, never bumps
+  // Version — a sync confirmation is not itself a new edit.
+  function updateTaskSyncMetadata(task, pushResult) {
+    const s = task._sync;
+    s.cloudId = pushResult.fileId;
+    s.lastSync = Date.now();
+    s.syncStatus = 'synced';
+  }
+
+  // markTaskUploaded(): the success path (Requirement 3), coordinating the
+  // three effects a confirmed single-task upload must produce — updated
+  // metadata, cleared dirty flag, Upload Queue entry removed — for this one
+  // task only. Persists through the existing saveState()/saveQueues() paths
+  // exactly like every other confirmed task mutation in this file already
+  // does (see startTask()/pauseTask()/etc.) — saveState() itself is never
+  // modified.
+  function markTaskUploaded(task, pushResult) {
+    updateTaskSyncMetadata(task, pushResult);
+    clearTaskDirty(task);
+    removeQueueEntry(task._sync.syncId, 'upload');
+    saveState();
+  }
+
+  // uploadTask(): performs the actual write. Delegates entirely to
+  // GoogleDriveWorkspace.pushStateToStateFile() (Phase 7) rather than
+  // duplicating any Drive REST logic — that function already implements
+  // duplicate-prevention (Find File before Upload/Update: a cloud file for
+  // this state already existing means Update File is used, never a second
+  // file created — Requirement 6) and network-level upload verification
+  // (Requirement 7's metadata-confirmation half). This function adds the
+  // task-level verification half on top (verifyUploadedTask(), above).
+  function uploadTask(task) {
+    if (typeof GoogleDriveWorkspace === 'undefined') {
+      return Promise.resolve({ ok: false, reason: 'workspace-unavailable' });
+    }
+    return GoogleDriveWorkspace.pushStateToStateFile().then(pushResult => {
+      if (!pushResult || !pushResult.ok) return pushResult || { ok: false, reason: 'unknown-error' };
+      if (!verifyUploadedTask(task)) return { ok: false, reason: 'verification-failed' };
+      return pushResult;
+    });
+  }
+
+  // uploadSingleTask(): the single public entry point (Requirement 2/8). On
+  // failure of any kind — no candidate, push failure, verification failure,
+  // thrown error — nothing here touches task._sync, nothing clears dirty,
+  // nothing removes the Upload Queue entry (Requirement 4: local changes are
+  // never lost on failure). Only a confirmed, verified success calls
+  // markTaskUploaded().
+  function uploadSingleTask(manuallySelectedTask) {
+    const candidateResult = getUploadCandidate(manuallySelectedTask || null);
+    if (!candidateResult.task) {
+      _status = 'idle';
+      const result = { ok: false, reason: candidateResult.reason, count: candidateResult.count };
+      _lastResult = result;
+      return Promise.resolve(result);
+    }
+    const task = candidateResult.task;
+    _status = 'uploading';
+    return uploadTask(task).then(pushResult => {
+      if (pushResult && pushResult.ok) {
+        markTaskUploaded(task, pushResult);
+        _status = 'complete';
+        const result = Object.assign({ ok: true, taskId: task.id, syncId: task._sync.syncId }, pushResult);
+        _lastResult = result;
+        return result;
+      }
+      _status = 'failed';
+      const result = Object.assign({ ok: false, taskId: task.id, syncId: task._sync.syncId }, pushResult || { reason: 'unknown-error' });
+      _lastResult = result;
+      return result;
+    }).catch(err => {
+      _status = 'failed';
+      const result = { ok: false, taskId: task.id, syncId: task._sync.syncId, reason: 'error', error: (err && err.message) || String(err) };
+      _lastResult = result;
+      return result;
+    });
+  }
+
+  // Read-only status for the Synchronization settings tab. Always a fresh
+  // object — never a live reference to this module's internal state.
+  function getSingleUploadStatus() {
+    const candidate = getUploadCandidate(null);
+    return {
+      status: _status,
+      lastResult: _lastResult ? Object.assign({}, _lastResult) : null,
+      candidateTaskId: candidate.task ? candidate.task.id : null,
+      candidateReason: candidate.reason,
+      candidateCount: candidate.count
+    };
+  }
+
+  return {
+    prepareTaskForUpload,
+    getUploadCandidate,
+    uploadTask,
+    verifyUploadedTask,
+    updateTaskSyncMetadata,
+    markTaskUploaded,
+    uploadSingleTask,
+    getSingleUploadStatus
+  };
+})();
+// ── End Single Task Upload (Phase 8) ──────────────────────────────────────────────
+
 // ── Persistence ───────────────────────────────────────────────────────────────
 function saveState() {
   try {
@@ -6871,6 +7056,42 @@ function renderMastersContent() {
     const testSyncBusy = fileSyncStatus.pushStatus === 'pushing' || fileSyncStatus.pullStatus === 'pulling';
     const testSyncDisabledAttr = (!workspaceStatus.ready || testSyncBusy) ? 'disabled' : '';
 
+    // Phase 8: Single Task Upload card state — reflects SingleTaskUpload's
+    // gating (exactly one dirty task) and last result. Computed the same
+    // read-only way as fileSyncStatus above; never mutates anything.
+    const singleUploadStatus = (typeof SingleTaskUpload !== 'undefined')
+      ? SingleTaskUpload.getSingleUploadStatus()
+      : { status: 'idle', lastResult: null, candidateTaskId: null, candidateReason: 'nothing-dirty', candidateCount: null };
+    const SINGLE_UPLOAD_REASON_LABELS = {
+      'nothing-dirty': 'No pending changes to upload.',
+      'multiple-dirty': (singleUploadStatus.candidateCount != null)
+        ? (singleUploadStatus.candidateCount + ' tasks have pending changes — single task upload requires exactly one dirty task at a time.')
+        : 'More than one task has pending changes — single task upload requires exactly one dirty task at a time.',
+      'selection-not-dirty': 'Selected task has no pending changes.'
+    };
+    const candidateTask = singleUploadStatus.candidateTaskId != null
+      ? tasks.find(t => t.id === singleUploadStatus.candidateTaskId)
+      : null;
+    const singleUploadCandidateLabel = candidateTask
+      ? ('#' + candidateTask.id + ' — ' + (candidateTask.title || candidateTask.description || 'Untitled task'))
+      : (SINGLE_UPLOAD_REASON_LABELS[singleUploadStatus.candidateReason] || 'No task available.');
+    function describeSingleUploadResult(result) {
+      if (!result) return 'Never Run';
+      if (result.ok) {
+        return '✓ Uploaded task #' + result.taskId
+          + (result.mode ? (' — ' + (result.mode === 'created' ? 'created' : 'updated')) : '')
+          + (typeof result.version === 'number' ? (' remote v' + result.version) : '');
+      }
+      return '✗ ' + (result.reason || 'failed') + (result.error ? (': ' + result.error) : '')
+        + (result.taskId != null ? (' (task #' + result.taskId + ' remains dirty)') : '');
+    }
+    const singleUploadResultLabel = describeSingleUploadResult(singleUploadStatus.lastResult);
+    const singleUploadBusy = singleUploadStatus.status === 'uploading';
+    const singleUploadDisabledAttr = (!workspaceStatus.ready || testSyncBusy || singleUploadBusy || !candidateTask) ? 'disabled' : '';
+    const singleUploadStatusLabel = singleUploadBusy ? 'Uploading…'
+      : (singleUploadStatus.status === 'complete' ? 'Upload Complete'
+      : (singleUploadStatus.status === 'failed' ? 'Upload Failed' : 'Idle'));
+
     content.innerHTML = `
       <div style="font-size:12px;color:var(--text-secondary);margin-bottom:16px">
         Synchronize your tasks and log history to Google Drive so they're available across devices.
@@ -6992,6 +7213,40 @@ function renderMastersContent() {
         <div id="test-sync-status" style="font-size:11px;color:var(--text-secondary);margin-top:8px"></div>
       </div>
 
+      <!-- Phase 8: Single Task Upload card. Validates the first successful
+           upload of ONE task's change, gated to exactly one dirty task at a
+           time (requirement 2). Adapted to the finalized whole-blob storage
+           model (GOOGLE_DRIVE_API.md §5): there is no per-task Drive file —
+           this pushes the same Tasks/state.json Phase 7 already writes, then
+           updates ONLY the single uploaded task's own sync metadata on
+           success. No batch/background sync, no download, no conflict
+           handling — same manual-trigger-only posture as Phase 7. -->
+      <div style="border:1px solid var(--border-md);border-radius:var(--radius-md);padding:14px;margin-bottom:14px">
+        <div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:4px"><i class="ti ti-cloud-upload" style="vertical-align:-2px;margin-right:5px;color:var(--blue-mid)"></i>Single Task Upload</div>
+        <div style="font-size:11px;color:var(--text-tertiary);margin-bottom:10px">
+          Uploads exactly one pending task change to <code>Tasks/state.json</code>, to validate the upload pipeline. Enabled only when exactly one task has unsynced changes.
+        </div>
+        <div class="complete-row">
+          <div class="complete-field" style="flex:1 1 100%">
+            <label class="complete-label">Candidate Task</label>
+            <input class="complete-input" value="${esc(singleUploadCandidateLabel)}" disabled style="width:100%" />
+          </div>
+        </div>
+        <div class="complete-row" style="margin-top:10px">
+          <div class="complete-field">
+            <label class="complete-label">Status</label>
+            <input class="complete-input" value="${esc(singleUploadStatusLabel)}" disabled style="width:100%" />
+          </div>
+          <div class="complete-field">
+            <label class="complete-label">Last Result</label>
+            <input class="complete-input" value="${esc(singleUploadResultLabel)}" disabled style="width:100%" />
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+          <button class="btn btn-primary" id="single-task-upload-btn" onclick="uploadSingleTaskClick()" ${singleUploadDisabledAttr}><i class="ti ti-cloud-upload"></i> Upload This Task</button>
+        </div>
+      </div>
+
       <!-- Future: queue statistics — will surface counts from TTLSync.Runtime
            once BackgroundSync and the upload/download queues exist
            (see BACKGROUND_SYNC.md §Queue Statistics). Reserved space only. -->
@@ -7084,6 +7339,18 @@ function testSyncPull() {
   if (statusEl) statusEl.textContent = 'Pulling…';
   if (activeMastersTab === 'sync') renderMastersContent();
   GoogleDriveWorkspace.pullStateFromStateFile().then(() => {
+    if (activeMastersTab === 'sync') renderMastersContent();
+  });
+}
+
+// ── Phase 8: Single Task Upload click handler ───────────────────────────────
+// Thin UI glue only — all real upload logic lives in SingleTaskUpload above.
+// Re-renders immediately on click (so the button disables and shows
+// "Uploading…" right away) and again once the upload settles, exactly
+// mirroring the existing testSyncPush()/testSyncPull() pattern.
+function uploadSingleTaskClick() {
+  if (activeMastersTab === 'sync') renderMastersContent();
+  SingleTaskUpload.uploadSingleTask().then(() => {
     if (activeMastersTab === 'sync') renderMastersContent();
   });
 }
@@ -9215,6 +9482,11 @@ function initializeSyncInfrastructure() {
   // Phase 6: register the Google Drive Workspace Initialization module.
   // Folder management only — no data upload/download, no synchronization.
   window.TTLSync.Modules.GoogleDriveWorkspace = GoogleDriveWorkspace;
+
+  // Phase 8: register the Single Task Upload module. Registration only —
+  // nothing here triggers an upload; that only ever happens from the
+  // "Upload This Task" button (uploadSingleTaskClick()).
+  window.TTLSync.Modules.SingleTaskUpload = SingleTaskUpload;
 
   // Phase 5: attempt a silent, non-interactive reconnect if a previous
   // session was connected. Never interactive, never blocking — see
