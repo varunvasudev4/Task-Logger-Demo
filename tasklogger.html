@@ -2854,6 +2854,17 @@ const GoogleAuthManager = (function () {
     };
   }
 
+  // Phase 6: hands the current in-memory access token to the Google Drive
+  // Workspace Initialization module for the duration of a single Drive call
+  // only (GOOGLE_DRIVE_CLIENT.md §2 "the Client consumes a token handed to it
+  // by the Authentication Manager but does not manage the token lifecycle
+  // itself"). Returns null whenever isAuthenticated() would — the caller is
+  // expected to treat null exactly like any other "not authenticated" state.
+  // Never persisted, never logged, never returned from anywhere else.
+  function getAccessTokenForClient() {
+    return isAuthenticated() ? _accessToken : null;
+  }
+
   return {
     authenticate,
     disconnect,
@@ -2862,10 +2873,279 @@ const GoogleAuthManager = (function () {
     validateAuthentication,
     refreshAuthentication,
     attemptSilentReconnectOnLoad,
-    getStatus
+    getStatus,
+    getAccessTokenForClient
   };
 })();
 // ── End Google Authentication Manager (Phase 5) ──────────────────────────────────
+
+// ── Google Drive Workspace Initialization (Phase 6) ──────────────────────────────
+// Implements Google Drive Workspace Initialization ONLY, per GOOGLE_DRIVE_API.md
+// §4 (Folder Structure), §6 (Drive Operations: Find Folder / Create Folder), and
+// GOOGLE_DRIVE_CLIENT.md §4 (Folder Management). This module owns FOLDER
+// STRUCTURE ONLY. It never uploads, downloads, updates, or synchronizes any
+// file — no `state.json`, no `preferences.json`, no application data of any
+// kind. It never implements background sync, queues, retries, conflict
+// resolution, or attachment transfer. All of that remains reserved for a
+// future phase.
+//
+// This module consumes a ready-made access token from GoogleAuthManager
+// (via getAccessTokenForClient(), added above) and never manages token
+// acquisition, refresh, or revocation itself — consistent with
+// GOOGLE_DRIVE_API.md §2 and GOOGLE_DRIVE_CLIENT.md §13 principle 5.
+//
+// Persisted here: only the minimum metadata required to identify the
+// workspace — root folder ID, subfolder IDs, provider name, and a workspace
+// schema version. Never OAuth tokens, never application data.
+//
+// Failure philosophy: a workspace initialization failure never signs the
+// user out, never touches `tasks`/`logEntries`/`masters`, and never prevents
+// the app from working fully offline — it only ever changes this module's
+// own in-memory/persisted workspace status (requirements 8 and 9).
+
+const GOOGLE_WORKSPACE_STORAGE_KEY = 'ttl_sync_workspace';
+const GOOGLE_WORKSPACE_VERSION     = 1;
+const GOOGLE_WORKSPACE_ROOT_NAME   = 'TTL';
+const GOOGLE_WORKSPACE_SUBFOLDERS  = ['Tasks', 'Settings', 'Attachments', 'Backups'];
+const GOOGLE_DRIVE_FILES_ENDPOINT  = 'https://www.googleapis.com/drive/v3/files';
+const GOOGLE_DRIVE_FOLDER_MIME     = 'application/vnd.google-apps.folder';
+
+const GoogleDriveWorkspace = (function () {
+  // ── In-memory workspace state ───────────────────────────────────────────────
+  let _status        = 'not_initialized'; // not_initialized | initializing | ready | error
+  let _lastError      = null;
+  let _rootFolderId   = null;
+  let _subfolderIds   = {}; // { Tasks: id, Settings: id, Attachments: id, Backups: id }
+  let _initPromise    = null; // dedupes concurrent initializeWorkspace() calls
+
+  // ── Minimal persisted workspace metadata (never a token, never app data) ───
+  function loadPersisted() {
+    try {
+      const raw = localStorage.getItem(GOOGLE_WORKSPACE_STORAGE_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      return (parsed && typeof parsed === 'object') ? parsed : null;
+    } catch (e) { return null; }
+  }
+
+  function savePersisted() {
+    try {
+      localStorage.setItem(GOOGLE_WORKSPACE_STORAGE_KEY, JSON.stringify({
+        provider: 'google',
+        version: GOOGLE_WORKSPACE_VERSION,
+        rootFolderId: _rootFolderId,
+        subfolderIds: _subfolderIds,
+        updatedAt: new Date().toISOString()
+      }));
+    } catch (e) {}
+  }
+
+  // Warm-starts in-memory state from a prior session's persisted hint. The
+  // IDs are never trusted blindly — every real operation re-confirms them
+  // against Drive (findFolder / validateWorkspace) before relying on them.
+  function restoreFromPersisted() {
+    const hint = loadPersisted();
+    if (hint && hint.rootFolderId) {
+      _rootFolderId = hint.rootFolderId;
+      _subfolderIds = (hint.subfolderIds && typeof hint.subfolderIds === 'object') ? hint.subfolderIds : {};
+      return true;
+    }
+    return false;
+  }
+
+  // ── Low-level Drive REST helper ─────────────────────────────────────────────
+  // Requirement 1: verifies authentication (via GoogleAuthManager) before any
+  // Drive operation is attempted. Never manages the token itself — only reads
+  // whatever GoogleAuthManager currently reports.
+  function driveFetch(url, options) {
+    const token = (typeof GoogleAuthManager !== 'undefined' && GoogleAuthManager.getAccessTokenForClient)
+      ? GoogleAuthManager.getAccessTokenForClient()
+      : null;
+    if (!token) {
+      const err = new Error('Not authenticated.');
+      err.authFailure = true;
+      return Promise.reject(err);
+    }
+    options = options || {};
+    options.headers = Object.assign({ Authorization: 'Bearer ' + token }, options.headers || {});
+    return fetch(url, options).then(res => {
+      if (res.status === 401 || res.status === 403) {
+        const err = new Error('Google Drive authentication failed (' + res.status + ').');
+        err.authFailure = true;
+        throw err;
+      }
+      if (!res.ok) {
+        return res.text().then(text => {
+          throw new Error('Google Drive request failed (' + res.status + '): ' + (text || res.statusText));
+        });
+      }
+      return res.status === 204 ? null : res.json();
+    });
+  }
+
+  function escapeForQuery(name) {
+    return String(name).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  }
+
+  // ── Helper functions (requirement 5) ────────────────────────────────────────
+  // These functions only manage folder structure. None of them read or write
+  // file content, and none of them touch `Tasks/state.json` or
+  // `Settings/preferences.json`.
+
+  // Locates a single named folder under a given parent within the hidden
+  // appDataFolder space. Returns the folder reference, or null if definitely
+  // absent. Distinguishes "not found" from "lookup failed" by rejecting the
+  // promise on a genuine error rather than resolving null (GOOGLE_DRIVE_API.md
+  // §8 Missing Folder / GOOGLE_DRIVE_CLIENT.md Find Root Folder).
+  function findFolder(name, parentId) {
+    const q = [
+      "mimeType='" + GOOGLE_DRIVE_FOLDER_MIME + "'",
+      "trashed=false",
+      "name='" + escapeForQuery(name) + "'",
+      "'" + parentId + "' in parents"
+    ].join(' and ');
+    const url = GOOGLE_DRIVE_FILES_ENDPOINT
+      + '?spaces=appDataFolder'
+      + '&fields=' + encodeURIComponent('files(id,name,createdTime)')
+      + '&q=' + encodeURIComponent(q);
+    return driveFetch(url).then(data => {
+      const files = (data && data.files) || [];
+      if (files.length === 0) return null;
+      if (files.length > 1) {
+        // Duplicate Folder: should not normally happen given fixed naming,
+        // but could arise from a race across two devices on first connect
+        // (GOOGLE_DRIVE_API.md §8 Duplicate File). The most recently created
+        // is treated as authoritative; the other is left untouched rather
+        // than silently deleted — this phase only logs the situation, since
+        // no Conflict Resolver exists yet to route it to.
+        files.sort((a, b) => new Date(b.createdTime) - new Date(a.createdTime));
+        console.warn('[GoogleDriveWorkspace] Duplicate folder "' + name + '" found under parent ' + parentId + '; using the most recently created.');
+      }
+      return files[0];
+    });
+  }
+
+  // Creates a single named folder under a given parent. Idempotent: always
+  // checks findFolder() first and reuses an existing folder rather than
+  // creating a duplicate (requirement 6).
+  function createFolder(name, parentId) {
+    return findFolder(name, parentId).then(existing => {
+      if (existing) return existing;
+      const url = GOOGLE_DRIVE_FILES_ENDPOINT + '?fields=' + encodeURIComponent('id,name,createdTime');
+      return driveFetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name, mimeType: GOOGLE_DRIVE_FOLDER_MIME, parents: [parentId] })
+      });
+    });
+  }
+
+  // Locates the `TTL/` root folder directly inside the hidden appDataFolder.
+  function findRootFolder() {
+    return findFolder(GOOGLE_WORKSPACE_ROOT_NAME, 'appDataFolder');
+  }
+
+  // Establishes `TTL/` on first connect; idempotent — reuses it if it
+  // already exists (requirement 2, "never create duplicate root folders").
+  function createRootFolder() {
+    return createFolder(GOOGLE_WORKSPACE_ROOT_NAME, 'appDataFolder');
+  }
+
+  // Confirms the full `TTL/Tasks,Settings,Attachments,Backups` structure is
+  // actually present on Drive right now, without creating anything. Useful
+  // as an on-demand health check independent of a full initialize pass.
+  function validateWorkspace() {
+    if (!_rootFolderId) restoreFromPersisted();
+    if (!_rootFolderId) return Promise.resolve({ valid: false, reason: 'not-initialized' });
+    return findFolder(GOOGLE_WORKSPACE_ROOT_NAME, 'appDataFolder')
+      .then(root => {
+        if (!root) return { valid: false, reason: 'root-missing' };
+        return Promise.all(GOOGLE_WORKSPACE_SUBFOLDERS.map(name => findFolder(name, root.id)))
+          .then(results => {
+            const missing = GOOGLE_WORKSPACE_SUBFOLDERS.filter((name, i) => !results[i]);
+            return missing.length === 0
+              ? { valid: true }
+              : { valid: false, reason: 'subfolder-missing', missing: missing };
+          });
+      })
+      .catch(err => ({ valid: false, reason: 'lookup-failed', error: (err && err.message) || String(err) }));
+  }
+
+  // ── Lifecycle ───────────────────────────────────────────────────────────────
+
+  // Locates or creates `TTL/` and its required subfolders, idempotently.
+  // Never uploads, downloads, or touches any file — folders only
+  // (requirement 3, 10). Safe to call repeatedly: an already-initialized
+  // workspace is simply reused and left unchanged (requirement 6).
+  function initializeWorkspace() {
+    if (_status === 'initializing' && _initPromise) return _initPromise;
+
+    if (typeof GoogleAuthManager === 'undefined' || !GoogleAuthManager.isAuthenticated()) {
+      // Requirement 8/9: no authentication yet is not an error state worth
+      // surfacing — it simply means workspace setup hasn't run. Offline/local
+      // usage continues exactly as before.
+      _status = 'not_initialized';
+      _lastError = null;
+      return Promise.resolve(getWorkspaceStatus());
+    }
+
+    _status = 'initializing';
+    _lastError = null;
+
+    _initPromise = createRootFolder()
+      .then(root => {
+        _rootFolderId = root.id;
+        return Promise.all(
+          GOOGLE_WORKSPACE_SUBFOLDERS.map(name =>
+            createFolder(name, _rootFolderId).then(folder => { _subfolderIds[name] = folder.id; })
+          )
+        );
+      })
+      .then(() => {
+        _status = 'ready';
+        _lastError = null;
+        savePersisted();
+        return getWorkspaceStatus();
+      })
+      .catch(err => {
+        // Requirement 8: authentication is left completely untouched here —
+        // this module never signs the user out and never modifies local
+        // application data on a workspace failure. Requirement 9: the app
+        // keeps working offline regardless of this outcome.
+        _status = 'error';
+        _lastError = (err && err.message) || String(err);
+        return getWorkspaceStatus();
+      })
+      .then(result => { _initPromise = null; return result; });
+
+    return _initPromise;
+  }
+
+  // Read-only workspace status (requirement 5, 7). Always a fresh object —
+  // never a live reference.
+  function getWorkspaceStatus() {
+    return {
+      status: _status, // not_initialized | initializing | ready | error
+      ready: _status === 'ready',
+      error: _lastError,
+      provider: 'google',
+      version: GOOGLE_WORKSPACE_VERSION,
+      rootFolderId: _rootFolderId,
+      subfolderIds: Object.assign({}, _subfolderIds)
+    };
+  }
+
+  return {
+    initializeWorkspace,
+    findRootFolder,
+    createRootFolder,
+    findFolder,
+    createFolder,
+    validateWorkspace,
+    getWorkspaceStatus
+  };
+})();
+// ── End Google Drive Workspace Initialization (Phase 6) ──────────────────────────
 
 // ── Persistence ───────────────────────────────────────────────────────────────
 function saveState() {
@@ -6109,6 +6389,25 @@ function renderMastersContent() {
       ? `<div style="font-size:11px;color:var(--red-dark);margin-top:8px">${esc(authStatus.lastError)}</div>`
       : '';
 
+    // Phase 6: workspace status reflects GoogleDriveWorkspace's folder-structure
+    // state only. Deliberately does NOT touch or relabel "Synchronization
+    // Status" above — that placeholder describes data sync, which remains out
+    // of scope until a later phase (requirement 7).
+    const workspaceStatus = (typeof GoogleDriveWorkspace !== 'undefined')
+      ? GoogleDriveWorkspace.getWorkspaceStatus()
+      : { status: 'not_initialized', ready: false, error: null, provider: 'google', rootFolderId: null, subfolderIds: {} };
+    const WORKSPACE_STATUS_LABELS = {
+      not_initialized: 'Not Initialized',
+      initializing:    'Initializing…',
+      ready:            'Ready',
+      error:            'Error'
+    };
+    const workspaceStatusLabel = WORKSPACE_STATUS_LABELS[workspaceStatus.status] || 'Not Initialized';
+    const workspaceReadyLabel = workspaceStatus.ready ? 'Yes' : 'No';
+    const workspaceErrorHtml = workspaceStatus.error
+      ? `<div style="font-size:11px;color:var(--red-dark);margin-top:8px">${esc(workspaceStatus.error)}</div>`
+      : '';
+
     content.innerHTML = `
       <div style="font-size:12px;color:var(--text-secondary);margin-bottom:16px">
         Synchronize your tasks and log history to Google Drive so they're available across devices.
@@ -6170,6 +6469,32 @@ function renderMastersContent() {
         </div>
       </div>
 
+      <!-- Phase 6: Workspace card — reflects live GoogleDriveWorkspace state
+           (folder structure only: TTL/Tasks, TTL/Settings, TTL/Attachments,
+           TTL/Backups). Deliberately shows no synchronization status; that
+           remains the "Synchronization Status" placeholder above, out of
+           scope until a later phase (requirement 7). -->
+      <div style="border:1px solid var(--border-md);border-radius:var(--radius-md);padding:14px;margin-bottom:14px">
+        <div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:10px"><i class="ti ti-folder-cog" style="vertical-align:-2px;margin-right:5px;color:var(--blue-mid)"></i>Workspace</div>
+        <div class="complete-row">
+          <div class="complete-field">
+            <label class="complete-label">Connected Provider</label>
+            <input class="complete-input" value="${esc(providerLabel)}" disabled style="width:100%" />
+          </div>
+          <div class="complete-field">
+            <label class="complete-label">Workspace Status</label>
+            <input class="complete-input" value="${esc(workspaceStatusLabel)}" disabled style="width:100%" />
+          </div>
+        </div>
+        <div class="complete-row" style="margin-top:10px">
+          <div class="complete-field" style="flex:1 1 100%">
+            <label class="complete-label">Workspace Ready</label>
+            <input class="complete-input" value="${esc(workspaceReadyLabel)}" disabled style="width:100%" />
+          </div>
+        </div>
+        ${workspaceErrorHtml}
+      </div>
+
       <!-- Future: queue statistics — will surface counts from TTLSync.Runtime
            once BackgroundSync and the upload/download queues exist
            (see BACKGROUND_SYNC.md §Queue Statistics). Reserved space only. -->
@@ -6224,7 +6549,16 @@ function connectGoogleDrive() {
   // authenticate() flips state to 'connecting' synchronously before any
   // network activity begins, so re-rendering immediately reflects that.
   if (activeMastersTab === 'sync') renderMastersContent();
-  p.then(() => { if (activeMastersTab === 'sync') renderMastersContent(); })
+  p.then(() => {
+      // Phase 6: after successful authentication, prepare the Drive
+      // workspace (folders only — no data is uploaded here). A workspace
+      // failure never signs the user out; GoogleAuthManager's state above is
+      // already committed regardless of what happens next.
+      return (typeof GoogleDriveWorkspace !== 'undefined')
+        ? GoogleDriveWorkspace.initializeWorkspace()
+        : null;
+    })
+   .then(() => { if (activeMastersTab === 'sync') renderMastersContent(); })
    .catch(() => { if (activeMastersTab === 'sync') renderMastersContent(); });
 }
 
@@ -8358,12 +8692,24 @@ function initializeSyncInfrastructure() {
   window.TTLSync.Modules.GoogleAuthManager = GoogleAuthManager;
   LocalSyncManager.Extensions.AuthManager = GoogleAuthManager;
 
+  // Phase 6: register the Google Drive Workspace Initialization module.
+  // Folder management only — no data upload/download, no synchronization.
+  window.TTLSync.Modules.GoogleDriveWorkspace = GoogleDriveWorkspace;
+
   // Phase 5: attempt a silent, non-interactive reconnect if a previous
   // session was connected. Never interactive, never blocking — see
   // attemptSilentReconnectOnLoad()'s own documentation. Refreshes the
   // Synchronization settings tab afterward only if it happens to be the
   // currently open Masters tab.
   GoogleAuthManager.attemptSilentReconnectOnLoad().then(() => {
+    // Phase 6: if that reconnect actually succeeded, prepare the Drive
+    // workspace (folders only). If it didn't, GoogleDriveWorkspace.
+    // initializeWorkspace() itself is a no-op that resolves quietly —
+    // this never blocks startup and never surfaces as an app-level error.
+    return (typeof GoogleDriveWorkspace !== 'undefined')
+      ? GoogleDriveWorkspace.initializeWorkspace()
+      : null;
+  }).then(() => {
     if (typeof activeMastersTab !== 'undefined' && activeMastersTab === 'sync' &&
         typeof renderMastersContent === 'function') {
       renderMastersContent();
