@@ -2315,11 +2315,22 @@ function clearCompletedEntries(queueName) {
 function enqueueTask(task) {
   if (!task || !task._sync || !task._sync.syncId) return null;
   const s = task._sync;
-  return upsertQueueEntry('upload', s.syncId, {
+  const entry = upsertQueueEntry('upload', s.syncId, {
     localId: s.localId,
     operation: s.deleted ? 'delete' : 'upload',
     version: s.version
   });
+  // Phase 17 (Automatic Sync After Local Changes): every task-mutation path
+  // that marks a task dirty already funnels through this single function
+  // (createSyncMetadata(), touchSyncMetadata(), markSyncMetadataDeleted(),
+  // markTaskDirty() — Phase 1/2 above) — the same central hook this phase's
+  // brief asks to reuse rather than wiring an independent sync call into
+  // every UI button individually. This only arms/resets a debounce window;
+  // it never triggers a synchronization pass itself or touches business
+  // data — that only ever happens through BackgroundScheduler (Phase 13)
+  // once the debounce elapses.
+  if (typeof AutoSyncEngine !== 'undefined') AutoSyncEngine.handleLocalChangeForSync();
+  return entry;
 }
 
 // Returns a copy of the current Upload Queue (never the live array — callers
@@ -2656,7 +2667,7 @@ const GoogleAuthManager = (function () {
   let _currentUser    = null;   // { email, name, picture } — cached per token
   let _tokenClient    = null;   // GIS token client instance
   let _gisLoadPromise = null;   // dedupes concurrent script-load attempts
-  let _authState       = 'disconnected'; // disconnected | connecting | connected | expired | error
+  let _authState       = 'disconnected'; // disconnected | connecting | connected | expired | unavailable | error
   let _lastError       = null;
   let _refreshTimer    = null;
 
@@ -2686,6 +2697,17 @@ const GoogleAuthManager = (function () {
     try { localStorage.removeItem(GOOGLE_AUTH_STORAGE_KEY); } catch (e) {}
   }
 
+  // ── Phase 16A: Authentication Persistence helpers ───────────────────────────
+  // Tags an error as "Google API unavailable" (GIS script failed to load, no
+  // network, or no Client ID configured) as opposed to an authentication-
+  // shaped rejection from Google itself (expired/revoked token). Requirement
+  // 5 explicitly calls out not confusing these two — this flag is how
+  // refreshAuthentication()'s catch tells them apart below.
+  function markUnavailableError(err) {
+    err.ttlAuthUnavailable = true;
+    return err;
+  }
+
   // ── Lazy GIS script loading ─────────────────────────────────────────────────
   // Only fetched when authentication is actually attempted, so the app never
   // depends on network access to Google just to load and run normally.
@@ -2698,7 +2720,7 @@ const GoogleAuthManager = (function () {
       const existing = document.querySelector('script[data-ttl-gis]');
       if (existing) {
         existing.addEventListener('load', () => resolve());
-        existing.addEventListener('error', () => reject(new Error('Failed to load Google Identity Services.')));
+        existing.addEventListener('error', () => reject(markUnavailableError(new Error('Failed to load Google Identity Services.'))));
         return;
       }
       const script = document.createElement('script');
@@ -2707,7 +2729,7 @@ const GoogleAuthManager = (function () {
       script.defer = true;
       script.setAttribute('data-ttl-gis', '1');
       script.onload = () => resolve();
-      script.onerror = () => reject(new Error('Failed to load Google Identity Services.'));
+      script.onerror = () => reject(markUnavailableError(new Error('Failed to load Google Identity Services.')));
       document.head.appendChild(script);
     }).catch(err => { _gisLoadPromise = null; throw err; });
     return _gisLoadPromise;
@@ -2716,7 +2738,7 @@ const GoogleAuthManager = (function () {
   function ensureTokenClient() {
     if (_tokenClient) return _tokenClient;
     if (!GOOGLE_AUTH_CLIENT_ID) {
-      throw new Error('Google OAuth Client ID is not configured.');
+      throw markUnavailableError(new Error('Google OAuth Client ID is not configured.'));
     }
     _tokenClient = google.accounts.oauth2.initTokenClient({
       client_id: GOOGLE_AUTH_CLIENT_ID,
@@ -2781,6 +2803,67 @@ const GoogleAuthManager = (function () {
     _authState = 'connected';
     _lastError = null;
     scheduleProactiveRefresh();
+  }
+
+  // ── Phase 16A: Authentication state transitions ─────────────────────────────
+  // Centralizes the "downgrade gracefully, touch nothing else" contract that
+  // requirement 6 (Expired Session) describes, so refreshAuthentication() and
+  // validateAuthentication() apply it identically instead of repeating it
+  // inline. Never clears tasks, never clears sync queues, never clears the
+  // persisted connection hint — a degraded session should still attempt a
+  // silent reconnect on the next load (that's the whole point of this phase).
+  function handleAuthenticationExpired(err) {
+    _accessToken = null;
+    _tokenExpiresAt = null;
+    _authState = 'expired';
+    _lastError = (err && err.message) || String(err || 'Authentication session expired.');
+    return getStatus();
+  }
+
+  // GOOGLE_DRIVE_CLIENT.md §8/§12 ("Revoked permissions") is explicit that a
+  // revoked grant surfaces through the same ordinary Drive/GIS failures as an
+  // expired token and is routed through the Authentication Manager exactly
+  // like an expired token — no separate client-side detection path is meant
+  // to exist. This function is kept as its own named entry point (per this
+  // phase's naming guidance) but intentionally delegates to the same
+  // handling as handleAuthenticationExpired() rather than duplicating it.
+  function handleAuthenticationRevoked(err) {
+    return handleAuthenticationExpired(err);
+  }
+
+  // "Google API unavailable" (no network, GIS script failed to load, no
+  // Client ID configured) — distinct from every user-session state above per
+  // requirement 5. Local data, queues, and the persisted hint are equally
+  // untouched here; the only difference from handleAuthenticationExpired()
+  // is the state value, so the UI/LocalSyncManager can tell "Google itself
+  // said no" apart from "we couldn't even reach Google."
+  function markAuthenticationUnavailable(err) {
+    _accessToken = null;
+    _tokenExpiresAt = null;
+    _authState = 'unavailable';
+    _lastError = (err && err.message) || String(err || 'Google authentication is unavailable.');
+    return getStatus();
+  }
+
+  // Canonical five-state view (requirement 5) derived from the existing,
+  // finer-grained _authState machine rather than a second parallel state
+  // variable — 'connecting' and the interactive-only 'error' state both
+  // read as NOT_AUTHENTICATED here, since neither represents an established
+  // session. getStatus().state keeps the finer-grained value for the
+  // existing Settings UI (requirement 10); this is the coarse view for any
+  // caller (e.g. a future LocalSyncManager consumer) that only needs the
+  // five canonical buckets.
+  function getAuthenticationState() {
+    switch (_authState) {
+      case 'connected':   return 'AUTHENTICATED';
+      case 'expired':      return 'AUTHENTICATION_EXPIRED';
+      case 'unavailable':  return 'AUTHENTICATION_UNAVAILABLE';
+      case 'disconnected':
+      case 'connecting':
+      case 'error':
+      default:
+        return 'NOT_AUTHENTICATED';
+    }
   }
 
   // ── Public helper functions (requirement 5) ─────────────────────────────────
@@ -2856,7 +2939,10 @@ const GoogleAuthManager = (function () {
     }).then(res => {
       if (res.ok) return { result: 'valid' };
       if (res.status === 401 || res.status === 403) {
-        _authState = 'expired';
+        // Per GOOGLE_DRIVE_CLIENT.md, a rejected token here may mean expired
+        // or revoked — both route through the same handler (see
+        // handleAuthenticationRevoked()'s comment above for why).
+        handleAuthenticationExpired(new Error('Google rejected the current authentication (' + res.status + ').'));
         return { result: 'invalid', reason: 'rejected', status: res.status };
       }
       return { result: 'inconclusive', reason: 'http-' + res.status };
@@ -2880,14 +2966,14 @@ const GoogleAuthManager = (function () {
         });
       })
       .catch(err => {
-        _accessToken = null;
-        _tokenExpiresAt = null;
-        _authState = 'expired';
-        _lastError = (err && err.message) || String(err);
         // Deliberately does NOT clear the persisted hint here — a failed
         // silent refresh means "needs an interactive reconnect next time,"
-        // not "the user disconnected."
-        return getStatus();
+        // not "the user disconnected." Requirement 5: an unreachable GIS
+        // script / missing Client ID is reported as AUTHENTICATION_UNAVAILABLE,
+        // not conflated with an ordinary expired/revoked session.
+        return (err && err.ttlAuthUnavailable)
+          ? markAuthenticationUnavailable(err)
+          : handleAuthenticationExpired(err);
       });
   }
 
@@ -2898,7 +2984,15 @@ const GoogleAuthManager = (function () {
   // available (requirement 10, backward compatibility).
   function attemptSilentReconnectOnLoad() {
     const hint = loadPersistedHint();
-    if (!hint || !hint.connected || !GOOGLE_AUTH_CLIENT_ID) return Promise.resolve(getStatus());
+    if (!hint || !hint.connected) return Promise.resolve(getStatus());
+    // A previous session was connected, but Google auth can't even be
+    // attempted right now — requirement 5: this is AUTHENTICATION_UNAVAILABLE,
+    // not "the user is signed out," so it must not silently look identical
+    // to NOT_AUTHENTICATED. The persisted hint is left untouched — the next
+    // load may find a Client ID configured again.
+    if (!GOOGLE_AUTH_CLIENT_ID) {
+      return Promise.resolve(markAuthenticationUnavailable(new Error('Google OAuth Client ID is not configured.')));
+    }
     if (hint.email || hint.name) _currentUser = { email: hint.email || null, name: hint.name || null, picture: null };
     _authState = 'connecting';
     return refreshAuthentication();
@@ -2906,7 +3000,7 @@ const GoogleAuthManager = (function () {
 
   function getStatus() {
     return {
-      state: _authState, // disconnected | connecting | connected | expired | error
+      state: _authState, // disconnected | connecting | connected | expired | unavailable | error
       authenticated: isAuthenticated(),
       provider: isAuthenticated() ? 'Google Drive' : null,
       user: getCurrentUser(),
@@ -2934,7 +3028,15 @@ const GoogleAuthManager = (function () {
     refreshAuthentication,
     attemptSilentReconnectOnLoad,
     getStatus,
-    getAccessTokenForClient
+    getAccessTokenForClient,
+    // Phase 16A: Authentication Persistence additions. getAuthenticationState()
+    // is the canonical five-state view (requirement 5); the two handlers are
+    // exposed under the names this phase's requirements suggested, in case a
+    // future module wants to invoke the same recovery path directly rather
+    // than only reach it via refreshAuthentication()/validateAuthentication().
+    getAuthenticationState,
+    handleAuthenticationExpired,
+    handleAuthenticationRevoked
   };
 })();
 // ── End Google Authentication Manager (Phase 5) ──────────────────────────────────
@@ -4886,6 +4988,24 @@ const IncrementalSyncEngine = (function () {
         // Never let a conflict-detection failure interrupt the sync plan.
       }
 
+      // ── Phase 15: Conflict Resolution ─────────────────────────────────
+      // Runs strictly AFTER Phase 14's scan just above has (re)populated
+      // the Conflict Queue for this pass, and — like Phase 14 — never
+      // touches `plan`/`statistics` themselves. Classifies/auto-resolves
+      // exactly what CONFLICT_RESOLUTION.md §4 marks safe (see
+      // ConflictResolver's own header comment); everything else is left
+      // Pending Manual Resolution in the same queue for the user to act on
+      // from the Synchronization tab. Wrapped defensively for the same
+      // reason as Phase 14's own call just above: a resolution failure of
+      // any kind must never break synchronization for the rest of the plan.
+      try {
+        if (typeof ConflictResolver !== 'undefined' && typeof ConflictResolver.autoResolvePendingConflicts === 'function') {
+          ConflictResolver.autoResolvePendingConflicts();
+        }
+      } catch (err) {
+        // Never let a conflict-resolution failure interrupt the sync plan.
+      }
+
       _status = 'complete';
       const result = {
         ok: true,
@@ -5322,6 +5442,505 @@ if (typeof IncrementalSyncEngine !== 'undefined' && IncrementalSyncEngine.Extens
 }
 // ── End Conflict Detection (Phase 14) ──────────────────────────────────────────
 
+// ── Conflict Resolution (Phase 15) ───────────────────────────────────────────────
+// Implements ONLY this phase's brief (CONFLICT_RESOLUTION.md §4/§5/§6/§7/§12):
+// resolve the conflicts Phase 14 already detected and recorded in the existing
+// 'conflict' queue. This module NEVER detects a new conflict itself (it only
+// ever reads/updates entries scanForConflicts()/enqueueConflict() already
+// created), NEVER modifies the upload pipeline (BatchTaskUpload/
+// SingleTaskUpload), NEVER modifies the download/pull pipeline
+// (GoogleDriveWorkspace/SingleTaskMerge/BatchCloudMerge — it only CALLS their
+// already-existing read/merge entry points), and NEVER modifies
+// IncrementalSyncEngine's own plan-building logic.
+//
+// Reuses, never reinvents:
+//   - the 'conflict' queue (Phase 3/14) via findQueueEntry()/updateQueueEntry()/
+//     getConflictQueue() — no second queue is created (requirement 1).
+//   - SingleTaskMerge.downloadCurrentState() / validateRemoteTask() /
+//     completeTaskMerge() (Phase 10) for every resolution that needs the
+//     remote copy of a task — this module never opens its own Drive read
+//     path and never re-implements the merge-onto-local-task mechanics.
+//   - ensureSyncMetadata() / computeTaskChecksum() / computeTaskContentHash() /
+//     getDeviceId() / enqueueTask() (Phase 1/3) for every resolution that
+//     keeps the local copy — the exact same metadata bookkeeping every other
+//     confirmed mutation in this file already goes through.
+//   - saveState() (existing) for persistence — no parallel storage path for
+//     task data.
+//
+// Policy source: every resolution strategy implemented below is taken
+// directly from CONFLICT_RESOLUTION.md §5 (Resolution Strategies) and §4
+// (Automatic Resolution Allowed), matched against the CONFLICT_TYPES Phase 14
+// already emits. No new policy is invented:
+//   - VERSION_MISMATCH (both Versions advanced, Checksums identical) →
+//     automatic (§4 bullet 2: "Both Versions advanced but Checksums match...
+//     the system reconciles the metadata... without prompting").
+//   - BOTH_MODIFIED ("same task edited on multiple devices") → manual,
+//     Keep Local / Keep Cloud (§5).
+//   - DELETED_LOCAL_MODIFIED_REMOTE / DELETED_REMOTE_MODIFIED_LOCAL
+//     ("task deleted on one device, edited on another") → manual, framed as
+//     Restore / Confirm Deletion (§5, §7).
+//   - MISSING_METADATA / CORRUPTED_METADATA / TIMESTAMP_INCONSISTENCY /
+//     UNKNOWN_SYNC_STATE / DUPLICATE_SYNC_IDENTITY — diagnostic conditions
+//     Phase 14 itself flags, none of which CONFLICT_RESOLUTION.md defines a
+//     safe automatic OR manual field-level strategy for (they are exactly
+//     the "Corrupted metadata... surfaced as an actionable failure requiring
+//     investigation" case, §10). This module never guesses at a resolution
+//     for these — it reports them as Resolution Failed (requirement 9) and
+//     leaves both sides completely untouched.
+//
+// Never overwrite (CONFLICT_RESOLUTION.md §5, "a standing rule, not a single
+// row"): every path below either (a) reconciles bookkeeping only where
+// content already matches, (b) applies a resolution the user explicitly
+// chose, or (c) fails closed without touching either side. Nothing here ever
+// silently discards a side the user has not been shown.
+const CONFLICT_HISTORY_STORAGE_KEY = 'ttl_conflict_history';
+const CONFLICT_HISTORY_SCHEMA_VERSION = 1;
+
+// In-memory Conflict History — loaded from localStorage by
+// loadConflictHistory() (called from loadState(), alongside loadQueues()).
+// Distinct from the live Conflict Queue (syncQueues.conflict), exactly as
+// CONFLICT_RESOLUTION.md §12 requires: "distinct from the live Conflict
+// Metadata used to drive the resolution UI, which is cleared once resolved.
+// Audit information persists after resolution." Nothing in this file ever
+// removes an entry from this array — it is append-only (requirement 7,
+// "This history must be read-only" from the outside; internally, only
+// appendConflictHistory() below ever writes to it).
+let conflictHistory = [];
+
+function loadConflictHistory() {
+  try {
+    const raw = localStorage.getItem(CONFLICT_HISTORY_STORAGE_KEY);
+    if (!raw) { conflictHistory = []; return; }
+    const parsed = JSON.parse(raw);
+    conflictHistory = (parsed && Array.isArray(parsed.entries)) ? parsed.entries : [];
+  } catch (e) { conflictHistory = []; }
+}
+
+function saveConflictHistory() {
+  try {
+    localStorage.setItem(CONFLICT_HISTORY_STORAGE_KEY, JSON.stringify({
+      schemaVersion: CONFLICT_HISTORY_SCHEMA_VERSION,
+      entries: conflictHistory
+    }));
+  } catch (e) {}
+}
+
+// appendConflictHistory(): requirement 7 — records exactly the fields
+// CONFLICT_RESOLUTION.md §12 lists as Audit Information: Conflict ID,
+// Resolution Time, Resolution Type, Automatic/Manual, Previous Versions,
+// Final Version. Always a NEW record — history is never edited or removed
+// (append-only), so a later bug in one resolution can never quietly rewrite
+// what an earlier one already recorded.
+function appendConflictHistory(record) {
+  const entry = {
+    conflictId: record.conflictId,
+    taskId: (typeof record.taskId === 'number') ? record.taskId : null,
+    conflictType: record.conflictType || null,
+    resolutionTime: Date.now(),
+    resolutionType: record.resolutionType || null,
+    automatic: !!record.automatic,
+    previousLocalVersion: (typeof record.previousLocalVersion === 'number') ? record.previousLocalVersion : null,
+    previousRemoteVersion: (typeof record.previousRemoteVersion === 'number') ? record.previousRemoteVersion : null,
+    finalVersion: (typeof record.finalVersion === 'number') ? record.finalVersion : null,
+    outcome: record.outcome || 'resolved', // 'resolved' | 'failed'
+    detail: record.detail || null
+  };
+  conflictHistory.push(entry);
+  saveConflictHistory();
+  return entry;
+}
+
+// getConflictHistory(): a copy of the current history (never the live
+// array), matching every other queue/history getter in this file.
+function getConflictHistory() {
+  return conflictHistory.slice();
+}
+
+const ConflictResolver = (function () {
+  // Conflict types this module can never safely resolve — neither
+  // automatically nor via a user choice — because CONFLICT_RESOLUTION.md
+  // defines no field-level or delete-vs-edit strategy for them; they are
+  // data-integrity diagnostics, not content divergence (see module header).
+  const UNRESOLVABLE_TYPES = [
+    CONFLICT_TYPES.MISSING_METADATA,
+    CONFLICT_TYPES.CORRUPTED_METADATA,
+    CONFLICT_TYPES.TIMESTAMP_INCONSISTENCY,
+    CONFLICT_TYPES.UNKNOWN_SYNC_STATE,
+    CONFLICT_TYPES.DUPLICATE_SYNC_IDENTITY
+  ];
+  // Valid manual choices per conflict type (requirement 3/5) — the only
+  // shapes CONFLICT_RESOLUTION.md §5 defines for these two conflict types.
+  const MANUAL_CHOICES = {
+    BOTH_MODIFIED: ['keep-local', 'keep-cloud'],
+    DELETED_LOCAL_MODIFIED_REMOTE: ['restore', 'confirm-deletion'],
+    DELETED_REMOTE_MODIFIED_LOCAL: ['restore', 'confirm-deletion']
+  };
+
+  // findLocalTaskForConflict(): requirement 9 (Missing local task) —
+  // locates the local counterpart using ONLY synchronization identity, same
+  // as every other sync module's lookup (SingleTaskMerge.findRemoteTask(),
+  // BatchCloudMerge.findLocalTaskBySyncId()). Returns null (never throws)
+  // when the task no longer exists locally — callers treat that as a
+  // failure, never as "nothing to do."
+  function findLocalTaskForConflict(entry) {
+    if (!entry || !entry.syncId || !Array.isArray(tasks)) return null;
+    return tasks.find(t => t && t._sync && t._sync.syncId === entry.syncId) || null;
+  }
+
+  // failConflict(): requirement 9 — the single path every failure below
+  // routes through. Marks the queue entry 'resolution_failed' (a status
+  // distinct from both 'pending'/'manual_pending' and 'completed', so the
+  // UI's requirement 8 buckets can tell them apart), records the failure in
+  // the read-only Conflict History (never silently dropped), and — critically
+  // — touches NOTHING else. Neither the local task nor the queue entry's own
+  // comparison fields (localVersion/remoteVersion/conflictType/detail) are
+  // ever modified here, so a failed resolution attempt can always be
+  // retried later with the exact same inputs once the underlying problem
+  // (e.g. a transient network failure) is gone.
+  function failConflict(syncId, reason, err) {
+    const entry = findQueueEntry(syncId, 'conflict');
+    updateQueueEntry(syncId, 'conflict', {
+      status: 'resolution_failed',
+      failureReason: reason || 'unexpected-resolution-failure',
+      failureDetail: (err && err.message) || (typeof err === 'string' ? err : null)
+    });
+    appendConflictHistory({
+      conflictId: syncId,
+      taskId: entry ? entry.taskId : null,
+      conflictType: entry ? entry.conflictType : null,
+      resolutionType: 'failed',
+      automatic: false,
+      previousLocalVersion: entry ? entry.localVersion : null,
+      previousRemoteVersion: entry ? entry.remoteVersion : null,
+      finalVersion: null,
+      outcome: 'failed',
+      detail: reason || 'unexpected-resolution-failure'
+    });
+    return { ok: false, reason: reason || 'unexpected-resolution-failure' };
+  }
+
+  // markManualResolutionRequired(): requirement 5/6 — an explicit helper
+  // (not just detection's own default 'pending' status) that marks a queue
+  // entry as needing a human decision. Leaves BOTH the local task and the
+  // remote copy completely unchanged (requirement 5: "Leave both versions
+  // unchanged. Keep the conflict in the queue."). Idempotent — calling this
+  // repeatedly on the same entry just refreshes its classification, never
+  // duplicates anything.
+  function markManualResolutionRequired(syncId, reason) {
+    return updateQueueEntry(syncId, 'conflict', {
+      status: 'manual_pending',
+      manualReason: reason || null
+    });
+  }
+
+  // completeConflict(): requirement 4/6/7 — the single shared "resolution
+  // succeeded" path every automatic and manual resolver below funnels
+  // through. Updates: Queue state (status → 'completed', requirement 4),
+  // Conflict status (implied by status, requirement 4), and appends the
+  // read-only Conflict History record (requirement 7). Local task and
+  // Synchronization metadata are ALREADY updated by the caller before this
+  // runs (requirement 4) — this function's only remaining job is queue +
+  // history bookkeeping, so every resolution path updates those two places
+  // exactly the same way.
+  function completeConflict(syncId, record) {
+    const entry = findQueueEntry(syncId, 'conflict');
+    updateQueueEntry(syncId, 'conflict', {
+      status: 'completed',
+      resolutionType: record.resolutionType,
+      automatic: !!record.automatic,
+      resolvedAt: Date.now()
+    });
+    appendConflictHistory({
+      conflictId: syncId,
+      taskId: record.taskId,
+      conflictType: entry ? entry.conflictType : record.conflictType,
+      resolutionType: record.resolutionType,
+      automatic: record.automatic,
+      previousLocalVersion: record.previousLocalVersion,
+      previousRemoteVersion: record.previousRemoteVersion,
+      finalVersion: record.finalVersion,
+      outcome: 'resolved',
+      detail: record.detail || null
+    });
+  }
+
+  // skipConflict(): requirement 6 — lets the user explicitly defer a
+  // pending conflict without resolving it. Never changes `status` (the
+  // conflict remains exactly as pending/manual_pending as before — it is
+  // NOT completed, NOT failed), so it can never be mistaken for an actual
+  // resolution in the queue/history. Purely a "when did the user last look
+  // at this and choose not to act" timestamp for the UI.
+  function skipConflict(syncId) {
+    return updateQueueEntry(syncId, 'conflict', { lastSkippedAt: Date.now() });
+  }
+
+  // resolveAutomatically(): requirement 3 — the ONLY automatic path this
+  // module implements, matching CONFLICT_RESOLUTION.md §4's single
+  // automatic-allowed case that can actually appear in the Conflict Queue
+  // (VERSION_MISMATCH — "both Versions advanced but Checksums match... the
+  // system reconciles the metadata... without prompting"). Never invents an
+  // automatic resolution for any other conflict type (requirement 3: "If
+  // architecture requires manual resolution, do not resolve automatically").
+  function resolveAutomatically(syncId) {
+    const entry = findQueueEntry(syncId, 'conflict');
+    if (!entry) return { ok: false, reason: 'invalid-conflict' };
+    if (entry.status === 'completed') return { ok: true, alreadyResolved: true };
+    if (entry.conflictType !== CONFLICT_TYPES.VERSION_MISMATCH) {
+      return { ok: false, reason: 'not-auto-eligible' };
+    }
+    try {
+      const localTask = findLocalTaskForConflict(entry);
+      if (!localTask) return failConflict(syncId, 'missing-local-task');
+
+      // Requirement 4: Local task (business fields — untouched, content
+      // already matches per Checksum), Synchronization metadata (updated
+      // below), Queue state + Conflict status (completeConflict()),
+      // Synchronization status (updated below).
+      ensureSyncMetadata(localTask);
+      const s = localTask._sync;
+      const prevLocalVersion = s.version;
+      const prevRemoteVersion = (typeof entry.remoteVersion === 'number') ? entry.remoteVersion : prevLocalVersion;
+      const targetVersion = Math.max(prevLocalVersion, prevRemoteVersion);
+      s.version = targetVersion;
+      s.lastSync = Date.now();
+      s.syncStatus = 'synced';
+      s.dirty = false;
+      s.checksum = computeTaskChecksum(localTask);
+      s.contentHash = computeTaskContentHash(localTask);
+      removeQueueEntry(s.syncId, 'upload');
+      saveState();
+
+      completeConflict(syncId, {
+        resolutionType: 'version-reconcile',
+        automatic: true,
+        previousLocalVersion: prevLocalVersion,
+        previousRemoteVersion: prevRemoteVersion,
+        finalVersion: targetVersion,
+        taskId: localTask.id,
+        detail: 'Content already identical (Checksum match) — version bookkeeping reconciled only'
+      });
+      return { ok: true, resolved: true, resolutionType: 'version-reconcile', taskId: localTask.id };
+    } catch (err) {
+      return failConflict(syncId, 'unexpected-resolution-failure', err);
+    }
+  }
+
+  // autoResolvePendingConflicts(): requirement 3 — the single entry point
+  // IncrementalSyncEngine calls right after Phase 14's scanForConflicts() on
+  // every sync pass (see the wiring at the end of buildSyncPlan() above).
+  // Classifies every freshly-(re)detected entry exactly once: auto-eligible
+  // conflicts are resolved immediately and silently (§4/§11 — "automatic
+  // never means invisible to audit, only invisible to the user's
+  // moment-to-moment attention"); conflicts this module cannot safely
+  // resolve at all are marked Resolution Failed (requirement 9); everything
+  // else is classified Pending Manual Resolution (requirement 5) and left
+  // completely untouched for the user to act on via resolveConflict().
+  // Wrapped so one malformed entry can never stop the rest from being
+  // classified (requirement 9, "never lose user data" — the worst case here
+  // is a single entry staying at its previous status for one more pass).
+  function autoResolvePendingConflicts() {
+    const q = syncQueues.conflict.slice();
+    let resolved = 0, markedManual = 0, failed = 0;
+    q.forEach(entry => {
+      if (!entry || entry.status === 'completed' || entry.status === 'resolution_failed') return;
+      try {
+        if (entry.conflictType === CONFLICT_TYPES.VERSION_MISMATCH) {
+          const r = resolveAutomatically(entry.syncId);
+          if (r && r.ok && r.resolved) resolved++; else if (r && !r.ok) failed++;
+        } else if (UNRESOLVABLE_TYPES.indexOf(entry.conflictType) !== -1) {
+          failConflict(entry.syncId, 'unsupported-conflict-type');
+          failed++;
+        } else {
+          markManualResolutionRequired(entry.syncId);
+          markedManual++;
+        }
+      } catch (err) {
+        try { failConflict(entry.syncId, 'unexpected-resolution-failure', err); } catch (e2) {}
+        failed++;
+      }
+    });
+    return { scanned: q.length, resolved: resolved, markedManual: markedManual, failed: failed };
+  }
+
+  // resolveConflict(): the single public entry point for USER-driven
+  // resolution (requirement 6) — mirrors mergeSingleTask()'s
+  // Promise-returning, never-throwing contract so its UI click handler can
+  // follow the exact same render-before/render-after pattern every other
+  // sync card in this file already uses. `choice` is optional: omitted for
+  // VERSION_MISMATCH (always automatic) and required for BOTH_MODIFIED /
+  // DELETED_LOCAL_MODIFIED_REMOTE / DELETED_REMOTE_MODIFIED_LOCAL (always
+  // manual) — see MANUAL_CHOICES above for the exact allowed values per type.
+  function resolveConflict(syncId, choice) {
+    let entry;
+    try {
+      entry = findQueueEntry(syncId, 'conflict');
+    } catch (err) {
+      return Promise.resolve(failConflict(syncId, 'unexpected-resolution-failure', err));
+    }
+    // Requirement 9 (Invalid conflict): no matching queue entry at all.
+    if (!entry) return Promise.resolve({ ok: false, reason: 'invalid-conflict' });
+    if (entry.status === 'completed') return Promise.resolve({ ok: true, alreadyResolved: true });
+
+    const type = entry.conflictType;
+
+    // The one automatic case — never gated behind a user choice.
+    if (type === CONFLICT_TYPES.VERSION_MISMATCH) {
+      return Promise.resolve(resolveAutomatically(syncId));
+    }
+
+    // Requirement 3: everything this module has no defined safe strategy
+    // for is a failure, never an automatic guess and never something the UI
+    // is offered a "choice" for.
+    if (UNRESOLVABLE_TYPES.indexOf(type) !== -1) {
+      return Promise.resolve(failConflict(syncId, 'unsupported-conflict-type'));
+    }
+
+    const allowedChoices = MANUAL_CHOICES[type];
+    if (!allowedChoices) {
+      return Promise.resolve(failConflict(syncId, 'unsupported-conflict-type'));
+    }
+    if (!choice) {
+      // Requirement 5: no choice yet — classify as pending and stop; both
+      // sides stay exactly as they are.
+      markManualResolutionRequired(syncId);
+      return Promise.resolve({ ok: false, reason: 'manual-resolution-required', pending: true });
+    }
+    if (allowedChoices.indexOf(choice) === -1) {
+      return Promise.resolve({ ok: false, reason: 'invalid-choice' });
+    }
+
+    let localTask;
+    try {
+      localTask = findLocalTaskForConflict(entry);
+    } catch (err) {
+      return Promise.resolve(failConflict(syncId, 'unexpected-resolution-failure', err));
+    }
+    // Requirement 9 (Missing local task).
+    if (!localTask) return Promise.resolve(failConflict(syncId, 'missing-local-task'));
+
+    const prevLocalVersion = localTask._sync.version;
+    const prevRemoteVersion = entry.remoteVersion;
+
+    // finalizeLocalWins(): "Keep Local" (BOTH_MODIFIED), "Confirm Deletion"
+    // on a locally-deleted task, or "Restore" on a remotely-deleted task —
+    // the three cases where the LOCAL copy is what must reach the cloud
+    // next. Per CONFLICT_RESOLUTION.md §7 ("Restore behaviour... produces a
+    // new, higher Version... never a rewound Version number") the resulting
+    // Version is always strictly greater than both sides' previous Version,
+    // so this resolution is guaranteed to win the next sync pass rather
+    // than silently losing to a stale remote copy. Never touches upload
+    // logic itself (requirement: DO NOT modify upload logic) — it only
+    // marks the task Dirty and refreshes its existing Upload Queue entry
+    // via enqueueTask(), exactly like every other confirmed local edit in
+    // this file already does; the existing upload pipeline picks it up on
+    // its own next pass.
+    function finalizeLocalWins(forceDeleted) {
+      ensureSyncMetadata(localTask);
+      const s = localTask._sync;
+      const targetVersion = Math.max(s.version, (typeof prevRemoteVersion === 'number' ? prevRemoteVersion : 0)) + 1;
+      s.version = targetVersion;
+      s.modifiedAt = Date.now();
+      s.deviceId = getDeviceId();
+      if (typeof forceDeleted === 'boolean') s.deleted = forceDeleted;
+      s.checksum = computeTaskChecksum(localTask);
+      s.contentHash = computeTaskContentHash(localTask);
+      s.dirty = true;
+      s.syncStatus = 'dirty';
+      enqueueTask(localTask);
+      saveState();
+      completeConflict(syncId, {
+        resolutionType: choice, automatic: false,
+        previousLocalVersion: prevLocalVersion, previousRemoteVersion: prevRemoteVersion,
+        finalVersion: targetVersion, taskId: localTask.id
+      });
+      return { ok: true, resolved: true, resolutionType: choice, taskId: localTask.id };
+    }
+
+    // finalizeRemoteWins(): "Keep Cloud" (BOTH_MODIFIED), "Restore" on a
+    // locally-deleted task (adopts the remote's non-deleted content — the
+    // literal meaning of "restore" here), or "Confirm Deletion" on a
+    // remotely-deleted task (adopts the remote's Deleted Flag). All three
+    // reuse SingleTaskMerge.completeTaskMerge() UNCHANGED (requirement: DO
+    // NOT modify download logic) — the exact same field-merge +
+    // metadata-adoption + Dirty-clear + Upload-Queue-removal + saveState()
+    // effect Phase 10 already established, never re-implemented here.
+    function finalizeRemoteWins(remoteTask) {
+      SingleTaskMerge.completeTaskMerge(localTask, remoteTask);
+      completeConflict(syncId, {
+        resolutionType: choice, automatic: false,
+        previousLocalVersion: prevLocalVersion, previousRemoteVersion: prevRemoteVersion,
+        finalVersion: localTask._sync.version, taskId: localTask.id
+      });
+      return { ok: true, resolved: true, resolutionType: choice, taskId: localTask.id };
+    }
+
+    const needsRemote =
+      (choice === 'keep-cloud') ||
+      (type === CONFLICT_TYPES.DELETED_LOCAL_MODIFIED_REMOTE && choice === 'restore') ||
+      (type === CONFLICT_TYPES.DELETED_REMOTE_MODIFIED_LOCAL && choice === 'confirm-deletion');
+
+    try {
+      if (!needsRemote) {
+        let forceDeleted; // undefined = leave Deleted Flag exactly as it is
+        if (type === CONFLICT_TYPES.DELETED_LOCAL_MODIFIED_REMOTE && choice === 'confirm-deletion') forceDeleted = true;
+        if (type === CONFLICT_TYPES.DELETED_REMOTE_MODIFIED_LOCAL && choice === 'restore') forceDeleted = false;
+        return Promise.resolve(finalizeLocalWins(forceDeleted));
+      }
+
+      // Requirement 9 (Missing remote task / network failure): reuses
+      // SingleTaskMerge's OWN read path — never a second Drive read
+      // mechanism — and its OWN reason codes (not-authenticated,
+      // workspace-not-ready, no-remote-file, corrupt-json, invalid-shape,
+      // checksum-mismatch) surface unchanged through failConflict().
+      return SingleTaskMerge.downloadCurrentState().then(dl => {
+        if (!dl || !dl.ok) {
+          return failConflict(syncId, (dl && dl.reason) || 'remote-fetch-failed');
+        }
+        const remoteTasksList = (dl.parsed && Array.isArray(dl.parsed.tasks)) ? dl.parsed.tasks : [];
+        const remoteTask = remoteTasksList.find(t => t && t._sync && t._sync.syncId === syncId) || null;
+        if (!remoteTask || !SingleTaskMerge.validateRemoteTask(remoteTask)) {
+          return failConflict(syncId, 'missing-remote-task');
+        }
+        return finalizeRemoteWins(remoteTask);
+      }).catch(err => failConflict(syncId, 'unexpected-resolution-failure', err));
+    } catch (err) {
+      return Promise.resolve(failConflict(syncId, 'unexpected-resolution-failure', err));
+    }
+  }
+
+  // getResolutionStatistics(): requirement 8 — read-only diagnostics for
+  // the Synchronization UI's Conflicts card, matching every other
+  // statistics getter in this file (always a fresh object, never a live
+  // reference). Buckets exactly the four values requirement 8 asks for:
+  // Resolved, Pending Manual Resolution, Resolution Failed, Conflict Count.
+  function getResolutionStatistics() {
+    const q = syncQueues.conflict;
+    const resolved = q.filter(e => e.status === 'completed');
+    const pendingManual = q.filter(e => e.status === 'manual_pending' || e.status === 'pending');
+    const failed = q.filter(e => e.status === 'resolution_failed');
+    return {
+      conflictCount: q.length,
+      resolved: resolved.length,
+      pendingManualResolution: pendingManual.length,
+      resolutionFailed: failed.length,
+      manualEntries: pendingManual.slice(),
+      failedEntries: failed.slice()
+    };
+  }
+
+  return {
+    resolveConflict,
+    resolveAutomatically,
+    autoResolvePendingConflicts,
+    markManualResolutionRequired,
+    completeConflict,
+    skipConflict,
+    findLocalTaskForConflict,
+    getResolutionStatistics
+  };
+})();
+// ── End Conflict Resolution (Phase 15) ────────────────────────────────────────
+
 // ── Background Synchronization Scheduler (Phase 13) ─────────────────────────────
 // Implements ONLY this phase's brief: a scheduler that decides WHEN a
 // synchronization pass should run and coordinates running it. It NEVER
@@ -5483,6 +6102,21 @@ const BackgroundScheduler = (function () {
   // ── scheduleSync(): the single gate every trigger passes through
   // (requirement 4, 6). Ignores a trigger outright when a pass is already
   // running, and skips automatic triggers when gating blocks apply. ───────
+  // Phase 17, requirement 6/7: notifies AutoSyncEngine once a pass through
+  // this function has actually settled (blocked, failed-to-start, or run to
+  // completion) — never called for the "already-running" early-return above,
+  // since nothing settled there. This is the single point every trigger
+  // (automatic AND manual) already passes through, so it's also the single
+  // point Phase 17 needs to hook to decide whether a follow-up debounced
+  // sync is warranted (new dirty work appeared during/after this pass).
+  // Read-only from this module's perspective — never re-runs planning,
+  // upload, or download itself.
+  function notifyAutoSyncSettled() {
+    if (typeof AutoSyncEngine !== 'undefined' && typeof AutoSyncEngine.onSyncPassSettled === 'function') {
+      AutoSyncEngine.onSyncPassSettled();
+    }
+  }
+
   function scheduleSync(trigger, opts) {
     const manual = !!(opts && opts.manual);
     if (_running) {
@@ -5494,6 +6128,7 @@ const BackgroundScheduler = (function () {
       const blockReason = gatingBlockReason();
       if (blockReason) {
         _status = (blockReason === 'sync-disabled') ? 'paused' : 'waiting';
+        notifyAutoSyncSettled();
         return Promise.resolve({ ok: false, reason: blockReason, trigger });
       }
     } else if (!isAuthenticatedNow() || !isWorkspaceReadyNow()) {
@@ -5504,10 +6139,14 @@ const BackgroundScheduler = (function () {
       // to succeed.
       _status = 'failed';
       _lastResult = { ok: false, reason: !isAuthenticatedNow() ? 'not-authenticated' : 'workspace-unavailable', trigger };
+      notifyAutoSyncSettled();
       return Promise.resolve(_lastResult);
     }
     _status = 'scheduled';
-    return runSynchronizationPass(trigger);
+    return runSynchronizationPass(trigger).then(result => {
+      notifyAutoSyncSettled();
+      return result;
+    });
   }
 
   // startSynchronization(): the Manual Sync entry point (requirement 3) —
@@ -5560,30 +6199,31 @@ const BackgroundScheduler = (function () {
         typeof renderMastersContent === 'function') {
       renderMastersContent();
     }
+    // Phase 16B, requirement 6: every automatic trigger funnels through
+    // scheduleSync().then(refreshSyncTabIfOpen) — this is therefore the one
+    // place to reconcile the running-task timer after ANY automatic pass
+    // settles (success, no-op, or failure), without adding a new trigger.
+    if (typeof reconcileRunningTaskAfterSync === 'function') reconcileRunningTaskAfterSync();
   }
 
+  // initializeScheduler(): idempotent. As of Phase 18 (Smart Sync
+  // Triggers), this function ONLY sets up the Scheduled Interval fallback
+  // trigger (BACKGROUND_SYNC.md §3 — "the fallback trigger, not the
+  // primary one"). Every other automatic trigger this function used to
+  // wire directly (startup, focus, visibility, network) is now supervised
+  // by SmartSyncTriggers (Phase 18) further below, which funnels every
+  // decision back through THIS module's own scheduleSync() — never a
+  // second scheduler or sync engine. Kept as its own function/name for
+  // backward compatibility with its existing call site
+  // (initializeSyncInfrastructure()).
   function initializeScheduler() {
     if (_initialized) return getSchedulerStatus(); // idempotent — safe to call more than once
     _initialized = true;
 
-    // Browser regains focus.
-    window.addEventListener('focus', () => scheduleSync('focus').then(refreshSyncTabIfOpen));
-
-    // Browser tab becomes visible.
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') scheduleSync('visibility').then(refreshSyncTabIfOpen);
-    });
-
-    // Network becomes available — short-circuits anything that was only
-    // waiting on connectivity (BACKGROUND_SYNC.md §2, §4).
-    window.addEventListener('online', () => scheduleSync('network-restored').then(refreshSyncTabIfOpen));
-
-    // Scheduled interval — the fallback trigger, not the primary one.
+    // Scheduled interval — the fallback trigger, not the primary one. Not
+    // part of Phase 18's smart-trigger list, so it stays owned here exactly
+    // as Phase 13 originally defined it.
     _intervalTimerId = setInterval(() => scheduleSync('interval').then(refreshSyncTabIfOpen), SCHEDULED_SYNC_INTERVAL_MS);
-
-    // Application startup — called last so every listener above is already
-    // registered before the first pass could possibly resolve.
-    scheduleSync('startup').then(refreshSyncTabIfOpen);
 
     return getSchedulerStatus();
   }
@@ -5594,10 +6234,481 @@ const BackgroundScheduler = (function () {
     startSynchronization,
     cancelSynchronization,
     isSynchronizationRunning,
-    getSchedulerStatus
+    getSchedulerStatus,
+    // Phase 18: exposed so SmartSyncTriggers can reuse the exact same
+    // "re-render sync tab + reconcile running task" glue every other
+    // automatic trigger already used, instead of duplicating it.
+    refreshSyncTabIfOpen
   };
 })();
 // ── End Background Synchronization Scheduler (Phase 13) ──────────────────────────
+
+// ── Automatic Sync After Local Changes (Phase 17) ─────────────────────────────────
+// Implements ONLY this phase's brief: automatically requesting a
+// synchronization pass, through the existing Phase 13 BackgroundScheduler, a
+// short debounce period after meaningful local changes. This module NEVER
+// compares local and remote tasks, NEVER uploads or downloads anything,
+// NEVER builds a sync plan, and NEVER talks to Google Drive itself — every
+// one of those responsibilities stays exactly where Phases 1–16 already put
+// it. Its only job is deciding WHEN to call BackgroundScheduler.scheduleSync()
+// — debounced — from the single existing dirty-marking hook (enqueueTask(),
+// Phase 3) every local task-mutation path already funnels through (Add
+// Task, edits, completion, deletion, Recurring materialization, Carry
+// Forward, start/pause/resume — see Phase 1/2/3 above). No second
+// scheduler, no second queue, no second synchronization engine, and no
+// second state machine are introduced: WAITING/SYNCING/PAUSED_*/COMPLETED/
+// FAILED below are all read from BackgroundScheduler's own status; the only
+// state genuinely new here is whether a debounce window is counting down.
+const AutoSyncEngine = (function () {
+  // ── In-memory-only debounce/status state. Nothing here needs to be
+  // durable — a page reload starts this module clean, exactly like
+  // BackgroundScheduler's own state above, and Phase 13's own Startup
+  // trigger (already wired in initializeScheduler()) independently picks up
+  // any pending work regardless of what this module remembers. ────────────
+  let _debounceTimerId = null;
+  let _debounceUntil = null;
+  let _followUpNeeded = false;
+  let _lastAutoResult = null;
+
+  // Requirement 2: 3–5 seconds after the last meaningful local change.
+  const DEBOUNCE_MS = 4000;
+
+  // hasPendingSyncWork(): requirement 4's "there is pending synchronization
+  // work" precondition — reuses the existing Upload Queue statistics (Phase
+  // 3) rather than re-deriving dirty state a second way.
+  function hasPendingSyncWork() {
+    if (typeof getQueueStatistics !== 'function') return false;
+    const stats = getQueueStatistics();
+    return !!(stats && stats.pendingUploads > 0);
+  }
+
+  function clearDebounceTimer() {
+    if (_debounceTimerId !== null) { clearTimeout(_debounceTimerId); _debounceTimerId = null; }
+    _debounceUntil = null;
+  }
+
+  // requestAutoSync(trigger): the single place this module ever calls into
+  // Phase 13 — never upload/download/plan functions directly (requirement
+  // 3). If a pass is already running (started by ANY trigger, automatic or
+  // manual), this does not poll or busy-wait for it (requirement 16): it
+  // just remembers a follow-up is wanted, and relies on
+  // BackgroundScheduler's own settle notification (onSyncPassSettled below)
+  // to notice and reschedule once the in-flight pass actually finishes.
+  function requestAutoSync(trigger) {
+    if (typeof BackgroundScheduler === 'undefined') {
+      return Promise.resolve({ ok: false, reason: 'scheduler-unavailable', trigger });
+    }
+    if (BackgroundScheduler.isSynchronizationRunning()) {
+      _followUpNeeded = true;
+      return Promise.resolve({ ok: false, reason: 'already-running', trigger });
+    }
+    return BackgroundScheduler.scheduleSync(trigger).then(result => {
+      _lastAutoResult = result;
+      return result;
+    });
+  }
+
+  // onDebounceElapsed(): fires once the debounce window has passed with no
+  // further local changes resetting it (requirement 2). Only actually
+  // requests a pass if there's still something to send — a debounce that
+  // elapses after the last dirty entry was already picked up by an
+  // unrelated trigger (focus, manual, network-restored, etc.) in the
+  // meantime has nothing left to do, and does not start a redundant pass.
+  function onDebounceElapsed() {
+    _debounceTimerId = null;
+    _debounceUntil = null;
+    if (!hasPendingSyncWork()) return;
+    requestAutoSync('debounced-edit');
+  }
+
+  // handleLocalChangeForSync(): the single hook every local mutation path
+  // reaches through enqueueTask() (Phase 3). Cancels any pending debounce
+  // and restarts it (requirement 2) — a burst of rapid edits to the same or
+  // different tasks collapses into ONE debounce window and, therefore, one
+  // synchronization pass, never one pass per edit.
+  function handleLocalChangeForSync() {
+    clearDebounceTimer();
+    _debounceUntil = Date.now() + DEBOUNCE_MS;
+    _debounceTimerId = setTimeout(onDebounceElapsed, DEBOUNCE_MS);
+  }
+
+  // scheduleAutoSync(): same debounce path as handleLocalChangeForSync(),
+  // exposed under its own name (per this phase's helper-function list) for
+  // any future caller that wants to (re)arm the debounce window without
+  // going through a task-mutation call site.
+  function scheduleAutoSync() {
+    handleLocalChangeForSync();
+  }
+
+  // cancelAutoSync(): explicit cancel of any pending debounce window only —
+  // never touches dirty state, the Upload Queue, or a pass already in
+  // flight. Provided for completeness/symmetry with scheduleAutoSync().
+  function cancelAutoSync() {
+    clearDebounceTimer();
+  }
+
+  // shouldAutoSync(): read-only — true only if there is pending work AND
+  // nothing currently blocks an automatic pass. Reuses
+  // BackgroundScheduler's own gating status (requirement 4/6) rather than
+  // re-deriving authentication/workspace/network/enabled checks a second
+  // way anywhere in this module.
+  function shouldAutoSync() {
+    if (!hasPendingSyncWork()) return false;
+    if (typeof BackgroundScheduler === 'undefined') return false;
+    return !BackgroundScheduler.getSchedulerStatus().blockReason;
+  }
+
+  // onSyncPassSettled(): requirement 6/7 (Changes During Sync) — called by
+  // BackgroundScheduler.scheduleSync() (Phase 13, via notifyAutoSyncSettled())
+  // once ANY synchronization pass, automatic OR manual, triggered by
+  // debounce, focus, visibility, network-restored, interval, startup, or
+  // the Manual Sync button, has already settled (blocked, failed to start,
+  // or run to completion). Never re-implements overlap prevention or
+  // planning itself — it only notices whether new dirty work still exists
+  // and, if the scheduler isn't currently blocked for a persistent reason
+  // (offline, auth expired, workspace unavailable, sync disabled —
+  // requirement 5/10), arms a fresh debounce window so that work is picked
+  // up shortly. When genuinely blocked, this deliberately does NOT
+  // reschedule itself — repeatedly retrying into a known-blocked condition
+  // would be exactly the "repeated synchronization attempts while offline"
+  // / "repeated login prompt" behavior requirements 5 and 10 forbid; the
+  // existing scheduler's own online/focus/interval triggers are what
+  // recover it once the block actually clears.
+  function onSyncPassSettled() {
+    const wasFollowUpNeeded = _followUpNeeded;
+    _followUpNeeded = false;
+    if (typeof BackgroundScheduler === 'undefined') return;
+    const s = BackgroundScheduler.getSchedulerStatus();
+    if (s.running) {
+      // Another pass is (still) in flight — nothing has actually settled
+      // from this module's point of view yet; keep remembering that a
+      // follow-up is wanted and wait for that pass's own settle call.
+      _followUpNeeded = wasFollowUpNeeded || hasPendingSyncWork();
+      return;
+    }
+    if (!wasFollowUpNeeded && !hasPendingSyncWork()) return; // nothing left to do
+    if (s.blockReason) return; // genuinely blocked — let the scheduler's own triggers recover it
+    handleLocalChangeForSync();
+  }
+
+  // getAutoSyncStatus(): read-only status (requirement 12/13), matching
+  // every other module's status getter in this file — always a fresh
+  // object. Reuses BackgroundScheduler's own status/gating rather than
+  // maintaining a second state machine; only adds the one piece of state
+  // genuinely new to this phase (whether a debounce window is counting
+  // down).
+  function getAutoSyncStatus() {
+    const schedulerStatus = (typeof BackgroundScheduler !== 'undefined')
+      ? BackgroundScheduler.getSchedulerStatus()
+      : { status: 'idle', running: false, enabled: true, blockReason: null, lastTrigger: null, lastSyncAt: null, lastResult: null };
+
+    const debouncing = _debounceTimerId !== null;
+    let status;
+    if (schedulerStatus.running) status = 'SYNCING';
+    else if (debouncing) status = 'DEBOUNCING';
+    else if (schedulerStatus.blockReason === 'network-unavailable') status = 'PAUSED_OFFLINE';
+    else if (schedulerStatus.blockReason === 'not-authenticated' || schedulerStatus.blockReason === 'workspace-unavailable') status = 'PAUSED_AUTH';
+    else if (schedulerStatus.blockReason === 'sync-disabled') status = 'PAUSED';
+    else if (hasPendingSyncWork()) status = 'WAITING';
+    else if (schedulerStatus.status === 'failed') status = 'FAILED';
+    else if (schedulerStatus.status === 'completed') status = 'COMPLETED';
+    else status = 'IDLE';
+
+    return {
+      status,
+      debouncing,
+      debounceRemainingMs: debouncing ? Math.max(0, _debounceUntil - Date.now()) : 0,
+      followUpNeeded: _followUpNeeded,
+      pendingSyncWork: hasPendingSyncWork(),
+      schedulerStatus,
+      lastAutoResult: _lastAutoResult
+    };
+  }
+
+  return {
+    handleLocalChangeForSync,
+    scheduleAutoSync,
+    cancelAutoSync,
+    requestAutoSync,
+    shouldAutoSync,
+    onSyncPassSettled,
+    getAutoSyncStatus
+  };
+})();
+// ── End Automatic Sync After Local Changes (Phase 17) ─────────────────────────────
+
+// ── Smart Sync Triggers (Phase 18) ────────────────────────────────────────────────
+// Implements ONLY this phase's brief: intelligent automatic synchronization
+// triggers for application lifecycle and connectivity events. This module
+// NEVER compares local and remote tasks, NEVER uploads or downloads
+// anything, NEVER builds a sync plan, and NEVER talks to Google Drive
+// itself — it only decides WHEN to call the existing
+// BackgroundScheduler.scheduleSync() (Phase 13), exactly the same funnel
+// every trigger already passes through (Phase 13's own header, Phase 17's
+// AutoSyncEngine). No second scheduler, no second sync engine, no second
+// queue, and no second sync state machine are introduced here: every
+// status this module reports either comes straight from
+// BackgroundScheduler/AutoSyncEngine or is trigger bookkeeping genuinely
+// new to this phase (last trigger, cooldown window, coalescing window).
+//
+// Ownership note: as of this phase, the browser lifecycle listeners
+// (window focus, document visibilitychange, window online) that Phase 13
+// used to register directly now live here instead — see
+// BackgroundScheduler.initializeScheduler() above, which no longer
+// registers them itself. This is the same three browser events reused,
+// never duplicated; only which module listens changed.
+const SmartSyncTriggers = (function () {
+  // ── In-memory-only trigger/coalescing state. Nothing here needs to be
+  // durable — a page reload starts this module clean, exactly like
+  // BackgroundScheduler's and AutoSyncEngine's own state above. ────────────
+  let _registered = false;
+  let _lastTrigger = null;
+  let _lastTriggerAt = null;
+  let _nextAllowedAutoSyncAt = 0;
+  let _pendingTrigger = null;
+  let _coalesceTimerId = null;
+  let _triggerCount = 0;
+  let _lastActiveAt = Date.now();
+  let _listeners = null; // { focus, visibility, online } — kept for unregister
+
+  // Requirement 7: "approximately 30–60 seconds unless BACKGROUND_SYNC.md
+  // or the existing implementation specifies another value." Neither does,
+  // so 45s (the midpoint) is used as the automatic-only cooldown. Manual
+  // Sync (Phase 13's startSynchronization()) never consults this.
+  const AUTO_SYNC_COOLDOWN_MS = 45 * 1000;
+
+  // Requirement 8: a short window to merge near-simultaneous lifecycle
+  // events (network online + focus + visibility + auth restored, all
+  // firing within the same tick or two) into a single automatic sync
+  // request, rather than one request per event.
+  const COALESCE_WINDOW_MS = 300;
+
+  // Requirement 6: a gap since the app was last known "active" (visible or
+  // focused) longer than this counts as "resumed after inactivity" for
+  // diagnostic/trigger-naming purposes only — it still funnels through the
+  // exact same requestSmartSync() path as every other trigger below, so it
+  // never syncs more aggressively than the cooldown already allows.
+  const RESUME_IDLE_THRESHOLD_MS = 5 * 60 * 1000;
+
+  function nowIso() { return new Date().toISOString(); }
+
+  // ── Diagnostics (requirement 15) ─────────────────────────────────────────
+  function getSmartTriggerStatus() {
+    return {
+      LAST_TRIGGER: _lastTrigger,
+      LAST_TRIGGER_TIME: _lastTriggerAt,
+      NEXT_ALLOWED_AUTO_SYNC: _nextAllowedAutoSyncAt ? new Date(_nextAllowedAutoSyncAt).toISOString() : null,
+      AUTO_SYNC_COOLDOWN: AUTO_SYNC_COOLDOWN_MS,
+      PENDING_TRIGGER: _pendingTrigger,
+      TRIGGER_COUNT: _triggerCount
+    };
+  }
+
+  // canTriggerAutomaticSync(): requirement 9/10 — mirrors
+  // BackgroundScheduler's own gating (never re-derives auth/workspace/
+  // network/enabled a second way) and adds only the two things genuinely
+  // new to this phase: an early overlap check (BackgroundScheduler enforces
+  // this too — checked again here so a coalesced request can bail out
+  // before even calling scheduleSync) and the automatic-only cooldown
+  // window.
+  function canTriggerAutomaticSync() {
+    if (typeof BackgroundScheduler === 'undefined') return false;
+    if (BackgroundScheduler.isSynchronizationRunning()) return false;
+    if (Date.now() < _nextAllowedAutoSyncAt) return false;
+    const status = BackgroundScheduler.getSchedulerStatus();
+    if (status.blockReason) return false; // not-authenticated / workspace-unavailable / network-unavailable / sync-disabled
+    return true;
+  }
+
+  // shouldTriggerSmartSync(): requirement 10 (No-Work Optimization) — an
+  // additional, trigger-aware check on top of canTriggerAutomaticSync().
+  // Most triggers here only matter if there's pending local work; reuses
+  // AutoSyncEngine's own pending-work signal (Phase 17) rather than
+  // re-deriving dirty state a second way. Network-restored / auth-restored
+  // / login-success / sync-enabled / startup are always worth a pass (per
+  // BACKGROUND_SYNC.md §2/§4 — reconciling missed remote changes is
+  // exactly what those triggers exist for), so they skip the pending-work
+  // check; every other trigger (focus/visibility/resume) requires pending
+  // work.
+  function shouldTriggerSmartSync(trigger) {
+    if (!canTriggerAutomaticSync()) return false;
+    const alwaysWorthChecking = (
+      trigger === 'network-restored' ||
+      trigger === 'auth-restored' ||
+      trigger === 'login-success' ||
+      trigger === 'sync-enabled' ||
+      trigger === 'startup'
+    );
+    if (alwaysWorthChecking) return true;
+    if (typeof AutoSyncEngine !== 'undefined' && typeof AutoSyncEngine.getAutoSyncStatus === 'function') {
+      return !!AutoSyncEngine.getAutoSyncStatus().pendingSyncWork;
+    }
+    return true; // AutoSyncEngine unavailable — defer entirely to BackgroundScheduler's own plan
+  }
+
+  // ── requestSmartSync(): the single entry point every trigger below
+  // calls (requirement 16). Coalesces near-simultaneous triggers
+  // (requirement 8) and enforces the automatic-only cooldown (requirement
+  // 7), then hands off to BackgroundScheduler.scheduleSync() — the exact
+  // same funnel Manual Sync and Phase 17's debounced edits already use.
+  // Never bypasses BackgroundScheduler's own overlap guard or gating; only
+  // adds an earlier, cheaper bail-out plus coalescing on top of it. ────────
+  function requestSmartSync(trigger) {
+    _triggerCount++;
+    _lastTrigger = trigger;
+    _lastTriggerAt = nowIso();
+    _lastActiveAt = Date.now();
+
+    if (_coalesceTimerId !== null) {
+      // Requirement 8: a request is already pending within the coalescing
+      // window — remember the newest trigger name for diagnostics only;
+      // the timer already scheduled below will fire exactly once.
+      _pendingTrigger = trigger;
+      return Promise.resolve({ ok: false, reason: 'coalesced', trigger });
+    }
+
+    _pendingTrigger = trigger;
+    return new Promise((resolve) => {
+      _coalesceTimerId = setTimeout(() => {
+        const firedTrigger = _pendingTrigger;
+        _coalesceTimerId = null;
+        _pendingTrigger = null;
+        resolve(fireSmartSync(firedTrigger));
+      }, COALESCE_WINDOW_MS);
+    });
+  }
+
+  function fireSmartSync(trigger) {
+    if (typeof BackgroundScheduler === 'undefined') {
+      return Promise.resolve({ ok: false, reason: 'scheduler-unavailable', trigger });
+    }
+    if (!shouldTriggerSmartSync(trigger)) {
+      // Requirement 10 (No-Work Optimization) / requirement 7 (cooldown) /
+      // requirement 9 (already running or otherwise gated) — reported, not
+      // silently dropped, so getSmartTriggerStatus() stays honest.
+      return Promise.resolve({ ok: false, reason: 'skipped', trigger });
+    }
+    // Requirement 7: the cooldown window starts the moment an automatic
+    // pass is actually requested, not when it later completes — this is
+    // what "no repeated Drive requests" (Test G) actually needs.
+    _nextAllowedAutoSyncAt = Date.now() + AUTO_SYNC_COOLDOWN_MS;
+    return BackgroundScheduler.scheduleSync(trigger).then(result => {
+      if (typeof BackgroundScheduler.refreshSyncTabIfOpen === 'function') {
+        BackgroundScheduler.refreshSyncTabIfOpen();
+      }
+      return result;
+    });
+  }
+
+  // ── Individual trigger handlers (requirement 16, items 1-6) ──────────────
+  // Each is a thin classifier that decides the RIGHT trigger name for
+  // diagnostics, then calls requestSmartSync() — never scheduleSync()
+  // directly, and never any upload/download/plan function.
+
+  function handleApplicationStartup() {
+    requestSmartSync('startup');
+  }
+
+  // classifyResumeOrElse(): requirement 6/8 — a tab becoming visible or a
+  // window regaining focus after a long-enough gap is ALSO "Application
+  // resumes after being inactive" (Test C); same coalesced, cooldown-gated
+  // path either way, just a more specific trigger name for diagnostics.
+  function classifyResumeOrElse(defaultTrigger) {
+    const gap = Date.now() - _lastActiveAt;
+    return gap >= RESUME_IDLE_THRESHOLD_MS ? 'resume' : defaultTrigger;
+  }
+
+  function handleVisibilityChange() {
+    if (document.visibilityState !== 'visible') return;
+    requestSmartSync(classifyResumeOrElse('visibility'));
+  }
+
+  function handleWindowFocus() {
+    requestSmartSync(classifyResumeOrElse('focus'));
+  }
+
+  function handleNetworkOnline() {
+    requestSmartSync('network-restored');
+  }
+
+  // handleAuthenticationReady(kind): requirement 5 — called after
+  // GoogleAuthManager reports a successful silent reconnect
+  // (attemptSilentReconnectOnLoad(), Phase 16A) or a successful interactive
+  // login (authenticate(), Phase 5). Never called on failure, and never
+  // forces an interactive login prompt itself (requirement 12/18 Error
+  // Handling) — it only reacts to authentication that has ALREADY
+  // succeeded elsewhere.
+  function handleAuthenticationReady(kind) {
+    requestSmartSync(kind === 'login' ? 'login-success' : 'auth-restored');
+  }
+
+  // handleSyncEnabledChange(enabled): requirement 7 (Synchronization
+  // becomes enabled after being disabled) — only reacts to the
+  // false→true transition; disabling never triggers a sync.
+  function handleSyncEnabledChange(enabled) {
+    if (enabled) requestSmartSync('sync-enabled');
+  }
+
+  // ── Registration (requirement 16/17) ──────────────────────────────────────
+  // Idempotent: calling this more than once never adds duplicate listeners
+  // or duplicate timers. Reuses the exact same browser lifecycle events
+  // Phase 13 originally registered (window focus, document
+  // visibilitychange, window online) — this module is now their sole
+  // owner (see BackgroundScheduler.initializeScheduler() above), which is
+  // what keeps registration duplicate-listener-free rather than
+  // double-registering the same events from two places.
+  function registerSmartSyncTriggers() {
+    if (_registered) return getSmartTriggerStatus(); // idempotent
+    _registered = true;
+
+    _listeners = {
+      focus: () => handleWindowFocus(),
+      visibility: () => handleVisibilityChange(),
+      online: () => handleNetworkOnline()
+    };
+    window.addEventListener('focus', _listeners.focus);
+    document.addEventListener('visibilitychange', _listeners.visibility);
+    window.addEventListener('online', _listeners.online);
+
+    // Application startup — called last so every listener above is already
+    // registered before the first pass could possibly resolve.
+    handleApplicationStartup();
+
+    return getSmartTriggerStatus();
+  }
+
+  // unregisterSmartSyncTriggers(): requirement 17 (Event Listener Safety) —
+  // cleans up every listener this module added, and any pending coalescing
+  // timer. Never touches BackgroundScheduler's own interval timer (Phase
+  // 13 owns and cleans up its own state independently).
+  function unregisterSmartSyncTriggers() {
+    if (!_registered || !_listeners) return getSmartTriggerStatus();
+    window.removeEventListener('focus', _listeners.focus);
+    document.removeEventListener('visibilitychange', _listeners.visibility);
+    window.removeEventListener('online', _listeners.online);
+    _listeners = null;
+    _registered = false;
+    if (_coalesceTimerId !== null) { clearTimeout(_coalesceTimerId); _coalesceTimerId = null; }
+    _pendingTrigger = null;
+    return getSmartTriggerStatus();
+  }
+
+  return {
+    registerSmartSyncTriggers,
+    unregisterSmartSyncTriggers,
+    handleVisibilityChange,
+    handleWindowFocus,
+    handleNetworkOnline,
+    handleAuthenticationReady,
+    handleSyncEnabledChange,
+    handleApplicationStartup,
+    requestSmartSync,
+    shouldTriggerSmartSync,
+    canTriggerAutomaticSync,
+    getSmartTriggerStatus
+  };
+})();
+// ── End Smart Sync Triggers (Phase 18) ─────────────────────────────────────────────
 
 // ── Persistence ───────────────────────────────────────────────────────────────
 function saveState() {
@@ -5651,6 +6762,10 @@ function loadState() {
     // populated (reconcileUploadQueue() reads the live tasks array).
     loadQueues();
     reconcileUploadQueue();
+    // Phase 15 (Conflict Resolution): load the read-only Conflict History
+    // audit log. Independent of the queues above — never affects dirty
+    // state, upload queue reconciliation, or any business data.
+    loadConflictHistory();
     if (l) {
       const allEntries = JSON.parse(l);
       // Keep only last 3 months
@@ -8828,7 +9943,11 @@ function renderMastersContent() {
       connecting:   'Connecting…',
       connected:    'Connected',
       expired:      'Session Expired — Reconnect',
-      error:        'Connection Error'
+      error:        'Connection Error',
+      // Phase 16A: distinct from every state above — Google itself couldn't
+      // be reached (no network / GIS script blocked / no Client ID), as
+      // opposed to Google rejecting an established session.
+      unavailable:  'Google Drive Unavailable'
     };
     const connectionStatusLabel = AUTH_STATE_LABELS[authStatus.state] || 'Disconnected';
     const providerLabel = authStatus.authenticated ? 'Google Drive' : 'Not Connected';
@@ -9042,7 +10161,13 @@ function renderMastersContent() {
       completed: 'Completed',
       failed: 'Failed'
     };
-    const schedulerStatusLabel = SCHEDULER_STATUS_LABELS[schedulerStatus.status] || 'Idle';
+    // Phase 17: the debounce window itself is state BackgroundScheduler
+    // doesn't know about (it only starts once the debounce elapses), so
+    // this is the one place that text needs to reflect it — no new status
+    // structure, no new card, just the existing label vocabulary this
+    // phase's brief already suggests ("Waiting to Sync").
+    const autoSyncDebouncing = (typeof AutoSyncEngine !== 'undefined') && AutoSyncEngine.getAutoSyncStatus().debouncing;
+    const schedulerStatusLabel = autoSyncDebouncing ? 'Waiting to Sync' : (SCHEDULER_STATUS_LABELS[schedulerStatus.status] || 'Idle');
     const SCHEDULER_BLOCK_REASON_LABELS = {
       'sync-disabled': 'Synchronization is turned off.',
       'network-unavailable': 'Waiting for network connection.',
@@ -9087,6 +10212,61 @@ function renderMastersContent() {
     const conflictStats = (typeof getConflictStatistics === 'function') ? getConflictStatistics() : null;
     const pendingConflictsLabel = conflictStats ? String(conflictStats.pendingConflicts) : 'Not Available';
     const conflictDetectedLabel = conflictStats ? (conflictStats.pendingConflicts > 0 ? 'Yes' : 'No') : 'Not Available';
+
+    // Phase 15: Conflict Resolution card state — read-only, from
+    // ConflictResolver.getResolutionStatistics() only. Never recomputed
+    // here. CONFLICT_TYPE_LABELS/CHOICE_LABELS below are display strings
+    // only — they never change which choices are valid; ConflictResolver
+    // itself is the sole source of truth for that (MANUAL_CHOICES).
+    const resolutionStats = (typeof ConflictResolver !== 'undefined') ? ConflictResolver.getResolutionStatistics() : null;
+    const resolvedCountLabel = resolutionStats ? String(resolutionStats.resolved) : 'Not Available';
+    const pendingManualLabel = resolutionStats ? String(resolutionStats.pendingManualResolution) : 'Not Available';
+    const resolutionFailedLabel = resolutionStats ? String(resolutionStats.resolutionFailed) : 'Not Available';
+    const conflictCountLabel = resolutionStats ? String(resolutionStats.conflictCount) : 'Not Available';
+    const CONFLICT_TYPE_LABELS = {
+      BOTH_MODIFIED: 'Edited on two devices',
+      DELETED_LOCAL_MODIFIED_REMOTE: 'Deleted here, edited elsewhere',
+      DELETED_REMOTE_MODIFIED_LOCAL: 'Deleted elsewhere, edited here',
+      VERSION_MISMATCH: 'Version bookkeeping only (content identical)',
+      MISSING_METADATA: 'Missing synchronization metadata',
+      CORRUPTED_METADATA: 'Corrupted synchronization metadata',
+      TIMESTAMP_INCONSISTENCY: 'Inconsistent timestamps',
+      UNKNOWN_SYNC_STATE: 'Unrecognized synchronization state',
+      DUPLICATE_SYNC_IDENTITY: 'Duplicate synchronization identity'
+    };
+    const CHOICE_BUTTONS = {
+      BOTH_MODIFIED: [['keep-local', 'Keep Local'], ['keep-cloud', 'Keep Cloud']],
+      DELETED_LOCAL_MODIFIED_REMOTE: [['restore', 'Restore'], ['confirm-deletion', 'Confirm Deletion']],
+      DELETED_REMOTE_MODIFIED_LOCAL: [['restore', 'Restore'], ['confirm-deletion', 'Confirm Deletion']]
+    };
+    function describeConflictTask(taskId) {
+      if (taskId === null || taskId === undefined) return 'Unknown task';
+      const t = tasks.find(x => x.id === taskId);
+      return '#' + taskId + ' — ' + (t ? esc(t.heading || t.description || 'Untitled task') : 'no longer present locally');
+    }
+    const manualConflictRowsHtml = (resolutionStats && resolutionStats.manualEntries.length)
+      ? resolutionStats.manualEntries.map(e => {
+          const buttons = CHOICE_BUTTONS[e.conflictType] || [];
+          const buttonsHtml = buttons.map(([choice, label]) =>
+            `<button class="btn" style="padding:4px 10px;font-size:11px" onclick="resolveConflictClick('${esc(e.syncId)}','${choice}')">${esc(label)}</button>`
+          ).join('');
+          return `<div style="border:1px solid var(--border-md);border-radius:var(--radius-sm);padding:8px 10px;margin-top:6px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+            <div style="font-size:11px;color:var(--text-secondary)">
+              <div style="font-weight:600;color:var(--text-primary)">${describeConflictTask(e.taskId)}</div>
+              <div>${esc(CONFLICT_TYPE_LABELS[e.conflictType] || e.conflictType || 'Unknown')}</div>
+            </div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">${buttonsHtml}</div>
+          </div>`;
+        }).join('')
+      : '<div style="font-size:11px;color:var(--text-tertiary);margin-top:6px">No conflicts are waiting on a decision.</div>';
+    const failedConflictRowsHtml = (resolutionStats && resolutionStats.failedEntries.length)
+      ? resolutionStats.failedEntries.map(e =>
+          `<div style="border:1px solid var(--border-md);border-radius:var(--radius-sm);padding:8px 10px;margin-top:6px;font-size:11px;color:var(--text-secondary)">
+            <div style="font-weight:600;color:var(--text-primary)">${describeConflictTask(e.taskId)}</div>
+            <div>${esc(CONFLICT_TYPE_LABELS[e.conflictType] || e.conflictType || 'Unknown')} — ${esc(e.failureReason || 'resolution failed')}</div>
+          </div>`
+        ).join('')
+      : '';
 
     content.innerHTML = `
       <div style="font-size:12px;color:var(--text-secondary);margin-bottom:16px">
@@ -9383,6 +10563,52 @@ function renderMastersContent() {
         </div>
       </div>
 
+      <!-- Phase 15: Conflict Resolution card. Extends the Conflicts card
+           above with the Resolved / Pending Manual Resolution / Resolution
+           Failed / Conflict Count breakdown (requirement 8) and, for every
+           conflict this module classified as needing a human decision, the
+           exact Keep Local/Keep Cloud or Restore/Confirm Deletion choice
+           CONFLICT_RESOLUTION.md §5 defines for its type — reusing this same
+           card/complete-row layout rather than introducing a new modal or
+           page (requirement 8: "Do not redesign the UI"). Automatic
+           resolution (VERSION_MISMATCH) never appears here as something to
+           act on — it already completed on its own during the last sync
+           pass (see ConflictResolver.autoResolvePendingConflicts()) and
+           only shows up in the Resolved count. -->
+      <div style="border:1px solid var(--border-md);border-radius:var(--radius-md);padding:14px;margin-bottom:14px">
+        <div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:10px"><i class="ti ti-git-merge" style="vertical-align:-2px;margin-right:5px;color:var(--blue-mid)"></i>Conflict Resolution</div>
+        <div style="font-size:11px;color:var(--text-tertiary);margin-bottom:10px">
+          Safe cases (identical content, differing bookkeeping only) resolve automatically. Everything else — the same task edited on two devices, or a deletion colliding with an edit — waits here for your decision. Neither side is ever discarded until you choose.
+        </div>
+        <div style="display:flex;gap:12px;flex-wrap:wrap">
+          <div style="background:var(--bg-secondary);border:1px solid var(--border-md);border-radius:var(--radius-md);padding:10px 16px;flex:1;min-width:110px">
+            <div style="font-size:11px;color:var(--text-tertiary)">Conflict Count</div>
+            <div style="font-size:14px;font-weight:600;color:var(--text-primary)">${esc(conflictCountLabel)}</div>
+          </div>
+          <div style="background:var(--bg-secondary);border:1px solid var(--border-md);border-radius:var(--radius-md);padding:10px 16px;flex:1;min-width:110px">
+            <div style="font-size:11px;color:var(--text-tertiary)">Resolved</div>
+            <div style="font-size:14px;font-weight:600;color:var(--text-primary)">${esc(resolvedCountLabel)}</div>
+          </div>
+          <div style="background:var(--bg-secondary);border:1px solid var(--border-md);border-radius:var(--radius-md);padding:10px 16px;flex:1;min-width:110px">
+            <div style="font-size:11px;color:var(--text-tertiary)">Pending Manual Resolution</div>
+            <div style="font-size:14px;font-weight:600;color:var(--text-primary)">${esc(pendingManualLabel)}</div>
+          </div>
+          <div style="background:var(--bg-secondary);border:1px solid var(--border-md);border-radius:var(--radius-md);padding:10px 16px;flex:1;min-width:110px">
+            <div style="font-size:11px;color:var(--text-tertiary)">Resolution Failed</div>
+            <div style="font-size:14px;font-weight:600;color:var(--text-primary)">${esc(resolutionFailedLabel)}</div>
+          </div>
+        </div>
+        <div style="margin-top:10px">
+          <div style="font-size:11px;font-weight:600;color:var(--text-secondary)">Waiting on your decision</div>
+          ${manualConflictRowsHtml}
+        </div>
+        ${failedConflictRowsHtml ? `<div style="margin-top:10px">
+          <div style="font-size:11px;font-weight:600;color:var(--text-secondary)">Could not be resolved</div>
+          ${failedConflictRowsHtml}
+        </div>` : ''}
+        <div id="conflict-resolution-status" style="font-size:11px;color:var(--text-secondary);margin-top:8px"></div>
+      </div>
+
       <!-- Future: retry queue diagnostics — will list failed operations awaiting
            retry once the retry/backoff logic exists (see BACKGROUND_SYNC.md §Retry). -->
       <!-- Phase 14: Conflicts now reflects real ConflictDetection state (see
@@ -9424,7 +10650,14 @@ function connectGoogleDrive() {
         ? GoogleDriveWorkspace.initializeWorkspace()
         : null;
     })
-   .then(() => { if (activeMastersTab === 'sync') renderMastersContent(); })
+   .then(() => {
+      if (activeMastersTab === 'sync') renderMastersContent();
+      // Phase 18, requirement 6: a successful manual Google login is its
+      // own smart-sync trigger — requests synchronization if work is
+      // pending. Never forces another login prompt; only reacts to a
+      // login that has already succeeded.
+      if (typeof SmartSyncTriggers !== 'undefined') SmartSyncTriggers.handleAuthenticationReady('login');
+    })
    .catch(() => { if (activeMastersTab === 'sync') renderMastersContent(); });
 }
 
@@ -9496,6 +10729,10 @@ function mergeSelectedTaskClick() {
   if (activeMastersTab === 'sync') renderMastersContent();
   SingleTaskMerge.mergeSingleTask(task).then(() => {
     if (activeMastersTab === 'sync') renderMastersContent();
+    // Phase 16B, requirement 6/7: a single-task merge can change the running
+    // task's fields — reconcile the timer against whatever the merge already
+    // settled on, never a new comparison here.
+    if (typeof reconcileRunningTaskAfterSync === 'function') reconcileRunningTaskAfterSync();
   });
 }
 
@@ -9509,6 +10746,42 @@ function batchMergeClick() {
   if (activeMastersTab === 'sync') renderMastersContent();
   BatchCloudMerge.mergeTaskCollection().then(() => {
     if (activeMastersTab === 'sync') renderMastersContent();
+    // Phase 16B, requirement 6/7: a batch merge can change the running
+    // task's fields — reconcile the timer against whatever the merge already
+    // settled on, never a new comparison here.
+    if (typeof reconcileRunningTaskAfterSync === 'function') reconcileRunningTaskAfterSync();
+  });
+}
+
+// ── Phase 15: Conflict Resolution click handler ──────────────────────────────
+// Thin UI glue only — all real resolution logic lives in ConflictResolver
+// above. `choice` is one of the exact strings CONFLICT_RESOLUTION.md §5
+// defines for the conflict's type (keep-local/keep-cloud/restore/
+// confirm-deletion — see MANUAL_CHOICES in ConflictResolver); the buttons
+// rendered in renderMastersContent()'s Conflict Resolution card only ever
+// pass one of those. Re-renders immediately (so the resolved/failed entry
+// disappears from "Waiting on your decision" right away where possible) and
+// again once the resolution settles, mirroring mergeSelectedTaskClick()'s
+// existing pattern. A brief inline status line reports the outcome without
+// introducing a new modal or page.
+function resolveConflictClick(syncId, choice) {
+  const statusEl = document.getElementById('conflict-resolution-status');
+  if (statusEl) statusEl.textContent = 'Resolving…';
+  ConflictResolver.resolveConflict(syncId, choice).then(result => {
+    if (activeMastersTab === 'sync') {
+      renderMastersContent();
+      const refreshedStatusEl = document.getElementById('conflict-resolution-status');
+      if (refreshedStatusEl) {
+        refreshedStatusEl.textContent = (result && result.ok)
+          ? '✓ Conflict resolved.'
+          : '✗ Could not resolve conflict (' + ((result && result.reason) || 'unknown error') + ').';
+      }
+    }
+    // Phase 16B, requirement 6/7: resolving a conflict (keep-local /
+    // keep-cloud / restore) can change the running task's fields —
+    // reconcile the timer against whatever the resolution already settled
+    // on. This never re-decides the conflict itself.
+    if (typeof reconcileRunningTaskAfterSync === 'function') reconcileRunningTaskAfterSync();
   });
 }
 
@@ -9523,9 +10796,16 @@ function batchMergeClick() {
 // Sync below always stays available regardless of this setting.
 function toggleBackgroundSync(enabled) {
   if (!masters.flags) masters.flags = {};
+  const wasEnabled = masters.flags.backgroundSyncEnabled !== false;
   masters.flags.backgroundSyncEnabled = !!enabled;
   saveState();
   if (activeMastersTab === 'sync') renderMastersContent();
+  // Phase 18, requirement 7: synchronization becoming enabled after being
+  // disabled is its own smart-sync trigger. Disabling never triggers a
+  // sync — handleSyncEnabledChange() itself only reacts to false→true.
+  if (typeof SmartSyncTriggers !== 'undefined' && !wasEnabled && enabled) {
+    SmartSyncTriggers.handleSyncEnabledChange(true);
+  }
 }
 
 // The Manual Sync release valve (requirement 3) — bypasses automatic
@@ -11525,17 +12805,169 @@ function initBreakTimer() {
   }, 1000);
 }
 
-// ── Restore intervals on load ─────────────────────────────────────────────────
-function restoreIntervals() {
-  tasks.forEach(task => {
-    if (task.status === 'running') {
-      intervals[task.id] = setInterval(() => {
-        const el = document.getElementById('timer-' + task.id);
-        if (el) { el.textContent = fmt(liveElapsedSecs(task)); el.className = 'timer-display running'; }
-        updateLogTable();
-      }, 1000);
-    }
+// ── Phase 16B: Automatic Running Task Recovery ────────────────────────────────
+// Ensures a task that was already running resumes automatically after a page
+// refresh, browser restart, application startup, or a synchronization pass —
+// without a second timer system. Reuses, and never duplicates: the existing
+// running-task state (task.status / task.accumulatedMs / task.segmentStart,
+// Task lifecycle above), the existing wall-clock elapsed-time model
+// (liveElapsedMs()/liveElapsedSecs(), Timer core above — segmentStart is
+// already an absolute timestamp, so elapsed time after any interruption is
+// already correct with zero new calculation), the existing single-active-task
+// business rule (pauseOthersExcept()), and the existing interval-per-task
+// bookkeeping (`intervals`, Timer core above).
+
+// findRunningTask(): Requirement 1 — reads running state ONLY from the
+// existing `tasks` array (task.status === 'running'), never inferred from any
+// unrelated field. Requirement 8: if more than one task is (invalidly)
+// marked running, this does not start timers for all of them — it picks the
+// one to recover using the SAME exclusivity signal pauseOthersExcept()
+// already relies on elsewhere (the task that was started/resumed most
+// recently), and leaves resolving the rest to restoreRunningTask() below.
+function findRunningTask() {
+  const running = tasks.filter(t => t && t.status === 'running');
+  if (running.length === 0) return null;
+  if (running.length === 1) return running[0];
+  running.sort((a, b) => (b.segmentStart || b.startedAt || 0) - (a.segmentStart || a.startedAt || 0));
+  return running[0];
+}
+
+// validateRunningTask(): Requirement 9 — refuses to recover a task that no
+// longer exists locally, was completed, was deleted, or is otherwise
+// invalid. Only the task's own current status / Deleted Flag are consulted —
+// no new validity rule is invented.
+function validateRunningTask(task) {
+  if (!task || typeof task !== 'object') return false;
+  if (tasks.indexOf(task) === -1) return false;        // no longer exists locally
+  if (task.status !== 'running') return false;          // completed / paused / idle
+  if (task._sync && task._sync.deleted) return false;   // soft-deleted (SYNC_DATA_MODEL.md §5)
+  return true;
+}
+
+// calculateRecoveredElapsedTime(): Requirement 3 — NOT a new calculation.
+// Names the existing liveElapsedMs() (Timer core above) for recovery
+// callers: persisted accumulatedMs + (now − persisted segmentStart) already
+// equals "elapsed before interruption + elapsed while the app was closed",
+// since segmentStart is already an absolute wall-clock timestamp.
+function calculateRecoveredElapsedTime(task) {
+  return liveElapsedMs(task);
+}
+
+// ensureActiveTimer(): Requirement 4 / Timer Safety — idempotent. Starts the
+// existing interval-per-task display timer (identical body to
+// startTask()/resumeTask()'s own setInterval, Timer core above) ONLY if one
+// is not already running for this task. Safe to call repeatedly — from
+// startup, from post-sync reconciliation, or after a visibility change —
+// without ever creating a second interval for the same task.
+function ensureActiveTimer(task) {
+  if (!task || intervals[task.id]) return; // already ticking — no duplicate
+  intervals[task.id] = setInterval(() => {
+    const el = document.getElementById('timer-' + task.id);
+    if (el) { el.textContent = fmt(liveElapsedSecs(task)); el.className = 'timer-display running'; }
+    updateLogTable();
+  }, 1000);
+}
+
+// stopDuplicateTimers(): Timer Safety — clears any stray interval that does
+// not belong to the single task being recovered (e.g. left over from a task
+// that was completed/deleted/merged out from under it, or from recovery
+// running more than once). Guarantees "one running task, one active timer,
+// one timer loop". Pass null to clear every interval (no task to recover).
+function stopDuplicateTimers(keepTaskId) {
+  Object.keys(intervals).forEach(idStr => {
+    const id = Number(idStr);
+    if (id !== keepTaskId) { clearInterval(intervals[id]); delete intervals[id]; }
   });
+}
+
+// getRunningTaskState(): read-only status snapshot, mirroring every other
+// sync module's own status getter already in this file (LocalSyncManager,
+// BackgroundScheduler, BatchCloudMerge, etc.) — always a fresh object, never
+// a live reference.
+function getRunningTaskState() {
+  const task = findRunningTask();
+  return {
+    hasRunningTask: !!task,
+    taskId: task ? task.id : null,
+    elapsedMs: task ? calculateRecoveredElapsedTime(task) : 0,
+    timerActive: task ? !!intervals[task.id] : false
+  };
+}
+
+// resumeRecoveredTask(): Requirement 2/4/10/11/13 — restores the task as the
+// active/running task without requiring the user to press Start again. The
+// task's own status/accumulatedMs/segmentStart are left exactly as already
+// persisted (Requirement 3 — no elapsed value is rewritten here); only the
+// display timer is (re)started, idempotently.
+function resumeRecoveredTask(task) {
+  if (!validateRunningTask(task)) return;
+  stopDuplicateTimers(task.id);
+  ensureActiveTimer(task);
+}
+
+// restoreRunningTask(): Requirement 1/2/8/9 — the single recovery entry
+// point. Detects at most one running task (resolving the multiple-running
+// anomaly, if any, via the existing pauseOthersExcept() exclusivity rule —
+// no new business rule is invented, per Requirement 8), validates it, and
+// hands off to resumeRecoveredTask(). A task that is completed, deleted, or
+// otherwise invalid is never restarted (Requirement 9), and idle local data
+// is never touched. Idempotent — calling this repeatedly never creates a
+// duplicate timer (Timer Safety) and never resets elapsed time.
+function restoreRunningTask() {
+  const candidate = findRunningTask();
+  if (!candidate) { stopDuplicateTimers(null); return null; }
+
+  const stillRunning = tasks.filter(t => t && t.status === 'running');
+  if (stillRunning.length > 1) {
+    // Requirement 8: preserve every task's data, recover at most one task
+    // safely, and record the anomaly — reusing the app's existing
+    // single-active-task rule (pauseOthersExcept(), Task CRUD above) rather
+    // than inventing a new business rule for this phase.
+    pauseOthersExcept(candidate.id);
+    console.warn('[Task Logger] Multiple running tasks detected during recovery; ' +
+      'kept task ' + candidate.id + ' running and paused the rest.');
+  }
+
+  if (!validateRunningTask(candidate)) { stopDuplicateTimers(null); return null; }
+
+  resumeRecoveredTask(candidate);
+  return candidate;
+}
+
+// reconcileRunningTaskAfterSync(): Requirement 6/7 — called once a
+// synchronization operation (automatic pass or manual merge/upload/
+// conflict-resolution) has already settled, via the hooks below. Re-checks
+// whether the active/running task still exists and is still marked running,
+// and ensures its existing timer is active without ever starting a second
+// one. This function never resolves a conflict, never decides which side
+// "wins", and never overwrites task data itself — SYNC_ARCHITECTURE.md §10
+// principle 8 and SYNC_DATA_MODEL.md §11 principle 6 already reserve that to
+// the existing Conflict Resolver and the user; this only reconciles the
+// TIMER to match whatever task state those existing pipelines already
+// settled on. Only the row(s) whose running state could have changed are
+// re-rendered — never a full list re-render — so an edit in progress
+// elsewhere in the UI is left undisturbed, mirroring
+// refreshSyncTabIfOpen()'s own "only touch what sync could have affected"
+// pattern (BackgroundScheduler, Phase 13).
+function reconcileRunningTaskAfterSync() {
+  const before = getRunningTaskState();
+  restoreRunningTask();
+  const after = getRunningTaskState();
+  if (typeof renderRow !== 'function') return;
+  if (before.taskId !== after.taskId) {
+    if (before.taskId !== null) renderRow(before.taskId);
+    if (after.taskId !== null) renderRow(after.taskId);
+  } else if (after.taskId !== null) {
+    renderRow(after.taskId);
+  }
+}
+
+// ── Restore running task on load ──────────────────────────────────────────────
+// Thin entry point kept for the existing Init/renderAll() call sites below —
+// all detection/validation/idempotency logic lives in restoreRunningTask()
+// above; this function is not reimplemented elsewhere.
+function restoreIntervals() {
+  restoreRunningTask();
 }
 
 // ── Theme: light / dark / system ────────────────────────────────────────────
@@ -11690,28 +13122,59 @@ function initializeSyncInfrastructure() {
     IncrementalSyncEngine.Extensions.BackgroundScheduler = BackgroundScheduler;
   }
 
+  // Phase 17: register the Automatic Sync After Local Changes module.
+  // Registration only — it starts doing anything only once a task mutation
+  // actually calls enqueueTask() (Phase 3), which is already wired to call
+  // AutoSyncEngine.handleLocalChangeForSync() directly; nothing here starts
+  // a debounce window or a synchronization pass at startup.
+  window.TTLSync.Modules.AutoSyncEngine = AutoSyncEngine;
+
+  // Phase 18: register the Smart Sync Triggers module. Registration only —
+  // its listeners aren't attached until registerSmartSyncTriggers() is
+  // called further down, after the reconnect/workspace attempt below has
+  // settled, exactly mirroring how Phase 13's own scheduler used to be
+  // started.
+  window.TTLSync.Modules.SmartSyncTriggers = SmartSyncTriggers;
+
   // Phase 5: attempt a silent, non-interactive reconnect if a previous
   // session was connected. Never interactive, never blocking — see
   // attemptSilentReconnectOnLoad()'s own documentation. Refreshes the
   // Synchronization settings tab afterward only if it happens to be the
   // currently open Masters tab.
-  GoogleAuthManager.attemptSilentReconnectOnLoad().then(() => {
+  GoogleAuthManager.attemptSilentReconnectOnLoad().then(authStatus => {
+    // Phase 18, requirement 5: remember whether the silent reconnect
+    // itself actually succeeded — this is its own smart-sync trigger,
+    // reported once the workspace attempt below has also settled.
+    const authRestored = !!(authStatus && authStatus.authenticated);
     // Phase 6: if that reconnect actually succeeded, prepare the Drive
     // workspace (folders only). If it didn't, GoogleDriveWorkspace.
     // initializeWorkspace() itself is a no-op that resolves quietly —
     // this never blocks startup and never surfaces as an app-level error.
-    return (typeof GoogleDriveWorkspace !== 'undefined')
+    const workspaceStep = (typeof GoogleDriveWorkspace !== 'undefined')
       ? GoogleDriveWorkspace.initializeWorkspace()
-      : null;
-  }).then(() => {
-    // Phase 13: start the scheduler (registers its focus/visibility/online/
-    // interval listeners and fires the Startup trigger) only after the
-    // workspace attempt above has settled either way — whether or not
-    // authentication/workspace actually succeeded, BackgroundScheduler's
-    // own gating (requirement 6) already handles a not-yet-ready workspace
-    // by skipping automatic synchronization until it is.
+      : Promise.resolve(null);
+    return workspaceStep.then(() => authRestored);
+  }).then(authRestored => {
+    // Phase 13: start the scheduler (Scheduled Interval fallback only, as
+    // of Phase 18 — see BackgroundScheduler.initializeScheduler() above)
+    // only after the workspace attempt above has settled either way —
+    // whether or not authentication/workspace actually succeeded,
+    // BackgroundScheduler's own gating (requirement 6) already handles a
+    // not-yet-ready workspace by skipping automatic synchronization until
+    // it is.
     if (typeof BackgroundScheduler !== 'undefined') {
       BackgroundScheduler.initializeScheduler();
+    }
+    // Phase 18: register every smart lifecycle/connectivity trigger
+    // (startup, focus, visibility, network) — idempotent, and the sole
+    // owner of those listeners as of this phase.
+    if (typeof SmartSyncTriggers !== 'undefined') {
+      SmartSyncTriggers.registerSmartSyncTriggers();
+      // Requirement 5: if the silent reconnect above actually succeeded,
+      // that's its own trigger — request synchronization if work is
+      // pending, in addition to (never instead of) the Startup trigger
+      // registerSmartSyncTriggers() just fired.
+      if (authRestored) SmartSyncTriggers.handleAuthenticationReady('restore');
     }
     if (typeof activeMastersTab !== 'undefined' && activeMastersTab === 'sync' &&
         typeof renderMastersContent === 'function') {
