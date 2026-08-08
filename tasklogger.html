@@ -2684,6 +2684,17 @@ const GoogleAuthManager = (function () {
   let _authState       = 'disconnected'; // disconnected | connecting | connected | expired | unavailable | error
   let _lastError       = null;
   let _refreshTimer    = null;
+  // Phase 19A: in-flight requestToken() promise, shared across the startup
+  // silent reconnect, proactive refresh, and manual Connect — see requestToken()
+  // below (requirement 9: these three call sites must never race each other by
+  // issuing overlapping requestAccessToken() calls against the same _tokenClient).
+  let _pendingTokenRequest = null;
+  // Phase 19A: bumped on every disconnect() so an in-flight silent request
+  // that resolves *after* the user has explicitly disconnected can detect
+  // it's stale and discard itself instead of resurrecting the session
+  // (test 4: explicit Disconnect must never be followed by an automatic
+  // reconnect, even if a reconnect happened to already be in flight).
+  let _authEpoch = 0;
 
   // ── Minimal persisted "connection hint" (never the token itself) ───────────
   function loadPersistedHint() {
@@ -2720,6 +2731,16 @@ const GoogleAuthManager = (function () {
   function markUnavailableError(err) {
     err.ttlAuthUnavailable = true;
     return err;
+  }
+
+  // Phase 19A: temporary diagnostic logging for the silent-reconnect flow
+  // (requirement 4). Emits one of the fixed codes this phase's diagnosis
+  // requires — never the access token itself, and never any other credential.
+  // Safe to leave in place (console.debug only, no UI surface, no PII beyond
+  // an already-displayed email), but scoped narrowly so it's easy to strip
+  // later if a future phase wants to.
+  function diagLog(code, detail) {
+    try { console.debug('[TTL Auth] ' + code + (detail ? ' — ' + detail : '')); } catch (e) {}
   }
 
   // ── Lazy GIS script loading ─────────────────────────────────────────────────
@@ -2769,19 +2790,53 @@ const GoogleAuthManager = (function () {
   // prompt. interactive=true is only ever invoked from a direct, user-
   // initiated action (the Connect Google Drive button).
   function requestToken(interactive) {
-    return loadGisScript().then(() => new Promise((resolve, reject) => {
-      let client;
-      try { client = ensureTokenClient(); } catch (e) { reject(e); return; }
-      client.callback = (response) => {
-        if (response && response.error) { reject(new Error(response.error)); return; }
-        if (!response || !response.access_token) { reject(new Error('No access token returned.')); return; }
-        resolve(response);
-      };
-      client.error_callback = (err) => { reject(err || new Error('Authentication request failed.')); };
-      try {
-        client.requestAccessToken(interactive ? { prompt: 'consent' } : { prompt: 'none' });
-      } catch (e) { reject(e); }
-    }));
+    // Requirement 9: the startup silent reconnect, the proactive refresh timer,
+    // and a manual Connect click must never issue overlapping
+    // requestAccessToken() calls — the GIS token client has a single shared
+    // `callback`/`error_callback`, so two in-flight requests would race to
+    // overwrite each other's handlers and one caller could resolve/reject with
+    // the other's response. Share a single in-flight promise instead.
+    if (_pendingTokenRequest) return _pendingTokenRequest;
+
+    // Requirement 5/6: silently restoring a session is far more reliable when
+    // GIS is told which Google account to use. Prefer the currently-cached
+    // identity (set from the persisted connection hint by
+    // attemptSilentReconnectOnLoad(), or refreshed from Drive after any prior
+    // successful token) as a login_hint — this is never the token itself, just
+    // the previously-displayed email, and is only ever attached to the
+    // outgoing request, never persisted or logged.
+    const loginHint = (_currentUser && _currentUser.email) || null;
+
+    const attempt = loadGisScript()
+      .catch(err => { diagLog('GIS_SCRIPT_FAILED', err && err.message); throw err; })
+      .then(() => new Promise((resolve, reject) => {
+        let client;
+        try { client = ensureTokenClient(); }
+        catch (e) { diagLog('CLIENT_ID_MISSING', e && e.message); reject(e); return; }
+        client.callback = (response) => {
+          if (response && response.error) { diagLog('SILENT_TOKEN_REQUEST_FAILED', response.error); reject(new Error(response.error)); return; }
+          if (!response || !response.access_token) { diagLog('NO_ACCESS_TOKEN'); reject(new Error('No access token returned.')); return; }
+          resolve(response);
+        };
+        client.error_callback = (err) => {
+          diagLog('SILENT_TOKEN_REQUEST_FAILED', (err && err.type) || (err && err.message));
+          reject(err || new Error('Authentication request failed.'));
+        };
+        try {
+          const overrideConfig = interactive ? { prompt: 'consent' } : { prompt: 'none' };
+          if (loginHint) overrideConfig.hint = loginHint;
+          client.requestAccessToken(overrideConfig);
+        } catch (e) { reject(e); }
+      }));
+
+    // Cleared as soon as the attempt settles (either way) so the next call —
+    // whether that's the proactive refresh timer or a later manual Connect —
+    // starts a fresh request rather than replaying a stale result.
+    _pendingTokenRequest = attempt.then(
+      (response) => { _pendingTokenRequest = null; return response; },
+      (err) => { _pendingTokenRequest = null; throw err; }
+    );
+    return _pendingTokenRequest;
   }
 
   // Fetches minimal display identity (name/email/photo) for the currently
@@ -2917,6 +2972,7 @@ const GoogleAuthManager = (function () {
     _currentUser = null;
     _authState = 'disconnected';
     _lastError = null;
+    _authEpoch++;
     clearPersistedHint();
     try {
       if (token && window.google && google.accounts && google.accounts.oauth2) {
@@ -2971,15 +3027,29 @@ const GoogleAuthManager = (function () {
   // Strategy / Authentication Failures). Local data and sync queues are
   // untouched regardless of outcome.
   function refreshAuthentication() {
+    const epoch = _authEpoch;
     return requestToken(false)
       .then(response => {
+        if (epoch !== _authEpoch) return getStatus(); // stale — user disconnected while this was in flight
         applyTokenResponse(response);
         return fetchCurrentUser(_accessToken).then(user => {
-          if (user) { _currentUser = user; savePersistedHint(user); }
+          if (user) {
+            _currentUser = user;
+            savePersistedHint(user);
+            diagLog('SILENT_RECONNECT_SUCCESS', user.email || undefined);
+          } else {
+            // A missing token is never possible here (applyTokenResponse()
+            // just set one) — this is specifically the identity lookup
+            // failing. Per fetchCurrentUser()'s own contract this never
+            // fails the connection: the token is kept, just without a
+            // refreshed display name/email.
+            diagLog('USER_LOOKUP_FAILED');
+          }
           return getStatus();
         });
       })
       .catch(err => {
+        if (epoch !== _authEpoch) return getStatus(); // stale — user disconnected while this was in flight
         // Deliberately does NOT clear the persisted hint here — a failed
         // silent refresh means "needs an interactive reconnect next time,"
         // not "the user disconnected." Requirement 5: an unreachable GIS
@@ -2998,13 +3068,14 @@ const GoogleAuthManager = (function () {
   // available (requirement 10, backward compatibility).
   function attemptSilentReconnectOnLoad() {
     const hint = loadPersistedHint();
-    if (!hint || !hint.connected) return Promise.resolve(getStatus());
+    if (!hint || !hint.connected) { diagLog('NO_PERSISTED_HINT'); return Promise.resolve(getStatus()); }
     // A previous session was connected, but Google auth can't even be
     // attempted right now — requirement 5: this is AUTHENTICATION_UNAVAILABLE,
     // not "the user is signed out," so it must not silently look identical
     // to NOT_AUTHENTICATED. The persisted hint is left untouched — the next
     // load may find a Client ID configured again.
     if (!GOOGLE_AUTH_CLIENT_ID) {
+      diagLog('CLIENT_ID_MISSING');
       return Promise.resolve(markAuthenticationUnavailable(new Error('Google OAuth Client ID is not configured.')));
     }
     if (hint.email || hint.name) _currentUser = { email: hint.email || null, name: hint.name || null, picture: null };
