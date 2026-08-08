@@ -2094,6 +2094,20 @@ function markSyncMetadataDeleted(task) {
   enqueueTask(task);
   return s;
 }
+// isTaskDeleted(): Phase 19 — the single, canonical check for "is this task a
+// tombstone." A deleted task is NEVER removed from the `tasks` array (see
+// deleteTask()/disableRecurringPlanFrom() below) — it stays there, exactly
+// where every sync module (BatchTaskUpload.findTaskForEntry,
+// BatchCloudMerge.findLocalTaskBySyncId, ConflictResolver.findLocalTaskForConflict,
+// SingleTaskUpload.verifyUploadedTask's tasks.includes() check) already expects
+// to find it by Sync ID, so the pending 'delete' Upload Queue entry can still be
+// located and pushed, and so a later remote copy of the same Sync ID is
+// recognized as "already deleted here" instead of being resurrected as a
+// brand-new task. Every user-facing view must call this to filter tombstones
+// out of what's actually shown (renderList(), running-task detection, etc.).
+function isTaskDeleted(task) {
+  return !!(task && task._sync && task._sync.deleted === true);
+}
 // ── End Synchronization Metadata (Phase 1) ──────────────────────────────────────
 
 // ── Dirty Tracking (Phase 2) ─────────────────────────────────────────────────────
@@ -6199,6 +6213,16 @@ const BackgroundScheduler = (function () {
         typeof renderMastersContent === 'function') {
       renderMastersContent();
     }
+    // Phase 19 fix: a sync pass can create, update, or (via a tombstone merge)
+    // hide tasks — none of that was ever reflected in the main visible task-card
+    // list, since only the running task's own row was re-rendered below. This is
+    // the single funnel every automatic trigger already passes through, so it's
+    // the correct place to bring the visible list back in line with whatever the
+    // pass just settled on — e.g. a task deleted on another device must actually
+    // disappear here, not just have its underlying data updated. Cheap and
+    // idempotent (renderList() already diffs existing DOM rows against current
+    // task state), matching how it's already called after every local mutation.
+    if (typeof renderList === 'function') renderList();
     // Phase 16B, requirement 6: every automatic trigger funnels through
     // scheduleSync().then(refreshSyncTabIfOpen) — this is therefore the one
     // place to reconcile the running-task timer after ANY automatic pass
@@ -6304,6 +6328,22 @@ const AutoSyncEngine = (function () {
     }
     return BackgroundScheduler.scheduleSync(trigger).then(result => {
       _lastAutoResult = result;
+      // Phase 19 fix: every other trigger path (SmartSyncTriggers.requestSmartSync(),
+      // the periodic interval trigger in BackgroundScheduler.initializeScheduler())
+      // chains .then(BackgroundScheduler.refreshSyncTabIfOpen) after scheduleSync()
+      // settles — that's the single place that both re-renders the Synchronization
+      // tab AND calls reconcileRunningTaskAfterSync() to stop/start timers to match
+      // whatever the pass just settled on. This debounced-edit path — the trigger
+      // fired by every ordinary Start/Pause/Resume/Delete/Edit/Create action via
+      // enqueueTask() — was the one path that skipped this, which is why routine
+      // task actions could sync data correctly but leave a stale timer ticking (or
+      // a newly-running task's timer never started) until some other trigger
+      // (opening the Synchronization tab, a focus/visibility event) happened to
+      // reconcile it. This is the single most common sync trigger in the app, so
+      // its omission here was effectively "you have to open the sync tab."
+      if (typeof BackgroundScheduler.refreshSyncTabIfOpen === 'function') {
+        BackgroundScheduler.refreshSyncTabIfOpen();
+      }
       return result;
     });
   }
@@ -7025,7 +7065,7 @@ document.addEventListener('visibilitychange', () => {
     checkBreakState();
     renderBreakWidget();
     renderWorkWidget();
-    if (tasks.some(t => t.status === 'running')) {
+    if (tasks.some(t => t.status === 'running' && !isTaskDeleted(t))) {
       const n = document.getElementById('wake-notice');
       if (n) { n.classList.add('show'); setTimeout(() => n.classList.remove('show'), 2500); }
     }
@@ -7330,7 +7370,7 @@ function addTask() {
 // ── Pause all running tasks except one ───────────────────────────────────────
 function pauseOthersExcept(exceptId) {
   tasks.forEach(t => {
-    if (t.id !== exceptId && t.status === 'running') {
+    if (t.id !== exceptId && t.status === 'running' && !isTaskDeleted(t)) {
       if (t.segmentStart !== null) {
         t.accumulatedMs += Date.now() - t.segmentStart;
         t.segmentStart = null;
@@ -8469,17 +8509,23 @@ function deleteTask(id) {
     saveBreakData(data);
   }
   // Phase 1: stamp the Deleted Flag + bump Version on the task's sync metadata exactly
-  // as SYNC_DATA_MODEL.md §3/§5 defines a deletion event, before it's removed from the
-  // in-memory/localStorage array below. This does NOT implement cloud deletion or
-  // soft-delete retention (the row still disappears immediately, same as before) —
-  // that's a Sync Manager / Storage Adapter concern for a later phase.
+  // as SYNC_DATA_MODEL.md §3/§5 defines a deletion event.
   if (task) markSyncMetadataDeleted(task);
-  tasks = tasks.filter(t => t.id !== id);
+  // Phase 19 fix: the task is DELIBERATELY NOT removed from the `tasks` array here.
+  // Removing it immediately breaks the sync tombstone chain: every syncId lookup the
+  // upload/merge/conflict pipelines use (findTaskForEntry, findLocalTaskBySyncId,
+  // findLocalTaskForConflict, verifyUploadedTask's tasks.includes() check) searches
+  // the LIVE `tasks` array, so evicting the task here would orphan its pending
+  // 'delete' Upload Queue entry (never found again, never pushed) AND make this
+  // device treat any future remote copy of the same Sync ID as brand new —
+  // resurrecting it via BatchCloudMerge.createLocalTaskFromRemote(). Instead, the
+  // task stays in `tasks` permanently, marked _sync.deleted = true (a tombstone),
+  // and is hidden from every user-facing view via isTaskDeleted() (renderList(),
+  // running-task detection, dropdowns, etc.) — reusing the existing task record
+  // and _sync metadata as the tombstone rather than inventing a second store.
   logEntries = logEntries.filter(e => e.taskId !== id);
   const row = document.getElementById('row-'+id);
   if (row) row.remove();
-  // Future synchronization integration point: Task deletion (TASK_DELETED)
-  // No implementation in Phase 0.5A
   saveState(); updateEmptyState(); updateLogPanel();
 }
 
@@ -8573,7 +8619,7 @@ function isPastTask(task) {
 function enforcePastDateAutoPause() {
   let changed = false;
   tasks.forEach(task => {
-    if (task.status === 'running' && isPastTask(task)) {
+    if (task.status === 'running' && isPastTask(task) && !isTaskDeleted(task)) {
       if (task.segmentStart !== null) {
         task.accumulatedMs += Date.now() - task.segmentStart;
         task.segmentStart = null;
@@ -8833,6 +8879,12 @@ function renderRow(id) {
   const task = tasks.find(t => t.id === id);
   let container = document.getElementById('row-'+id);
   if (!task) return;
+  if (isTaskDeleted(task)) {
+    // Phase 19: a tombstone must never be painted, even if some caller (e.g.
+    // reconcileRunningTaskAfterSync()) asks to render its row directly.
+    if (container) container.remove();
+    return;
+  }
   if (!container) {
     // Don't create a card for tasks that don't belong to the currently
     // selected date — avoids tasks from other dates leaking into view
@@ -8978,6 +9030,7 @@ function renderList() {
   // it was created on, regardless of its current status (running/paused/idle).
   // This keeps tasks from one day bleeding into another day's view.
   const todayTasks = tasks.filter(t => {
+    if (isTaskDeleted(t)) return false; // Phase 19: tombstones never show in card list
     if (t.status === 'done') return false; // completed tasks never show in card list
     if (!t.createdAt) return selDate === today; // legacy tasks without date — treat as today's
     const d = new Date(t.createdAt);
@@ -9027,7 +9080,9 @@ function renderList() {
 
 function updateEmptyState() {
   const list = document.getElementById('task-list');
-  if (tasks.length===0 && !document.getElementById('empty-state')) {
+  // Phase 19: tombstoned tasks stay in `tasks` forever, so count only
+  // non-deleted tasks when deciding whether to show the "no tasks yet" state.
+  if (!tasks.some(t => !isTaskDeleted(t)) && !document.getElementById('empty-state')) {
     const d = document.createElement('div'); d.className='empty-state'; d.id='empty-state';
     d.innerHTML='<i class="ti ti-clipboard-list"></i>No tasks yet — hit "Add task" to begin.';
     list.appendChild(d);
@@ -9864,7 +9919,9 @@ function renderMastersContent() {
   }
   if (activeMastersTab === 'data') {
     const logCount = logEntries.length;
-    const taskCount = tasks.length;
+    // Phase 19: tombstoned (deleted) tasks stay in `tasks` permanently for sync
+    // correctness — don't count them in the user-facing task count.
+    const taskCount = tasks.filter(t => !isTaskDeleted(t)).length;
     const oldestTs = logEntries.length ? Math.min(...logEntries.map(e => e.startTs)) : null;
     const oldestDate = oldestTs ? new Date(oldestTs).toLocaleDateString('en-GB') : '—';
     const storageKB = Math.round(JSON.stringify({tasks, logEntries, masters}).length / 1024);
@@ -10106,10 +10163,11 @@ function renderMastersContent() {
       return '✗ ' + (MERGE_REASON_LABELS[result.reason] || result.reason || 'failed') + (result.error ? (': ' + result.error) : '');
     }
     const mergeResultLabel = describeMergeResult(mergeStatusObj.lastResult);
-    const mergeTaskOptionsHtml = tasks.length === 0
+    const mergeableTasks = tasks.filter(t => !isTaskDeleted(t)); // Phase 19: tombstones aren't manually mergeable
+    const mergeTaskOptionsHtml = mergeableTasks.length === 0
       ? '<option value="">No tasks available</option>'
-      : tasks.map(t => '<option value="' + t.id + '">#' + t.id + ' — ' + esc(t.heading || t.description || 'Untitled task') + '</option>').join('');
-    const mergeControlsDisabledAttr = (!workspaceStatus.ready || testSyncBusy || singleUploadBusy || batchUploadBusy || mergeBusy || tasks.length === 0) ? 'disabled' : '';
+      : mergeableTasks.map(t => '<option value="' + t.id + '">#' + t.id + ' — ' + esc(t.heading || t.description || 'Untitled task') + '</option>').join('');
+    const mergeControlsDisabledAttr = (!workspaceStatus.ready || testSyncBusy || singleUploadBusy || batchUploadBusy || mergeBusy || mergeableTasks.length === 0) ? 'disabled' : '';
 
     // Phase 11: Batch Cloud Merge card state — reflects BatchCloudMerge's
     // own status/last-run summary. Computed the same read-only way as every
@@ -12471,19 +12529,20 @@ function disableRecurringPlanFrom(planId, fromDateStr) {
   plan.disabledFromDate = fromDateStr;
   plan.active = false;
 
-  // Remove future idle instances on/after the disable date that haven't been started
-  tasks = tasks.filter(t => {
-    if (t.recurringPlanId !== planId) return true;
-    if (t.status !== 'idle') return true; // never touch started/paused/running/done instances
+  // Tombstone future idle instances on/after the disable date that haven't been
+  // started. Phase 19 fix: mirrors deleteTask()'s fix — the task is stamped
+  // deleted via markSyncMetadataDeleted() but stays in `tasks` as a tombstone
+  // (never filtered out of the array), so the deletion can still reach the
+  // cloud and can never be resurrected by a later merge. isTaskDeleted() hides
+  // it from every view instead.
+  tasks.forEach(t => {
+    if (t.recurringPlanId !== planId) return;
+    if (t.status !== 'idle') return; // never touch started/paused/running/done instances
     const d = new Date(t.createdAt);
     const ds = dateToStr(d);
     if (ds >= fromDateStr) {
-      // Phase 1: this instance is being deleted — stamp sync metadata the same way
-      // deleteTask() does before it's dropped from the array below.
       markSyncMetadataDeleted(t);
-      return false; // remove
     }
-    return true;
   });
   // Also forget those dates so re-enabling later (if ever) won't think they're already generated
   if (plan.generatedDates) {
@@ -12653,7 +12712,7 @@ function isWithinWorkHours() {
 }
 
 function hasRunningTask() {
-  return tasks.some(t => t.status === 'running');
+  return tasks.some(t => t.status === 'running' && !isTaskDeleted(t));
 }
 
 // break data keyed by date string 'YYYY-MM-DD'
@@ -12825,7 +12884,7 @@ function initBreakTimer() {
 // already relies on elsewhere (the task that was started/resumed most
 // recently), and leaves resolving the rest to restoreRunningTask() below.
 function findRunningTask() {
-  const running = tasks.filter(t => t && t.status === 'running');
+  const running = tasks.filter(t => t && t.status === 'running' && !isTaskDeleted(t));
   if (running.length === 0) return null;
   if (running.length === 1) return running[0];
   running.sort((a, b) => (b.segmentStart || b.startedAt || 0) - (a.segmentStart || a.startedAt || 0));
@@ -12917,7 +12976,7 @@ function restoreRunningTask() {
   const candidate = findRunningTask();
   if (!candidate) { stopDuplicateTimers(null); return null; }
 
-  const stillRunning = tasks.filter(t => t && t.status === 'running');
+  const stillRunning = tasks.filter(t => t && t.status === 'running' && !isTaskDeleted(t));
   if (stillRunning.length > 1) {
     // Requirement 8: preserve every task's data, recover at most one task
     // safely, and record the anomaly — reusing the app's existing
@@ -13221,7 +13280,7 @@ restoreIntervals();
 updateLogPanel();
 updateTaskVisibility();
 initBreakTimer();
-if (tasks.length === 0) addTask();
+if (!tasks.some(t => !isTaskDeleted(t))) addTask();
 
 </script>
 </body>
