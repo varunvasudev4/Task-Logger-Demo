@@ -2380,6 +2380,502 @@ function reconcileUploadQueue() {
 }
 // ── End Local Queue Engine (Phase 3) ──────────────────────────────────────────────
 
+// ── Generalized Application State Change Tracking (Phase 20) ─────────────────────
+// Extends Phase 1/2/3's task-only synchronization metadata / dirty tracking / Upload
+// Queue into a domain-agnostic mechanism any persistent state can participate in —
+// per SYNC_STATE_INVENTORY.md, the non-task business domains (`logEntries`,
+// `recurringPlans`, `masters`, `breakData`, `theme`, `weekendOverrides`, the ID
+// `counters`, `userName`) currently have no dirty/queue/notify wiring at all (see
+// SYNC_AUDIT.md §2/§4/§5).
+//
+// This module deliberately does NOT introduce a second sync engine, a second queue,
+// a second scheduler, or a second Drive client (SYNC_AUDIT.md §9 "Recommended
+// Architecture"). It only generalizes the ONE thing Phase 1/2/3 hard-coded to
+// `task._sync.dirty` — "something changed and needs to reach the cloud" — into a
+// small per-domain record, and reuses every existing downstream mechanism exactly as
+// tasks already do: the same `AutoSyncEngine.handleLocalChangeForSync()` debounce
+// hook `enqueueTask()` already calls, the same write-through localStorage
+// persistence pattern `saveQueues()`/`loadQueues()` already established, and the
+// same "tombstone, never silently disappear" deletion pattern
+// `markSyncMetadataDeleted()`/`isTaskDeleted()` already established for tasks.
+//
+// Per SYNC_AUDIT.md §9.3, the non-task domains are small, low-contention,
+// whole-document data — they do not need per-entity syncId/version/conflict
+// machinery the way `tasks` do. `entityId` below is therefore OPTIONAL: pass one
+// when a domain change is naturally scoped to a single record (e.g. a single
+// recurring plan, a single log entry), or omit it (whole-domain key) for changes
+// that only make sense as "this whole domain's document changed" (e.g. theme).
+// Either way, this module still only ever changes what needs to be marked dirty —
+// it never touches `buildStatePayload()`'s upload contents or the download/merge
+// path; wiring individual domains into those remains future, domain-by-domain work
+// (see SYNC_IMPLEMENTATION.md).
+
+// Storage key deliberately separate from `ttl_sync_queues` (Phase 3) and every
+// business-data key (`ttl_tasks`, `ttl_log`, etc.) — same "own key per concern"
+// convention QUEUE_STORAGE_KEY already established, so this phase can never corrupt
+// or be corrupted by either.
+const DOMAIN_STATE_SCHEMA_VERSION = 1;
+const DOMAIN_STATE_STORAGE_KEY = 'ttl_sync_domain_state';
+// Sentinel entity key for changes that describe "the whole domain's document
+// changed" rather than one identifiable record within it (e.g. theme, work-hours
+// config). Never collides with a real entityId, since callers pass entityId as a
+// string/number identifying one record, never this literal.
+const DOMAIN_WHOLE_KEY = '__domain__';
+
+// The smallest practical domain model covering every non-task state category
+// SYNC_STATE_INVENTORY.md identifies as "should synchronize." Uses the exact
+// terminology already present in the app (`logEntries`, `masters`, `recurringPlans`,
+// etc.) rather than inventing new names. `tasks` is intentionally NOT listed here —
+// it keeps its own dedicated Phase 1/2/3 pipeline; this module is only for
+// everything that pipeline doesn't cover. Not a hard whitelist: recordSyncChange()
+// still records a domain outside this list (forward-compatible with a state
+// category not yet anticipated), but every call site added in this session uses one
+// of these.
+const SYNC_DOMAINS = ['logEntries', 'recurringPlans', 'masters', 'breakData', 'theme', 'weekendOverrides', 'counters', 'userName'];
+
+// In-memory domain change state, shaped as:
+//   { schemaVersion, domains: { [domain]: { dirty, version, lastChangeAt, entities: { [entityId]: { operation, version, timestamp, deviceId } } } } }
+// Rebuilt from localStorage on load (loadDomainSyncState()) — mirrors syncQueues'
+// own in-memory-cache-backed-by-write-through-persistence shape (Phase 3).
+let domainSyncState = { schemaVersion: DOMAIN_STATE_SCHEMA_VERSION, domains: {} };
+
+// Ensures a domain has a record, without discarding one that already exists —
+// same "create only if missing" contract as ensureSyncMetadata() (Phase 1).
+function ensureDomainRecord(domain) {
+  if (!domain) return null;
+  if (!domainSyncState.domains[domain] || typeof domainSyncState.domains[domain] !== 'object') {
+    domainSyncState.domains[domain] = { dirty: false, version: 0, lastChangeAt: null, entities: {} };
+  }
+  const rec = domainSyncState.domains[domain];
+  if (typeof rec.dirty !== 'boolean') rec.dirty = false;
+  if (typeof rec.version !== 'number') rec.version = 0;
+  if (!rec.entities || typeof rec.entities !== 'object') rec.entities = {};
+  return rec;
+}
+
+// Persists the full domain-state map as one JSON blob, write-through — called after
+// every mutation to it, exactly like saveQueues() (Phase 3), so this survives a
+// reload, browser restart, or iOS/iPadOS tab suspension without relying on any
+// in-memory-only variable (task brief requirement 5).
+function saveDomainSyncState() {
+  try {
+    localStorage.setItem(DOMAIN_STATE_STORAGE_KEY, JSON.stringify({
+      schemaVersion: DOMAIN_STATE_SCHEMA_VERSION,
+      domains: domainSyncState.domains
+    }));
+  } catch (e) {}
+}
+
+// Loads persisted domain-state from localStorage. Safe to call on a profile that
+// predates this phase (no key yet, or a malformed one) — leaves the default empty
+// map in place rather than throwing, exactly like loadQueues() (Phase 3). Backward
+// compatible by construction: this key is new and additive, so it never touches or
+// invalidates existing `ttl_tasks`/`ttl_sync_queues`/remote synchronization data.
+function loadDomainSyncState() {
+  try {
+    const raw = localStorage.getItem(DOMAIN_STATE_STORAGE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (parsed && parsed.domains && typeof parsed.domains === 'object') {
+      domainSyncState.domains = parsed.domains;
+      Object.keys(domainSyncState.domains).forEach(ensureDomainRecord);
+    }
+  } catch (e) {}
+}
+
+// The central mutation-notification function the task brief asks for: any future
+// mutation site can call recordSyncChange(domain, entityId, operation) exactly the
+// way every task mutation already calls touchSyncMetadata()/markTaskDirty(). One
+// domain change record per (domain, entityId) is upserted — never duplicated — so
+// "change A, change A, change A, sync" collapses into the same single record
+// "change A, change B, change C, sync" would leave three of (matching Phase 3's
+// upsertQueueEntry() coalescing contract), while still bumping the domain's overall
+// version counter on every call so no version information is lost. `entityId` may
+// be omitted (or passed as null/undefined) for a whole-domain-document change — see
+// DOMAIN_WHOLE_KEY above. `operation` is a free-form string ('create'/'update'/
+// 'delete'/etc.); passing 'delete' leaves a tombstone record in place (the entity
+// key is never removed from `entities`), mirroring markSyncMetadataDeleted()'s
+// "never silently disappear" contract for tasks (task brief requirement 6).
+function recordSyncChange(domain, entityId, operation) {
+  if (!domain) return null;
+  const rec = ensureDomainRecord(domain);
+  const key = (entityId === undefined || entityId === null || entityId === '') ? DOMAIN_WHOLE_KEY : String(entityId);
+  const now = Date.now();
+  rec.version += 1;
+  rec.dirty = true;
+  rec.lastChangeAt = now;
+  rec.entities[key] = {
+    operation: operation || 'update',
+    version: rec.version,
+    timestamp: now,
+    deviceId: (typeof getDeviceId === 'function') ? getDeviceId() : null
+  };
+  saveDomainSyncState();
+  // Reuses the EXACT SAME hook enqueueTask() (Phase 3/17) already calls — no second
+  // scheduler, no second debounce, no second trigger path. A domain change and a
+  // task change occurring together collapse into the same one debounce window.
+  if (typeof AutoSyncEngine !== 'undefined' && typeof AutoSyncEngine.handleLocalChangeForSync === 'function') {
+    AutoSyncEngine.handleLocalChangeForSync();
+  }
+  return Object.assign({ domain: domain, entityId: key === DOMAIN_WHOLE_KEY ? null : key }, rec.entities[key]);
+}
+
+// Whether a domain currently has local changes that haven't been confirmed synced —
+// the domain-level counterpart to isTaskDirty() (Phase 2).
+function isDomainDirty(domain) {
+  const rec = domainSyncState.domains[domain];
+  return !!(rec && rec.dirty === true);
+}
+
+// Every currently-dirty domain name — the domain-level counterpart to
+// getDirtyTasks() (Phase 2).
+function getDirtyDomains() {
+  return Object.keys(domainSyncState.domains).filter(isDomainDirty);
+}
+
+// True if ANY domain has pending changes — this is the single check
+// AutoSyncEngine.hasPendingSyncWork() below adds alongside its existing Upload
+// Queue check, so a domain-only change (no task touched) is still enough to trigger
+// the existing automatic sync pass.
+function hasPendingDomainWork() {
+  return getDirtyDomains().length > 0;
+}
+
+// Clears a domain's dirty flag. Nothing calls this yet — there is no confirmed-push
+// pipeline for non-task domains in this session (see task brief requirement 9 / the
+// "Not implemented yet" list in the final report) — provided now as the
+// counterpart a future phase needs, exactly like clearTaskDirty() (Phase 2) was
+// provided ahead of its own eventual caller.
+function clearDomainDirty(domain) {
+  const rec = domainSyncState.domains[domain];
+  if (!rec) return;
+  rec.dirty = false;
+  saveDomainSyncState();
+}
+
+// Read-only inspection of a domain's recorded entity changes — never a live
+// reference, same contract as getUploadQueue() (Phase 3). Useful for a future
+// upload/download implementation to know exactly what changed, and for debugging/
+// testing this session's mechanism.
+function getDomainChangeEntries(domain) {
+  const rec = domainSyncState.domains[domain];
+  if (!rec) return [];
+  return Object.keys(rec.entities).map(k => Object.assign(
+    { entityId: k === DOMAIN_WHOLE_KEY ? null : k },
+    rec.entities[k]
+  ));
+}
+
+// Whether a specific domain entity's most recent recorded change was a deletion —
+// the domain-level counterpart to isTaskDeleted() (Phase 1).
+function isDomainEntityDeleted(domain, entityId) {
+  const rec = domainSyncState.domains[domain];
+  if (!rec) return false;
+  const key = (entityId === undefined || entityId === null || entityId === '') ? DOMAIN_WHOLE_KEY : String(entityId);
+  const entry = rec.entities[key];
+  return !!(entry && entry.operation === 'delete');
+}
+// ── End Generalized Application State Change Tracking (Phase 20) ─────────────────
+
+// ── Non-Task Domain Synchronization: Configuration & App State (Phase 19E) ───────
+// Wires the remaining "should synchronize" rows SYNC_STATE_INVENTORY.md still lists
+// as ❌ (theme, weekendOverrides, breakData) or ⬆️ upload-only (masters, the ID
+// counters, userName) into the SAME generalized mechanism Phase 20 built and Phase
+// 19C/19D already used for logEntries/recurringPlans — no second sync engine, queue,
+// scheduler, or Drive client, per this phase's own brief §CRITICAL RULE. Two halves:
+//
+// 1. Upload-side completeness: buildStatePayload() (GoogleDriveWorkspace, below) now
+//    includes theme/breakData/weekendOverrides, so the ONE existing whole-state write
+//    (pushStateToStateFile()) carries them automatically whenever it runs — matching
+//    exactly how masters/counters/userName already ride along today. See
+//    trackNonTaskDomainChangesOnSave() for how masters/counters/userName (whose
+//    mutations are scattered across ~15+ call sites) get their recordSyncChange()
+//    call without instrumenting every one of those sites individually.
+//
+// 2. Download-side: previously nothing at all — every non-task domain was upload-only
+//    (SYNC_AUDIT.md §1/§9.1). mergeNonTaskDomains() below is the missing read/merge
+//    half, using the SAME per-domain "newer wins" comparison Phase 10/11 already use
+//    for tasks, just generalized to whole-document domains per SYNC_AUDIT.md §9.3
+//    ("small, low-contention, whole-document data — they do not need per-entity
+//    syncId/version/conflict machinery the way tasks do"). `counters` uses max-wins
+//    instead of newer-wins, since its only correctness requirement is "never reused,"
+//    not "most recent." `weekendOverrides` merges per-date, since each date is
+//    naturally its own entity (recordSyncChange() already keys it that way).
+//
+// A domain with a local change not yet confirmed pushed (isDomainDirty()) is NEVER
+// overwritten by a remote value here, regardless of the remote's own timestamp — the
+// local, not-yet-uploaded edit always survives until it actually reaches the cloud,
+// mirroring isRemoteNewer()'s "local wins on a tie" posture for tasks. This is what
+// keeps this a true two-way sync rather than a download that can stomp an in-flight
+// local edit.
+
+// Baseline content hashes for saveState()-funnel change detection (masters/counters/
+// userName — see trackNonTaskDomainChangesOnSave()). Primed once at load, from the
+// PRE-mutation persisted values, so the very first genuine change after load is still
+// correctly detected as a change on the very next saveState() call.
+let _lastMastersHash = null;
+let _lastCountersHash = null;
+let _lastUserNameHash = null;
+
+// Collects the per-date weekend "working day?" overrides into one object, keyed by
+// date string. Single source of truth for this shape — both exportBackup() and
+// buildStatePayload() use it, so the payload's `weekendOverrides` field always means
+// exactly what the manual backup's own field of the same name already means.
+function collectWeekendOverrides() {
+  const weekendOverrides = {};
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.indexOf('ttl_weekend_') === 0) weekendOverrides[k.slice('ttl_weekend_'.length)] = localStorage.getItem(k);
+    }
+  } catch (e) {}
+  return weekendOverrides;
+}
+
+// Per-domain last-change metadata for the whole-document domains, sourced from the
+// SAME domainSyncState (Phase 20) recordSyncChange() already maintains — nothing new
+// is tracked, this just surfaces it into the upload payload so a receiving device has
+// something to compare against (SYNC_STATE_INVENTORY.md's "Domain change-tracking
+// implementation status" table already noted this bookkeeping exists but "is never
+// itself synced" — it still isn't; only a per-domain timestamp/version SUMMARY rides
+// in `_syncMeta`, never the local queue/entity bookkeeping itself).
+function buildDomainMeta() {
+  const meta = {};
+  ['masters', 'theme', 'breakData', 'counters', 'userName'].forEach(d => {
+    const rec = domainSyncState.domains[d];
+    if (rec && rec.lastChangeAt) {
+      meta[d] = { version: rec.version || 0, modifiedAt: rec.lastChangeAt, deviceId: getDeviceId() };
+    }
+  });
+  return meta;
+}
+
+// Same idea as buildDomainMeta(), but per-date, for weekendOverrides — reuses the
+// entity-level records recordSyncChange('weekendOverrides', dateStr, ...) already
+// creates rather than inventing a second timestamp store for the same data.
+function buildWeekendOverridesMeta(weekendOverrides) {
+  const out = {};
+  const rec = domainSyncState.domains['weekendOverrides'];
+  if (rec && rec.entities && weekendOverrides) {
+    Object.keys(weekendOverrides).forEach(dateStr => {
+      const e = rec.entities[dateStr];
+      if (e) out[dateStr] = { modifiedAt: e.timestamp, deviceId: e.deviceId };
+    });
+  }
+  return out;
+}
+
+// Records that a remote value has now been adopted locally WITHOUT going through
+// recordSyncChange() — adopting a remote value is not itself a new local edit, so it
+// must not re-mark the domain dirty (that would immediately re-upload the exact value
+// we just downloaded, an unnecessary write and, worse, a feedback loop between two
+// devices each "confirming" the other's value back and forth). Directly updates the
+// domain's version/lastChangeAt bookkeeping and clears dirty, exactly like a
+// confirmed task upload already clears task._sync.dirty (clearTaskDirty()) without
+// re-marking anything.
+function adoptRemoteDomainMeta(domain, remoteMeta) {
+  const rec = ensureDomainRecord(domain);
+  rec.dirty = false;
+  rec.version = Math.max(rec.version || 0, (remoteMeta && remoteMeta.version) || 0);
+  rec.lastChangeAt = (remoteMeta && remoteMeta.modifiedAt) || Date.now();
+  saveDomainSyncState();
+}
+
+// ── Per-domain "apply if remote is newer and local isn't dirty" checks ───────────
+// Each returns true only if it actually changed local state (so mergeNonTaskDomains()
+// knows whether a save/re-render is warranted), false otherwise — same true/false
+// "did this actually do anything" contract BatchCloudMerge's mergeOneRemoteTask()
+// outcome already uses, just boolean instead of an outcome string (no per-domain
+// UI/statistics surface exists yet to warrant the richer shape).
+
+function applyRemoteMastersIfNewer(remoteParsed) {
+  if (!remoteParsed || !remoteParsed.masters || typeof remoteParsed.masters !== 'object') return false;
+  if (isDomainDirty('masters')) return false;
+  const remoteMeta = remoteParsed._syncMeta && remoteParsed._syncMeta.domainMeta && remoteParsed._syncMeta.domainMeta.masters;
+  if (!remoteMeta || !remoteMeta.modifiedAt) return false;
+  const rec = domainSyncState.domains['masters'];
+  const localModifiedAt = rec ? rec.lastChangeAt : null;
+  if (localModifiedAt && localModifiedAt >= remoteMeta.modifiedAt) return false;
+  // Phase 19E §5 (task brief): masters bundles several independently-editable
+  // concerns (projects/natures/lists, log-table/task-card columns, work hours,
+  // flags, email template). True entity-level merging of each would need its own
+  // conflict/version machinery this phase's CRITICAL RULE explicitly rules out
+  // building. Smallest compatible approach: whole-document newer-wins, same as
+  // every other domain here — a concurrent, still-unsynced edit to a DIFFERENT
+  // part of masters on the other device can be overwritten by this. Documented
+  // limitation, not silently accepted — see PHASE_19E_RESULT.md §10.
+  masters = remoteParsed.masters;
+  _lastMastersHash = simpleHash(stableStringify(masters));
+  adoptRemoteDomainMeta('masters', remoteMeta);
+  return true;
+}
+
+function applyRemoteThemeIfNewer(remoteParsed) {
+  if (!remoteParsed || typeof remoteParsed.theme !== 'string') return false;
+  if (isDomainDirty('theme')) return false;
+  const remoteMeta = remoteParsed._syncMeta && remoteParsed._syncMeta.domainMeta && remoteParsed._syncMeta.domainMeta.theme;
+  if (!remoteMeta || !remoteMeta.modifiedAt) return false;
+  const rec = domainSyncState.domains['theme'];
+  const localModifiedAt = rec ? rec.lastChangeAt : null;
+  if (localModifiedAt && localModifiedAt >= remoteMeta.modifiedAt) return false;
+  if (remoteParsed.theme === getStoredTheme()) { adoptRemoteDomainMeta('theme', remoteMeta); return false; }
+  // Deliberately NOT setTheme() — that function itself calls recordSyncChange(),
+  // which would immediately re-mark this domain dirty and re-upload the value we
+  // just downloaded. Applies the same two effects setTheme() has (persist +
+  // repaint) without its dirty-tracking side effect.
+  try { localStorage.setItem('ttl_theme', remoteParsed.theme); } catch (e) {}
+  if (typeof applyTheme === 'function') applyTheme(remoteParsed.theme);
+  if (typeof updateFsChipThemeIcon === 'function') setTimeout(updateFsChipThemeIcon, 0);
+  adoptRemoteDomainMeta('theme', remoteMeta);
+  return true;
+}
+
+function applyRemoteBreakDataIfNewer(remoteParsed) {
+  if (!remoteParsed || !remoteParsed.breakData || typeof remoteParsed.breakData !== 'object') return false;
+  if (isDomainDirty('breakData')) return false;
+  const remoteMeta = remoteParsed._syncMeta && remoteParsed._syncMeta.domainMeta && remoteParsed._syncMeta.domainMeta.breakData;
+  if (!remoteMeta || !remoteMeta.modifiedAt) return false;
+  const rec = domainSyncState.domains['breakData'];
+  const localModifiedAt = rec ? rec.lastChangeAt : null;
+  if (localModifiedAt && localModifiedAt >= remoteMeta.modifiedAt) return false;
+  // Persisted timing data only (segment start/end epoch ms, a currentStart epoch
+  // ms if a break is mid-flight) — never a JS interval/timer handle, which never
+  // leaves this device in the first place (getBreakData()/saveBreakData() are the
+  // only read/write path; nothing here touches setInterval/clearInterval). A
+  // receiving device reconstructs its break display from this persisted data on
+  // its own next render, exactly as task brief §11 requires.
+  try { localStorage.setItem('ttl_break', JSON.stringify(remoteParsed.breakData)); } catch (e) {}
+  if (typeof renderBreakWidget === 'function') renderBreakWidget();
+  adoptRemoteDomainMeta('breakData', remoteMeta);
+  return true;
+}
+
+function applyRemoteUserNameIfNewer(remoteParsed) {
+  if (!remoteParsed || typeof remoteParsed.userName !== 'string' || !remoteParsed.userName) return false;
+  if (isDomainDirty('userName')) return false;
+  const remoteMeta = remoteParsed._syncMeta && remoteParsed._syncMeta.domainMeta && remoteParsed._syncMeta.domainMeta.userName;
+  if (!remoteMeta || !remoteMeta.modifiedAt) return false;
+  const rec = domainSyncState.domains['userName'];
+  const localModifiedAt = rec ? rec.lastChangeAt : null;
+  if (localModifiedAt && localModifiedAt >= remoteMeta.modifiedAt) return false;
+  if (remoteParsed.userName === userName) { adoptRemoteDomainMeta('userName', remoteMeta); return false; }
+  userName = remoteParsed.userName;
+  _lastUserNameHash = simpleHash(userName);
+  adoptRemoteDomainMeta('userName', remoteMeta);
+  return true;
+}
+
+// Max-wins, not newer-wins (see module header). Applied unconditionally — a higher
+// remote counter is always adopted regardless of this domain's own dirty flag,
+// because adopting it can only ever prevent a future ID collision, never lose data.
+function applyRemoteCountersIfHigher(remoteParsed) {
+  if (!remoteParsed) return false;
+  let changed = false;
+  if (typeof remoteParsed.taskIdCounter === 'number' && remoteParsed.taskIdCounter > taskIdCounter) { taskIdCounter = remoteParsed.taskIdCounter; changed = true; }
+  if (typeof remoteParsed.importIdCounter === 'number' && remoteParsed.importIdCounter > importIdCounter) { importIdCounter = remoteParsed.importIdCounter; changed = true; }
+  if (typeof remoteParsed.recurringPlanIdCounter === 'number' && remoteParsed.recurringPlanIdCounter > recurringPlanIdCounter) { recurringPlanIdCounter = remoteParsed.recurringPlanIdCounter; changed = true; }
+  if (changed) {
+    _lastCountersHash = simpleHash(stableStringify({ taskIdCounter: taskIdCounter, importIdCounter: importIdCounter, recurringPlanIdCounter: recurringPlanIdCounter }));
+    const remoteMeta = (remoteParsed._syncMeta && remoteParsed._syncMeta.domainMeta && remoteParsed._syncMeta.domainMeta.counters) || {};
+    adoptRemoteDomainMeta('counters', remoteMeta);
+  }
+  return changed;
+}
+
+// Per-date merge (see module header). Each date is its own entity — a local change
+// to date X never blocks adopting a remote change to date Y, unlike the whole-
+// document domains above.
+function applyRemoteWeekendOverrides(remoteParsed) {
+  if (!remoteParsed || !remoteParsed.weekendOverrides || typeof remoteParsed.weekendOverrides !== 'object') return false;
+  const remoteMetaMap = (remoteParsed._syncMeta && remoteParsed._syncMeta.weekendOverridesMeta) || {};
+  const rec = ensureDomainRecord('weekendOverrides');
+  let changed = false;
+  Object.keys(remoteParsed.weekendOverrides).forEach(dateStr => {
+    const remoteVal = remoteParsed.weekendOverrides[dateStr];
+    const remoteEntryMeta = remoteMetaMap[dateStr];
+    const remoteAt = remoteEntryMeta && remoteEntryMeta.modifiedAt;
+    if (!remoteAt) return; // no timestamp info from the sender — never overwrite blind
+    const localEntry = rec.entities[dateStr];
+    if (localEntry && localEntry.timestamp >= remoteAt) return; // local change is newer-or-tied — wins
+    const localKey = 'ttl_weekend_' + dateStr;
+    let localCurrent = null;
+    try { localCurrent = localStorage.getItem(localKey); } catch (e) {}
+    if (localCurrent === remoteVal) return; // identical already — nothing to adopt
+    try { localStorage.setItem(localKey, remoteVal); } catch (e) {}
+    rec.entities[dateStr] = { operation: 'update', version: rec.version, timestamp: remoteAt, deviceId: remoteEntryMeta.deviceId || null };
+    if (typeof todayStr === 'function' && dateStr === todayStr() && typeof weekendWorkday !== 'undefined') {
+      weekendWorkday = (remoteVal === 'true');
+    }
+    changed = true;
+  });
+  if (changed) { rec.dirty = false; saveDomainSyncState(); }
+  return changed;
+}
+
+// mergeNonTaskDomains(): the single public entry point (mirrors
+// BatchCloudMerge.mergeTaskCollection()'s role, but for everything that pipeline
+// doesn't cover). Takes an ALREADY-downloaded, already-parsed remote state object —
+// never downloads anything itself — so every caller (the automatic background pass,
+// which already downloads once for task planning, and the manual Batch Cloud Merge
+// button, which does its own separate download) gets the exact same merge logic
+// with zero duplicated code, and this never triggers a second network read.
+function mergeNonTaskDomains(remoteParsed) {
+  if (!remoteParsed || typeof remoteParsed !== 'object') return { changed: [] };
+  const changed = [];
+  try {
+    if (applyRemoteMastersIfNewer(remoteParsed)) changed.push('masters');
+    if (applyRemoteThemeIfNewer(remoteParsed)) changed.push('theme');
+    if (applyRemoteBreakDataIfNewer(remoteParsed)) changed.push('breakData');
+    if (applyRemoteUserNameIfNewer(remoteParsed)) changed.push('userName');
+    if (applyRemoteCountersIfHigher(remoteParsed)) changed.push('counters');
+    if (applyRemoteWeekendOverrides(remoteParsed)) changed.push('weekendOverrides');
+  } catch (e) {}
+  if (changed.length > 0) {
+    saveState();
+    if (typeof renderAll === 'function') renderAll();
+  }
+  return { changed: changed };
+}
+
+// Called from the END of saveState() (see Persistence section below) — the single
+// funnel virtually every masters/counter/userName mutation in this file already
+// passes through. Chosen over instrumenting masters' ~15+ scattered mutation call
+// sites (add/edit/delete project, nature, custom list value, work-hours edit,
+// weekend-day toggle, task-card/log column visibility, email template, flags...)
+// individually: this one content-hash-gated check, at the one place they already
+// all funnel through, gives the identical dirty-tracking guarantee without touching
+// every mutation function's own body.
+function trackNonTaskDomainChangesOnSave() {
+  try {
+    const mHash = simpleHash(stableStringify(masters));
+    if (_lastMastersHash !== null && mHash !== _lastMastersHash) recordSyncChange('masters', null, 'update');
+    _lastMastersHash = mHash;
+
+    const cHash = simpleHash(stableStringify({ taskIdCounter: taskIdCounter, importIdCounter: importIdCounter, recurringPlanIdCounter: recurringPlanIdCounter }));
+    if (_lastCountersHash !== null && cHash !== _lastCountersHash) recordSyncChange('counters', null, 'update');
+    _lastCountersHash = cHash;
+
+    const uHash = simpleHash(String(userName || ''));
+    if (_lastUserNameHash !== null && uHash !== _lastUserNameHash) recordSyncChange('userName', null, 'update');
+    _lastUserNameHash = uHash;
+  } catch (e) {}
+}
+
+// Primes the three baseline hashes above from the just-loaded (pre-mutation)
+// persisted values — called once from loadState(), before any mutation this
+// session can happen. Without this, the FIRST real change of a session would be
+// missed: trackNonTaskDomainChangesOnSave()'s own baseline-priming-on-first-call
+// fallback (`_lastMastersHash !== null` guard) exists for a profile that predates
+// this phase, not as the normal path.
+function primeNonTaskDomainHashes() {
+  try {
+    _lastMastersHash = simpleHash(stableStringify(masters));
+    _lastCountersHash = simpleHash(stableStringify({ taskIdCounter: taskIdCounter, importIdCounter: importIdCounter, recurringPlanIdCounter: recurringPlanIdCounter }));
+    _lastUserNameHash = simpleHash(String(userName || ''));
+  } catch (e) {}
+}
+// ── End Non-Task Domain Synchronization (Phase 19E) ───────────────────────────────
+
 // ── Local Synchronization Manager (Phase 4) ─────────────────────────────────────
 // Coordinates the local synchronization components already implemented in Phases
 // 1–3 (Synchronization Metadata, Dirty Tracking, Local Queue Engine) and reserves
@@ -2530,6 +3026,9 @@ const LocalSyncManager = (function () {
     if (!syncQueues || typeof syncQueues !== 'object') syncQueues = { upload: [], download: [], delete: [], retry: [], conflict: [] };
     loadQueues();          // recover persisted queue structures
     reconcileUploadQueue(); // ensure every dirty task has a matching queue entry
+    // Phase 20 (Generalized Application State Change Tracking): recover persisted
+    // domain-level dirty state the same way queues are recovered just above.
+    if (typeof loadDomainSyncState === 'function') loadDomainSyncState();
     validateSynchronizationState();
     _initialized = true;
     _ready = true;
@@ -3519,6 +4018,10 @@ const GoogleDriveWorkspace = (function () {
   // scope for this phase.
   function buildStatePayload() {
     getOrCreateStateSyncId();
+    // Phase 19E: theme/breakData/weekendOverrides were entirely outside this payload
+    // before this phase (SYNC_STATE_INVENTORY.md's ❌ rows) — masters/counters/
+    // userName were already here (⬆️ upload-only rows), unchanged by this addition.
+    const weekendOverrides = collectWeekendOverrides();
     const business = {
       tasks: tasks,
       logEntries: logEntries,
@@ -3527,7 +4030,10 @@ const GoogleDriveWorkspace = (function () {
       importIdCounter: importIdCounter,
       recurringPlans: recurringPlans,
       recurringPlanIdCounter: recurringPlanIdCounter,
-      userName: userName
+      userName: userName,
+      theme: getStoredTheme(),
+      breakData: getBreakData(),
+      weekendOverrides: weekendOverrides
     };
     const nowIso = new Date().toISOString();
     const meta = {
@@ -3537,7 +4043,14 @@ const GoogleDriveWorkspace = (function () {
       checksum: computeStatePayloadChecksum(business),
       deviceId: getDeviceId(),
       createdAt: _stateCreatedAt || nowIso,
-      modifiedAt: nowIso
+      modifiedAt: nowIso,
+      // Phase 19E: per-domain last-change metadata for the whole-document domains
+      // (masters/theme/breakData/counters/userName) plus a per-date map for
+      // weekendOverrides — lets a receiving device apply newer-wins comparison
+      // without per-entity sync metadata the way tasks have. See
+      // SYNC_IMPLEMENTATION.md's Phase 19E section for the full design.
+      domainMeta: buildDomainMeta(),
+      weekendOverridesMeta: buildWeekendOverridesMeta(weekendOverrides)
     };
     return Object.assign({ _syncMeta: meta }, business);
   }
@@ -4219,9 +4732,17 @@ const BatchTaskUpload = (function () {
     const entries = getUploadQueue(); // Phase 3 — deterministic, insertion-ordered copy
     resetProgress(entries);
 
-    if (entries.length === 0) {
+    // Phase 19E: a domain-only change (theme/masters/breakData/weekendOverrides/
+    // counters/userName, no task involved) must still reach the cloud automatically
+    // — previously this function returned here without ever calling
+    // pushStateToStateFile() when the TASK queue was empty, so a domain-only change
+    // could never sync no matter how many passes ran. Snapshot which domains are
+    // dirty right now (before the push) so we know exactly what this push covers.
+    const domainsDirtyAtStart = (typeof getDirtyDomains === 'function') ? getDirtyDomains() : [];
+
+    if (entries.length === 0 && domainsDirtyAtStart.length === 0) {
       _status = 'idle';
-      const result = { ok: true, processed: 0, completed: 0, failed: 0, results: [] };
+      const result = { ok: true, processed: 0, completed: 0, failed: 0, results: [], domainsSynced: [] };
       _lastRun = result;
       return Promise.resolve(result);
     }
@@ -4241,7 +4762,8 @@ const BatchTaskUpload = (function () {
         // Design Principle 5 (LOCAL_SYNC_ENGINE.md §13) it is treated as if
         // it never happened for every queued entry — none of them can have
         // succeeded (requirement 4), and every entry is left untouched to be
-        // retried on a future pass.
+        // retried on a future pass. Dirty domains are left untouched too, for
+        // the identical reason — they'll be included again on the next push.
         const reason = (pushResult && pushResult.reason) || 'unknown-error';
         const extra = (pushResult && pushResult.error) ? { error: pushResult.error } : null;
         entries.forEach(e => failUpload(e, reason, extra));
@@ -4260,9 +4782,17 @@ const BatchTaskUpload = (function () {
       const results = entries.map(entry => uploadQueuedTask(entry, pushResult));
       const completed = results.filter(r => r.ok).length;
       const failed = results.length - completed;
-      if (completed > 0) saveState();
+      // Phase 19E: the single shared write above (pushStateToStateFile() ->
+      // buildStatePayload()) already carried every domain that was dirty when we
+      // snapshotted domainsDirtyAtStart — clear each one now that the push is
+      // confirmed, exactly like completed task entries above have their own dirty
+      // flag cleared by uploadQueuedTask(). A domain that became dirty again
+      // AFTER the snapshot (a change mid-flight) is untouched here and will
+      // simply be picked up, correctly, by the next pass.
+      if (typeof clearDomainDirty === 'function') domainsDirtyAtStart.forEach(clearDomainDirty);
+      if (completed > 0 || domainsDirtyAtStart.length > 0) saveState();
       _status = failed > 0 ? 'failed' : 'complete';
-      const result = { ok: failed === 0, processed: entries.length, completed: completed, failed: failed, results: results };
+      const result = { ok: failed === 0, processed: entries.length, completed: completed, failed: failed, results: results, domainsSynced: domainsDirtyAtStart };
       _lastRun = result;
       return result;
     }).catch(err => {
@@ -4722,7 +5252,26 @@ const BatchCloudMerge = (function () {
       tasksSkipped: results.filter(r => r.outcome === 'skipped').length,
       tasksFailed:  results.filter(r => r.outcome === 'failed').length
     };
+    // Phase 19D: this is the point where a remote device's independently-generated
+    // recurring occurrence(s) just landed in the local `tasks` array (any 'created'
+    // outcome above). Reconcile before the single save below, so a duplicate
+    // occurrence never even gets rendered — see dedupeRecurringOccurrences()'s own
+    // header comment for why this, not a new merge engine, is the right hook
+    // (task brief §11 Scenarios B/C, §19).
+    if (typeof dedupeRecurringOccurrences === 'function') dedupeRecurringOccurrences();
+    // Phase 19E: this manual "Batch Cloud Merge" pass already downloaded the full
+    // remote payload above (downloadResult.parsed) — merge the non-task domains
+    // from the SAME payload, no second download, so the manual merge button stays
+    // consistent with the automatic pass's own domain-merge behavior
+    // (BackgroundScheduler.runSynchronizationPass()). mergeNonTaskDomains() calls
+    // saveState() itself only when something actually changed; the unconditional
+    // saveState() below still covers the task-only path exactly as before.
+    let domainMergeResult = null;
+    if (typeof mergeNonTaskDomains === 'function' && downloadResult && downloadResult.parsed) {
+      domainMergeResult = mergeNonTaskDomains(downloadResult.parsed);
+    }
     saveState();
+    summary.domainsMerged = domainMergeResult ? domainMergeResult.changed : [];
     return summary;
   }
 
@@ -5097,7 +5646,14 @@ const IncrementalSyncEngine = (function () {
         fileId: downloadResult.fileId,
         modifiedTime: downloadResult.modifiedTime,
         plan: plan,
-        statistics: summarizeSyncPlan(plan)
+        statistics: summarizeSyncPlan(plan),
+        // Phase 19E: this download (already fetched, once, for task planning above)
+        // contains the full remote payload, including every non-task domain. Exposed
+        // here so BackgroundScheduler's automatic pass can merge those domains too,
+        // WITHOUT a second download — see mergeNonTaskDomains() and its call site in
+        // runSynchronizationPass(). Purely additive field; nothing that already reads
+        // this result's plan/statistics is affected.
+        remoteState: downloadResult.parsed
       };
       _lastPlan = result;
       return result;
@@ -6132,18 +6688,38 @@ const BackgroundScheduler = (function () {
         return _lastResult;
       }
 
+      // Phase 19E: the download buildSyncPlan() just performed for task planning
+      // already carries the full remote payload (planResult.remoteState) — merge
+      // the non-task domains (theme/masters/breakData/weekendOverrides/counters/
+      // userName) from it now, on EVERY pass, with no second download and
+      // independent of the task-only needsUpload/needsDownload decision below.
+      // This is what makes Device B "eventually receive" a config-only change
+      // (SYNC_STATE_INVENTORY.md's automatic-sync requirement) even on a pass
+      // where zero tasks are involved. Synchronous, local-only, never throws
+      // (mergeNonTaskDomains() already wraps its own per-domain work in try/catch).
+      let domainMergeResult = null;
+      if (typeof mergeNonTaskDomains === 'function' && planResult.remoteState) {
+        domainMergeResult = mergeNonTaskDomains(planResult.remoteState);
+      }
+
       const stats = planResult.statistics || {};
-      const needsUpload   = (stats.uploadsRequired > 0)   || (stats.createRemote > 0);
+      // Phase 19E: a domain-only local change (no task touched) must still reach
+      // the cloud automatically — hasPendingDomainWork() is the domain-level
+      // counterpart of the task-level uploadsRequired/createRemote stats already
+      // checked here.
+      const needsUpload   = (stats.uploadsRequired > 0)   || (stats.createRemote > 0)
+        || (typeof hasPendingDomainWork === 'function' && hasPendingDomainWork());
       const needsDownload = (stats.downloadsRequired > 0) || (stats.createLocal > 0);
 
       if (!needsUpload && !needsDownload) {
         // Nothing for the existing pipelines to do — the cheapest possible
         // wake-up: a plan was built, but neither upload nor download is
-        // invoked (BACKGROUND_SYNC.md §10 CPU usage).
+        // invoked (BACKGROUND_SYNC.md §10 CPU usage). The domain merge above
+        // (if anything) has already happened regardless of this early return.
         _running = false;
         _lastSyncAt = new Date().toISOString();
         _status = 'completed';
-        _lastResult = { ok: true, trigger, plan: planResult, uploaded: null, merged: null, noop: true };
+        _lastResult = { ok: true, trigger, plan: planResult, uploaded: null, merged: null, noop: true, domainsMerged: domainMergeResult && domainMergeResult.changed };
         return _lastResult;
       }
 
@@ -6169,7 +6745,7 @@ const BackgroundScheduler = (function () {
           const mergeOk = !mergeResult || mergeResult.ok !== false;
           _lastSyncAt = new Date().toISOString();
           _status = (uploadOk && mergeOk) ? 'completed' : 'failed';
-          _lastResult = { ok: uploadOk && mergeOk, trigger, plan: planResult, uploaded: uploadResult, merged: mergeResult };
+          _lastResult = { ok: uploadOk && mergeOk, trigger, plan: planResult, uploaded: uploadResult, merged: mergeResult, domainsMerged: domainMergeResult && domainMergeResult.changed };
           return _lastResult;
         });
       });
@@ -6372,9 +6948,17 @@ const AutoSyncEngine = (function () {
   // work" precondition — reuses the existing Upload Queue statistics (Phase
   // 3) rather than re-deriving dirty state a second way.
   function hasPendingSyncWork() {
-    if (typeof getQueueStatistics !== 'function') return false;
-    const stats = getQueueStatistics();
-    return !!(stats && stats.pendingUploads > 0);
+    if (typeof getQueueStatistics === 'function') {
+      const stats = getQueueStatistics();
+      if (stats && stats.pendingUploads > 0) return true;
+    }
+    // Phase 20 (Generalized Application State Change Tracking): a domain-only
+    // change (e.g. a log edit, a recurring-plan change, a theme change) with no
+    // task touched still has pending work — check the generalized domain dirty
+    // flags alongside the existing task Upload Queue check above, rather than
+    // re-deriving "is anything dirty" a second, task-only way.
+    if (typeof hasPendingDomainWork === 'function' && hasPendingDomainWork()) return true;
+    return false;
   }
 
   function clearDebounceTimer() {
@@ -6833,10 +7417,22 @@ function saveState() {
     localStorage.setItem('ttl_recurring_plans', JSON.stringify(recurringPlans));
     localStorage.setItem('ttl_recurring_counter', String(recurringPlanIdCounter));
   } catch(e) {}
+  // Phase 19E: masters/counters/userName are mutated from ~15+ scattered call sites;
+  // this single funnel (virtually every one of them calls saveState() immediately
+  // after mutating) detects an actual content change and records it via the same
+  // generalized tracker every other domain uses — see trackNonTaskDomainChangesOnSave()'s
+  // own header comment for why this, not per-call-site instrumentation.
+  if (typeof trackNonTaskDomainChangesOnSave === 'function') trackNonTaskDomainChangesOnSave();
 }
 
 function renderAll() {
   materializeRecurringTasksUpTo(todayStr());
+  // Phase 19D: defense-in-depth alongside the completeBatchMerge() hook — covers
+  // startup (a duplicate pair could already be sitting in `tasks` from before this
+  // phase, or from an offline session that never got a chance to sync-and-reconcile)
+  // and post-backup-restore (importBackup() calls renderAll(), and a restored backup
+  // could itself contain a pre-existing duplicate pair). See dedupeRecurringOccurrences().
+  if (typeof dedupeRecurringOccurrences === 'function') dedupeRecurringOccurrences();
   enforcePastDateAutoPause();
   renderList();
   restoreIntervals();
@@ -6873,6 +7469,11 @@ function loadState() {
     // populated (reconcileUploadQueue() reads the live tasks array).
     loadQueues();
     reconcileUploadQueue();
+    // Phase 20 (Generalized Application State Change Tracking): load persisted
+    // domain-level dirty state, the same write-through-localStorage pattern as
+    // loadQueues() just above — independent of it (own storage key), so this can
+    // never corrupt or be corrupted by the task Upload Queue.
+    if (typeof loadDomainSyncState === 'function') loadDomainSyncState();
     // Phase 15 (Conflict Resolution): load the read-only Conflict History
     // audit log. Independent of the queues above — never affects dirty
     // state, upload queue reconciliation, or any business data.
@@ -6999,6 +7600,13 @@ function loadState() {
     let minKnownId = 0;
     logEntries.forEach(e => { if (typeof e.taskId === 'number' && e.taskId < minKnownId) minKnownId = e.taskId; });
     if (importIdCounter >= minKnownId) importIdCounter = minKnownId;
+
+    // Phase 19E: prime the masters/counters/userName baseline hashes from the
+    // just-loaded, pre-mutation values (including every migration above), so the
+    // FIRST genuine change of this session is correctly detected by
+    // trackNonTaskDomainChangesOnSave() on the next saveState() call, rather than
+    // being silently absorbed into an unset baseline.
+    if (typeof primeNonTaskDomainHashes === 'function') primeNonTaskDomainHashes();
   } catch(e) {}
 }
 
@@ -7474,6 +8082,7 @@ function startTask(id) {
   task.segmentStart = Date.now();
   if (!task.startedAt) task.startedAt = Date.now();
 
+  const newEntryStartTs = Date.now();
   logEntries.push({
     taskId: id, heading: task.heading.trim(),
     project: task.project, module: task.module,
@@ -7484,9 +8093,16 @@ function startTask(id) {
     description: (task.customFields && task.customFields.description) || '',
     remark: (task.customFields && task.customFields.remark) || '',
     employee: userName,
-    startTs: Date.now(), endTs: null, durationSecs: null,
+    startTs: newEntryStartTs, endTs: null, durationSecs: null,
     customFields: { ...(task.customFields || {}) }
   });
+  // Phase 19C (Logs/Deletion/Clear Logs/Time Transfer sync integration): a new log
+  // entry is a real synchronized mutation — mark the 'logEntries' domain dirty via the
+  // same generalized tracker clearLog()/confirmMakeRecurring()/setTheme() already use
+  // (Phase 20). Entity key is `taskId@startTs` — logEntries have no stable id field of
+  // their own (see SYNC_STATE_INVENTORY.md), so this composite is the closest available
+  // stand-in; captured once, before any later edit could change startTs.
+  if (typeof recordSyncChange === 'function') recordSyncChange('logEntries', id + '@' + newEntryStartTs, 'create');
 
   intervals[id] = setInterval(() => {
     const el = document.getElementById('timer-'+id);
@@ -7890,6 +8506,11 @@ function submitComplete() {
   // Edit mode — just update entry fields, no task changes
   if (pendingEditIdx !== null) {
     const editEntry = logEntries[pendingEditIdx];
+    // Phase 19C: capture the entity key BEFORE any mutation below can change startTs
+    // (a custom start-time edit reassigns editEntry.startTs further down), so the
+    // recordSyncChange() call after this block always identifies the entry we started
+    // editing, not whatever startTs it ends up with.
+    const editEntryKey = editEntry ? (editEntry.taskId + '@' + editEntry.startTs) : null;
     if (editEntry) {
       editEntry.heading = heading; editEntry.project = project;
       editEntry.module = module;   editEntry.nature = nature;
@@ -7917,6 +8538,10 @@ function submitComplete() {
         rt.customFields.description = desc;
         rt.customFields.remark = remark;
       }
+      // Phase 19C: editing an existing log entry (heading/description/duration/
+      // timestamps/custom fields) is a real synchronized mutation — mark it via the
+      // generalized 'logEntries' domain tracker, same as create/delete elsewhere.
+      if (typeof recordSyncChange === 'function' && editEntryKey) recordSyncChange('logEntries', editEntryKey, 'update');
     }
     pendingEditIdx = null;
     document.querySelector('#complete-modal .modal-title').innerHTML =
@@ -8002,6 +8627,10 @@ function submitComplete() {
     touchSyncMetadata(task);
     const entry = openEntry;
     if (entry) {
+      // Phase 19C: capture the entity key BEFORE startTs can be overwritten by a
+      // custom start time below, so the primary entry's recordSyncChange() call
+      // (after this block) always matches the entry that was actually open.
+      const primaryEntryKey = entry.taskId + '@' + entry.startTs;
       entry.endTs = customEnd || Date.now();
       if (customStart) entry.startTs = customStart;
       // If custom time was used, deduct that window from break
@@ -8035,11 +8664,22 @@ function submitComplete() {
           const target = i === 0 ? entry : { ...entry, customFields: { ...entry.customFields } };
           target.durationSecs = share;
           Object.entries(combo).forEach(([key, val]) => setEntryFieldValue(target, key, val));
-          if (i > 0) logEntries.push(target);
+          if (i > 0) {
+            logEntries.push(target);
+            // Phase 19C: each split-generated duplicate is a brand-new log entry.
+            // All combos share the same startTs as the primary entry (copied via the
+            // spread above), so the plain `taskId@startTs` key would collide across
+            // them — disambiguate with the combo index.
+            if (typeof recordSyncChange === 'function') recordSyncChange('logEntries', primaryEntryKey + '#' + i, 'create');
+          }
         });
       } else {
         entry.durationSecs = totalSecs;
       }
+      // Phase 19C: the primary entry itself was finalized (endTs/durationSecs/fields) —
+      // mark it via the generalized 'logEntries' domain tracker. Covers both the
+      // split and non-split paths (combo 0 always reuses `entry` in place above).
+      if (typeof recordSyncChange === 'function') recordSyncChange('logEntries', primaryEntryKey, 'update');
     }
     closeCompleteModal();
     // Future synchronization integration point: Task completion (TASK_UPDATED)
@@ -8277,6 +8917,14 @@ function confirmMakeRecurring() {
     plan.generatedDates.push(startDate); // today's instance already exists (this task itself)
   }
 
+  // Phase 20 (Generalized Application State Change Tracking): SYNC_AUDIT.md §5/§12
+  // confirmed Recurring enable has no dirty/queue/notify wiring for the plan itself
+  // (only the linked task, via its own separate pipeline, gets one). Representative
+  // call site: domain 'recurringPlans', entityId is the new plan's id, per
+  // SYNC_STATE_INVENTORY.md. Marks the domain dirty and arms the existing
+  // AutoSyncEngine debounce; does not yet make the plan itself reach another
+  // device — see the note in clearLog() above.
+  if (typeof recordSyncChange === 'function') recordSyncChange('recurringPlans', planId, 'create');
   saveState();
   materializeRecurringTasksUpTo(getSelectedDate());
   closeMakeRecurringModal();
@@ -8420,10 +9068,21 @@ function confirmDeleteLogEntry(globalIdx) {
   const label = richTextToPlain(e.description) || e.heading || 'this entry';
   showConfirm('Delete log entry?', '"' + label.slice(0, 60) + (label.length > 60 ? '…' : '') + '" will be permanently removed.', () => {
     const taskId = e.taskId;
+    // Phase 19C: capture the entity key before splicing the entry out of logEntries.
+    const deletedEntryKey = taskId + '@' + e.startTs;
     logEntries.splice(globalIdx, 1);
+    if (typeof recordSyncChange === 'function') recordSyncChange('logEntries', deletedEntryKey, 'delete');
     // Also remove the task card
     clearInterval(intervals[taskId]); delete intervals[taskId];
-    tasks = tasks.filter(t => t.id !== taskId);
+    // Phase 19C fix: this used to hard-remove the task with tasks.filter(), bypassing
+    // the Phase 1 tombstone contract entirely — the task had no _sync.deleted flag and
+    // no Upload Queue delete entry, so a stale remote copy could resurrect it on another
+    // device (see deleteTask()'s own inline comment for the full reasoning, and
+    // SYNC_IMPLEMENTATION.md §12.3). Deleting a log entry through this row action also
+    // deletes its task, so it must go through the same tombstone mechanism deleteTask()
+    // uses, not a second, inconsistent deletion path.
+    const taskToDelete = tasks.find(t => t.id === taskId);
+    if (taskToDelete) markSyncMetadataDeleted(taskToDelete);
     const row = document.getElementById('row-' + taskId);
     if (row) row.remove();
     saveState(); updateEmptyState(); updateLogPanel();
@@ -8544,8 +9203,21 @@ function confirmTransferMinutes() {
   if (mins > srcMins) mins = srcMins;
 
   const secsToMove = mins * 60;
+  // Phase 19C: capture both entities' keys before either delta is applied, in case
+  // a future change ever makes applyTransferDelta() touch startTs (it doesn't today,
+  // but this keeps the key derivation independent of that function's internals).
+  const sourceEntryKey = entry.taskId + '@' + entry.startTs;
+  const targetEntryKey = target.taskId + '@' + target.startTs;
   applyTransferDelta(entry, -secsToMove);
   applyTransferDelta(target, secsToMove);
+  // Treat the transfer as one logical operation: both entries are marked in the same
+  // domain-dirty pass before saveState(), so the next upload of the whole logEntries
+  // rider carries both post-transfer durations together (see SYNC_IMPLEMENTATION.md
+  // §12.4) — there is no window where only one side of the transfer is marked.
+  if (typeof recordSyncChange === 'function') {
+    recordSyncChange('logEntries', sourceEntryKey, 'update');
+    recordSyncChange('logEntries', targetEntryKey, 'update');
+  }
 
   // The log table re-renders from updateLogPanel(), but paused task cards only
   // redraw their timer text at render time (they don't tick like running ones),
@@ -8594,6 +9266,16 @@ function deleteTask(id) {
   // and is hidden from every user-facing view via isTaskDeleted() (renderList(),
   // running-task detection, dropdowns, etc.) — reusing the existing task record
   // and _sync metadata as the tombstone rather than inventing a second store.
+  // Phase 19C: this task's log entries are cascaded out of logEntries[] below (the
+  // existing, unchanged business rule for deleteTask() — logs are removed alongside
+  // their task, unlike the standalone confirmDeleteLogEntry() path). Each removed
+  // entry is still its own synchronized record, so it needs its own domain-tracked
+  // 'delete' — recorded before the filter, using each entry's pre-removal key.
+  if (typeof recordSyncChange === 'function') {
+    logEntries.filter(e => e.taskId === id).forEach(e => {
+      recordSyncChange('logEntries', id + '@' + e.startTs, 'delete');
+    });
+  }
   logEntries = logEntries.filter(e => e.taskId !== id);
   const row = document.getElementById('row-'+id);
   if (row) row.remove();
@@ -9667,6 +10349,15 @@ function clearLog() {
   const label = d.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
   showConfirm('Clear log for ' + label + '?', 'This removes all entries for this date only. Other dates and running tasks are not affected.', () => {
     logEntries = logEntries.filter(e => !entryMatchesDate(e, selDate));
+    // Phase 20 (Generalized Application State Change Tracking): SYNC_AUDIT.md §5/§12
+    // confirmed Clear Logs has no dirty/queue/notify wiring at all — it only ever
+    // called saveState() and stopped. Representative call site: entityId is the
+    // date being cleared (a natural per-day scope for this bulk deletion), domain
+    // 'logEntries' per SYNC_STATE_INVENTORY.md. This marks the domain dirty and
+    // arms the existing AutoSyncEngine debounce; it does not yet make Clear Logs
+    // itself reach another device — that needs the download-side read + upload
+    // payload work SYNC_AUDIT.md §9.1/§10 phase 1 describes, tracked separately.
+    if (typeof recordSyncChange === 'function') recordSyncChange('logEntries', selDate, 'delete');
     saveState(); updateLogPanel();
   }, 'Clear');
 }
@@ -11720,6 +12411,15 @@ function runHistoryCleanup() {
   const before = logEntries.length;
   // Keep entries newer than cutoff OR whose task is currently active
   const activeTaskIds = new Set(tasks.filter(t => t.running || t.startedAt).map(t => t.id));
+  const entriesToRemove = logEntries.filter(e => !(e.startTs >= cutoff || activeTaskIds.has(e.taskId)));
+  // Phase 19C: History Cleanup is a second, separate bulk log-deletion path alongside
+  // Clear Logs (clearLog() only ever clears one date; this can span many). Per the
+  // brief's item 6 ("identify every log-table deletion path... do not fix only one UI
+  // button"), each removed entry gets its own domain-tracked 'delete', same as the
+  // single-entry and cascade-from-task-delete paths.
+  if (typeof recordSyncChange === 'function') {
+    entriesToRemove.forEach(e => recordSyncChange('logEntries', e.taskId + '@' + e.startTs, 'delete'));
+  }
   logEntries = logEntries.filter(e => e.startTs >= cutoff || activeTaskIds.has(e.taskId));
   const removed = before - logEntries.length;
   saveState();
@@ -12469,6 +13169,10 @@ function checkWeekendPrompt() {
 function setWeekendWorkday(isWorking) {
   weekendWorkday = isWorking;
   localStorage.setItem('ttl_weekend_' + todayStr(), String(isWorking));
+  // Phase 19E: entityId = the date itself — each date is its own record, per
+  // SYNC_STATE_INVENTORY.md's weekendOverrides row and applyRemoteWeekendOverrides()'s
+  // per-date merge.
+  if (typeof recordSyncChange === 'function') recordSyncChange('weekendOverrides', todayStr(), 'update');
   document.getElementById('weekend-prompt-overlay').classList.add('hidden');
   // Re-init break timer logic now that we know the mode
   checkBreakState();
@@ -12546,10 +13250,32 @@ function planAppliesOnDate(plan, dateStr) {
   return true;
 }
 
+// Phase 19D — deterministic occurrence identity (SYNC_IMPLEMENTATION.md §13.1).
+// A recurring occurrence's logical identity is the pair (recurringPlanId, occurrence
+// date) — both already stored on every generated task (`task.recurringPlanId` and the
+// date derived from `task.createdAt`), so no new field is needed on the task itself.
+// This is the "smallest compatible extension" the task brief's item 4 asks for: the
+// task's own Sync ID stays a random UUID (untouched — every other sync module keys
+// off it), but generation now checks for an already-existing LIVE task with this
+// (planId, date) pair before creating a new one, instead of trusting only
+// `plan.generatedDates` — which is local-only bookkeeping that never round-trips
+// through sync (SYNC_STATE_INVENTORY.md: `recurringPlans` is an upload-only rider).
+// Tasks, by contrast, DO fully round-trip (upload + download + merge + conflict) —
+// so consulting the live `tasks` array is what makes this check work across devices:
+// once device A's generated task syncs down to device B, device B's own next
+// materialization pass will find it here even though B's own `plan.generatedDates`
+// never learned about it.
+function findExistingRecurringOccurrenceTask(planId, dateStr) {
+  return tasks.find(t => t.recurringPlanId === planId && !isTaskDeleted(t) &&
+    dateToStr(new Date(t.createdAt)) === dateStr);
+}
+
 // Generate any missing task instances for all active plans, from each plan's
 // start date (or today, whichever is later — we never backfill past days) up
 // through `throughDateStr` inclusive. Safe to call repeatedly; it skips dates
-// that already have a generated instance (tracked in plan.generatedDates).
+// that already have a generated instance (tracked in plan.generatedDates, and,
+// as of Phase 19D, cross-checked against `tasks` itself — see
+// findExistingRecurringOccurrenceTask() above).
 function materializeRecurringTasksUpTo(throughDateStr) {
   if (!recurringPlans || recurringPlans.length === 0) return;
   const today = todayStr();
@@ -12560,28 +13286,50 @@ function materializeRecurringTasksUpTo(throughDateStr) {
     if (!plan.generatedDates) plan.generatedDates = [];
     let cursor = plan.startDate > today ? plan.startDate : today; // never backfill before today
     let safety = 0;
+    let planChanged = false;
     while (cursor <= throughDateStr && safety < 3660) { // ~10yr safety cap
       safety++;
       if (planAppliesOnDate(plan, cursor) && !plan.generatedDates.includes(cursor)) {
-        const [y, m, d] = cursor.split('-').map(Number);
-        const w = (typeof getWorkHours === 'function') ? getWorkHours() : { startH: 9, startM: 30 };
-        const createdAt = new Date(y, m-1, d, w.startH, w.startM, 0, 0).getTime();
-        const newId = ++taskIdCounter;
-        const generatedTask = {
-          id: newId,
-          heading: plan.heading, project: plan.project, nature: plan.nature,
-          module: plan.module, ticket: plan.ticket,
-          customFields: { ...(plan.customFields || {}) },
-          status: 'idle', accumulatedMs: 0, segmentStart: null, startedAt: null,
-          createdAt, recurringPlanId: plan.id
-        };
-        // Phase 1: a task generated by a recurring plan must receive fresh sync metadata.
-        createSyncMetadata(generatedTask);
-        tasks.unshift(generatedTask);
-        plan.generatedDates.push(cursor);
-        changed = true;
+        // Phase 19D: check the live tasks list — not just this device's own
+        // generatedDates bookkeeping — before generating. If another device already
+        // generated (and synced) this exact occurrence, adopt it instead of creating
+        // a second task with a different Sync ID for the same logical occurrence
+        // (task brief items 8/9/11 — idempotent, cross-device-safe generation).
+        const existing = findExistingRecurringOccurrenceTask(plan.id, cursor);
+        if (existing) {
+          plan.generatedDates.push(cursor);
+          planChanged = true;
+        } else {
+          const [y, m, d] = cursor.split('-').map(Number);
+          const w = (typeof getWorkHours === 'function') ? getWorkHours() : { startH: 9, startM: 30 };
+          const createdAt = new Date(y, m-1, d, w.startH, w.startM, 0, 0).getTime();
+          const newId = ++taskIdCounter;
+          const generatedTask = {
+            id: newId,
+            heading: plan.heading, project: plan.project, nature: plan.nature,
+            module: plan.module, ticket: plan.ticket,
+            customFields: { ...(plan.customFields || {}) },
+            status: 'idle', accumulatedMs: 0, segmentStart: null, startedAt: null,
+            createdAt, recurringPlanId: plan.id
+          };
+          // Phase 1: a task generated by a recurring plan must receive fresh sync metadata.
+          createSyncMetadata(generatedTask);
+          tasks.unshift(generatedTask);
+          plan.generatedDates.push(cursor);
+          planChanged = true;
+        }
       }
       cursor = addDaysStr(cursor, 1);
+    }
+    if (planChanged) {
+      changed = true;
+      // Phase 19D: the plan's generatedDates bookkeeping changed — record it on the
+      // generalized 'recurringPlans' domain tracker (same mechanism confirmMakeRecurring()
+      // already uses for plan creation), per the brief's §14 synchronization order
+      // ("generate → persist → record synchronization change → AutoSyncEngine").
+      // Upserts by (domain, planId), so many occurrences generated for the same plan
+      // in one pass collapse into a single dirty record, not one per occurrence.
+      if (typeof recordSyncChange === 'function') recordSyncChange('recurringPlans', plan.id, 'update');
     }
   });
 
@@ -12619,7 +13367,75 @@ function disableRecurringPlanFrom(planId, fromDateStr) {
   if (plan.generatedDates) {
     plan.generatedDates = plan.generatedDates.filter(ds => ds < fromDateStr);
   }
+  // Phase 19D: SYNC_AUDIT.md §5 confirmed "Recurring disable" has no dirty/queue/notify
+  // wiring for the plan's own `active`/`disabledFromDate` fields (only the tombstoned
+  // task instances, via their own separate pipeline, get one — and only when there was
+  // at least one idle instance to tombstone). Same representative call site pattern
+  // confirmMakeRecurring() already uses for plan creation: domain 'recurringPlans',
+  // entityId is the plan's id. This does not by itself make the plan's fields reach
+  // another device (that still requires the download-side read SYNC_AUDIT.md §9.1
+  // describes, which remains out of this phase's scope — see PHASE_19D_RESULT.md) —
+  // it makes the upload side reliable, exactly like every other Phase 19D/20 call site.
+  if (typeof recordSyncChange === 'function') recordSyncChange('recurringPlans', planId, 'update');
   saveState();
+}
+
+// ── Recurring occurrence deduplication (Phase 19D) ──────────────────────────────
+// materializeRecurringTasksUpTo()'s own generation guard (findExistingRecurringOccurrenceTask())
+// prevents a device from generating a SECOND copy of an occurrence it already knows
+// about — but it can't prevent two devices from each independently generating a FIRST
+// copy of the same occurrence while offline/before either has seen the other's task
+// (task brief §11, Scenarios B/C). Once both of those tasks reach the same device via
+// the normal, already-fully-synced task pipeline (upload + download + merge +
+// conflict — SYNC_AUDIT.md §1), this function reconciles them down to exactly one
+// logical occurrence, the same way a person would resolve the same duplication if
+// they noticed it by hand — by tombstoning the extra copy via the existing
+// markSyncMetadataDeleted() mechanism, so the resolution itself round-trips through
+// the same task pipeline rather than needing a new one (task brief §19: do not create
+// a recurring-specific sync engine).
+//
+// Deliberately conservative: a group is only reconciled automatically when at most one
+// instance in it has ever been acted on (status !== 'idle') — mirroring
+// disableRecurringPlanFrom()'s own "never touch started/paused/running/done instances"
+// rule. If two or more instances in the same (plan, date) group were independently
+// started, this function leaves the whole group untouched rather than guessing which
+// one represents the user's real work; SYNC_ARCHITECTURE.md §3/§10 explicitly prefers
+// surfacing a genuine ambiguity to the user over a silent automatic merge, and the
+// existing app has no UI for that yet (documented as a known limitation in
+// PHASE_19D_RESULT.md, matching the brief's item 17 guidance for other ambiguous cases).
+function dedupeRecurringOccurrences() {
+  const groups = {};
+  tasks.forEach(t => {
+    if (!t.recurringPlanId) return;
+    if (isTaskDeleted(t)) return;
+    const key = t.recurringPlanId + '@' + dateToStr(new Date(t.createdAt));
+    (groups[key] || (groups[key] = [])).push(t);
+  });
+  let removedAny = false;
+  Object.keys(groups).forEach(key => {
+    const group = groups[key];
+    if (group.length < 2) return;
+    const startedCount = group.filter(t => t.status !== 'idle').length;
+    if (startedCount > 1) return; // genuinely ambiguous — leave for the user, don't guess
+    // Deterministic survivor selection so every device reconciling the SAME group
+    // independently converges on the SAME winner without coordinating first: prefer
+    // whichever instance was actually started/paused/done over a still-idle duplicate
+    // (real work always outranks an untouched placeholder), then break any remaining
+    // tie by the lower Sync ID — a stable, already-unique string every task has,
+    // unlike device-local task.id or array order, which differ per device.
+    const survivor = group.slice().sort((a, b) => {
+      const aStarted = a.status !== 'idle' ? 0 : 1;
+      const bStarted = b.status !== 'idle' ? 0 : 1;
+      if (aStarted !== bStarted) return aStarted - bStarted;
+      const aId = (a._sync && a._sync.syncId) || '';
+      const bId = (b._sync && b._sync.syncId) || '';
+      return aId < bId ? -1 : (aId > bId ? 1 : 0);
+    })[0];
+    group.forEach(t => {
+      if (t !== survivor) { markSyncMetadataDeleted(t); removedAny = true; }
+    });
+  });
+  return removedAny;
 }
 
 
@@ -12793,6 +13609,11 @@ function getBreakData() {
 }
 function saveBreakData(data) {
   try { localStorage.setItem('ttl_break', JSON.stringify(data)); } catch(e) {}
+  // Phase 19E: single choke point for every break mutation (startBreak/endBreak/
+  // manual edits/backup restore) — see SYNC_STATE_INVENTORY.md's breakData row.
+  // Persisted timing data only (segment start/end epoch ms) — the JS timer that
+  // drives the live display is never touched here and never leaves this device.
+  if (typeof recordSyncChange === 'function') recordSyncChange('breakData', null, 'update');
 }
 
 function getBreakDataForDate(dateStr) {
@@ -13126,6 +13947,15 @@ function setTheme(theme) {
     localStorage.setItem('ttl_theme', theme);
     setTimeout(updateFsChipThemeIcon, 0);
  } catch (e) {}
+  // Phase 20 (Generalized Application State Change Tracking): marks the domain
+  // dirty and arms the existing AutoSyncEngine debounce; domain 'theme' (a
+  // whole-document preference, no entityId — see DOMAIN_WHOLE_KEY), per
+  // SYNC_STATE_INVENTORY.md. Phase 19E: theme is now also part of
+  // buildStatePayload()'s upload contents (GoogleDriveWorkspace) and has a
+  // download-side merge (applyRemoteThemeIfNewer()) — this call site needed no
+  // change itself, it was already correct; only the two ends it was missing
+  // (upload inclusion, download merge) were added.
+  if (typeof recordSyncChange === 'function') recordSyncChange('theme', null, 'update');
   applyTheme(theme);
 }
 
@@ -13265,6 +14095,23 @@ function initializeSyncInfrastructure() {
   // settled, exactly mirroring how Phase 13's own scheduler used to be
   // started.
   window.TTLSync.Modules.SmartSyncTriggers = SmartSyncTriggers;
+
+  // Phase 20: register the Generalized Application State Change Tracking
+  // functions as a discoverable module, mirroring every other Phase's
+  // registration above. These are plain top-level functions (not an IIFE),
+  // exactly like Phase 1/2/3's own createSyncMetadata()/markTaskDirty()/
+  // enqueueTask() — grouped here only so future code can discover them via
+  // window.TTLSync.Modules the same way it discovers every other phase.
+  window.TTLSync.Modules.AppStateSyncTracker = {
+    recordSyncChange,
+    isDomainDirty,
+    getDirtyDomains,
+    hasPendingDomainWork,
+    clearDomainDirty,
+    getDomainChangeEntries,
+    isDomainEntityDeleted,
+    SYNC_DOMAINS
+  };
 
   // Phase 5: attempt a silent, non-interactive reconnect if a previous
   // session was connected. Never interactive, never blocking — see
