@@ -2641,7 +2641,12 @@ function collectWeekendOverrides() {
 // in `_syncMeta`, never the local queue/entity bookkeeping itself).
 function buildDomainMeta() {
   const meta = {};
-  ['masters', 'theme', 'breakData', 'counters', 'userName'].forEach(d => {
+  // Phase 21: logEntries/recurringPlans added here so a receiving device has
+  // something to compare against on download — this was the only reason
+  // either was still "upload-only" (SYNC_AUDIT.md §1). No new tracking added;
+  // both already write into domainSyncState via recordSyncChange() at every
+  // real mutation site (Phase 19C/19D), same as the other five domains below.
+  ['masters', 'theme', 'breakData', 'counters', 'userName', 'logEntries', 'recurringPlans'].forEach(d => {
     const rec = domainSyncState.domains[d];
     if (rec && rec.lastChangeAt) {
       meta[d] = { version: rec.version || 0, modifiedAt: rec.lastChangeAt, deviceId: getDeviceId() };
@@ -2782,6 +2787,49 @@ function applyRemoteCountersIfHigher(remoteParsed) {
   return changed;
 }
 
+// Phase 21: logEntries and recurringPlans were tracked/payloaded/uploaded/
+// confirmed-push-cleared since Phase 19C/19D but never downloaded or merged
+// (SYNC_AUDIT.md §1/§9.3, PHASE_21_IMPLEMENTATION_CONTRACT.md §4). These two
+// functions are the missing download/merge half — same whole-document
+// newer-wins shape as applyRemoteMastersIfNewer() immediately above, applied
+// to an array instead of an object. No new conflict semantics: SYNC_AUDIT.md
+// §9.3 already specified "newer-wins, whole-document merge" for both.
+
+function applyRemoteLogEntriesIfNewer(remoteParsed) {
+  if (!remoteParsed || !Array.isArray(remoteParsed.logEntries)) return false;
+  if (isDomainDirty('logEntries')) return false;
+  const remoteMeta = remoteParsed._syncMeta && remoteParsed._syncMeta.domainMeta && remoteParsed._syncMeta.domainMeta.logEntries;
+  if (!remoteMeta || !remoteMeta.modifiedAt) return false;
+  const rec = domainSyncState.domains['logEntries'];
+  const localModifiedAt = rec ? rec.lastChangeAt : null;
+  if (localModifiedAt && localModifiedAt >= remoteMeta.modifiedAt) return false;
+  // Whole-document replace, same accepted limitation as masters: a
+  // concurrent, still-unsynced local edit to a DIFFERENT log entry than
+  // whatever changed remotely would be overwritten if this branch is
+  // reached — but it can only be reached when isDomainDirty('logEntries')
+  // is false, i.e. there is no such pending local edit in the first place.
+  logEntries = remoteParsed.logEntries;
+  adoptRemoteDomainMeta('logEntries', remoteMeta);
+  return true;
+}
+
+function applyRemoteRecurringPlansIfNewer(remoteParsed) {
+  if (!remoteParsed || !Array.isArray(remoteParsed.recurringPlans)) return false;
+  if (isDomainDirty('recurringPlans')) return false;
+  const remoteMeta = remoteParsed._syncMeta && remoteParsed._syncMeta.domainMeta && remoteParsed._syncMeta.domainMeta.recurringPlans;
+  if (!remoteMeta || !remoteMeta.modifiedAt) return false;
+  const rec = domainSyncState.domains['recurringPlans'];
+  const localModifiedAt = rec ? rec.lastChangeAt : null;
+  if (localModifiedAt && localModifiedAt >= remoteMeta.modifiedAt) return false;
+  // Known, accepted limitation (out of Phase 21 scope, per the contract's
+  // §7): plans have no per-plan tombstone and generatedDates isn't synced
+  // independently, so this is a whole-array replace, not a per-plan merge —
+  // same posture masters already accepts for its own bundled sub-concerns.
+  recurringPlans = remoteParsed.recurringPlans;
+  adoptRemoteDomainMeta('recurringPlans', remoteMeta);
+  return true;
+}
+
 // Per-date merge (see module header). Each date is its own entity — a local change
 // to date X never blocks adopting a remote change to date Y, unlike the whole-
 // document domains above.
@@ -2829,10 +2877,66 @@ function mergeNonTaskDomains(remoteParsed) {
     if (applyRemoteUserNameIfNewer(remoteParsed)) changed.push('userName');
     if (applyRemoteCountersIfHigher(remoteParsed)) changed.push('counters');
     if (applyRemoteWeekendOverrides(remoteParsed)) changed.push('weekendOverrides');
+    // Phase 21: the two remaining upload-only riders now get their download/
+    // merge half, via the exact same call/push-to-`changed` pattern as the
+    // six domains above — no change to this function's own shape.
+    if (applyRemoteLogEntriesIfNewer(remoteParsed)) changed.push('logEntries');
+    if (applyRemoteRecurringPlansIfNewer(remoteParsed)) changed.push('recurringPlans');
   } catch (e) {}
   if (changed.length > 0) {
     saveState();
-    if (typeof renderAll === 'function') renderAll();
+    // Phase 19F: this used to be a single unconditional renderAll() for ANY
+    // of the six domains above — meaning a remote THEME change alone
+    // rebuilt every visible task card (renderList()), recreated the
+    // running-task interval (restoreIntervals()), and re-rendered the
+    // break/work widgets and the masters tab, every time. That is exactly
+    // the disproportionate "background sync unnecessarily rebuilds task
+    // cards" the task brief's Known Problem #3 and §6/§16 describe — none
+    // of these domains actually needs a task-card rebuild except `masters`
+    // (its embedded column config can change which fields a card shows/
+    // labels), and NONE of them should ever touch the running-task timer.
+    // Each domain now updates only the specific UI it can actually affect.
+    const changedSet = changed; // already a plain array, kept for clarity below
+    if (changedSet.indexOf('masters') !== -1) {
+      // Column/label/work-hours-panel config can change what a card shows
+      // — every visible card's structure is potentially affected, so this
+      // is the one domain where a full (but still task-list-only, never
+      // restoreIntervals()/timer-touching) renderList() is the correct
+      // "minimum required UI update" per §6, not an over-reaction.
+      if (typeof renderList === 'function') renderList();
+    }
+    if (changedSet.indexOf('theme') !== -1) {
+      // Just a CSS attribute + icon/label swap — never a task-card concern.
+      if (typeof applyTheme === 'function' && typeof getStoredTheme === 'function') applyTheme(getStoredTheme());
+    }
+    if (changedSet.indexOf('breakData') !== -1) {
+      if (typeof renderBreakWidget === 'function') renderBreakWidget();
+    }
+    if (changedSet.indexOf('weekendOverrides') !== -1) {
+      if (typeof renderWorkWidget === 'function') renderWorkWidget();
+    }
+    if (changedSet.indexOf('logEntries') !== -1) {
+      // Same log table every existing local logEntries mutation already
+      // refreshes through (see the recordSyncChange('logEntries', ...) call
+      // sites) — this is that same "only re-render what's actually
+      // affected" convention, applied to a remote-originated change.
+      if (typeof updateLogPanel === 'function') updateLogPanel();
+    }
+    // recurringPlans has no dedicated live panel comparable to the log panel
+    // or masters tab (confirmed against existing render call sites) — no
+    // render call needed here, matching counters/userName above.
+    // If the Masters panel is currently showing a tab whose content comes
+    // from `masters` itself (columns/lists/work-hours/projects/natures),
+    // refresh it — same "only re-render what's actually open and actually
+    // affected" convention every existing manual-sync click handler in
+    // this file already uses for the Sync tab (activeMastersTab === 'sync').
+    // userName/counters have no dedicated visual surface, so nothing
+    // further is needed for either.
+    if (changedSet.indexOf('masters') !== -1 && typeof activeMastersTab !== 'undefined' &&
+        typeof renderMastersContent === 'function' &&
+        ['columns', 'lists', 'workhours', 'projects', 'natures'].indexOf(activeMastersTab) !== -1) {
+      renderMastersContent();
+    }
   }
   return { changed: changed };
 }
@@ -3790,11 +3894,20 @@ const GoogleDriveWorkspace = (function () {
       if (res.status === 401 || res.status === 403) {
         const err = new Error('Google Drive authentication failed (' + res.status + ').');
         err.authFailure = true;
+        err.httpStatus = res.status;
         throw err;
       }
       if (!res.ok) {
         return res.text().then(text => {
-          throw new Error('Google Drive request failed (' + res.status + '): ' + (text || res.statusText));
+          // Phase 20 (Synchronization Retry & Resilience): httpStatus is
+          // attached here — the single place a Drive response status is
+          // known — so every caller up the chain (pushStateToStateFile(),
+          // fetchAndValidateStateFile(), and everything built on top of
+          // them) can classify a failure as transient (429/5xx) vs.
+          // permanent (other 4xx) without re-deriving it from message text.
+          const err = new Error('Google Drive request failed (' + res.status + '): ' + (text || res.statusText));
+          err.httpStatus = res.status;
+          throw err;
         });
       }
       return res.status === 204 ? null : res.json();
@@ -3820,11 +3933,14 @@ const GoogleDriveWorkspace = (function () {
       if (res.status === 401 || res.status === 403) {
         const err = new Error('Google Drive authentication failed (' + res.status + ').');
         err.authFailure = true;
+        err.httpStatus = res.status;
         throw err;
       }
       if (!res.ok) {
         return res.text().then(text => {
-          throw new Error('Google Drive request failed (' + res.status + '): ' + (text || res.statusText));
+          const err = new Error('Google Drive request failed (' + res.status + '): ' + (text || res.statusText));
+          err.httpStatus = res.status;
+          throw err;
         });
       }
       return res.text();
@@ -4189,7 +4305,15 @@ const GoogleDriveWorkspace = (function () {
       // untouched either way, since this function only ever sends data
       // outward and never writes anything back to `tasks`/`logEntries`.
       _pushStatus = 'error';
-      const result = { ok: false, reason: 'error', error: (err && err.message) || String(err) };
+      // Phase 20: carry authFailure/httpStatus through (when present) so the
+      // Retry Engine can classify this failure (transient/auth/permanent)
+      // without re-parsing the error message. Additive fields only — every
+      // existing reader of {ok, reason, error} is unaffected.
+      const result = {
+        ok: false, reason: 'error', error: (err && err.message) || String(err),
+        authFailure: !!(err && err.authFailure),
+        httpStatus: (err && err.httpStatus) || null
+      };
       _lastPushResult = result;
       return result;
     });
@@ -4286,7 +4410,11 @@ const GoogleDriveWorkspace = (function () {
       .then(result => { _pullStatus = result.ok ? 'idle' : 'error'; _lastPullResult = result; return result; })
       .catch(err => {
         _pullStatus = 'error';
-        const result = { ok: false, reason: 'error', error: (err && err.message) || String(err) };
+        const result = {
+          ok: false, reason: 'error', error: (err && err.message) || String(err),
+          authFailure: !!(err && err.authFailure),
+          httpStatus: (err && err.httpStatus) || null
+        };
         _lastPullResult = result;
         return result;
       });
@@ -4768,7 +4896,12 @@ const BatchTaskUpload = (function () {
         const extra = (pushResult && pushResult.error) ? { error: pushResult.error } : null;
         entries.forEach(e => failUpload(e, reason, extra));
         _status = 'failed';
-        const result = { ok: false, processed: entries.length, completed: 0, failed: entries.length, reason: reason };
+        const result = {
+          ok: false, processed: entries.length, completed: 0, failed: entries.length, reason: reason,
+          error: (pushResult && pushResult.error) || null,
+          authFailure: !!(pushResult && pushResult.authFailure),
+          httpStatus: (pushResult && pushResult.httpStatus) || null
+        };
         _lastRun = result;
         return result;
       }
@@ -4800,7 +4933,10 @@ const BatchTaskUpload = (function () {
       const errMsg = (err && err.message) || String(err);
       entries.forEach(e => failUpload(e, reason, { error: errMsg }));
       _status = 'failed';
-      const result = { ok: false, processed: entries.length, completed: 0, failed: entries.length, reason: reason, error: errMsg };
+      const result = {
+        ok: false, processed: entries.length, completed: 0, failed: entries.length, reason: reason, error: errMsg,
+        authFailure: !!(err && err.authFailure), httpStatus: (err && err.httpStatus) || null
+      };
       _lastRun = result;
       return result;
     });
@@ -5204,21 +5340,44 @@ const BatchCloudMerge = (function () {
       if (!localTask) {
         // Requirement 4.
         const created = createLocalTaskFromRemote(remoteTask);
-        return { syncId: syncId, outcome: 'created', taskId: created.id };
+        // Phase 19F: a brand-new local task is always UI-relevant — there is
+        // no "before" checksum to compare against, so effectiveChange is
+        // unconditionally true (see getChangedTaskIdsFromResults() below,
+        // which is what the UI reconciliation layer actually reads).
+        return { syncId: syncId, outcome: 'created', taskId: created.id, effectiveChange: true };
       }
 
       // Requirement 5/6 — reuses Phase 10's OWN comparison, never
       // re-derived here.
       if (!SingleTaskMerge.isRemoteNewer(localTask, remoteTask)) {
-        return { syncId: syncId, outcome: 'skipped', reason: 'local-newer', taskId: localTask.id };
+        return { syncId: syncId, outcome: 'skipped', reason: 'local-newer', taskId: localTask.id, effectiveChange: false };
       }
+
+      // Phase 19F (task brief §4): "do not use object reference equality...
+      // compare meaningful synchronized state" via the existing
+      // checksum/deleted-flag metadata, never a new deep-equality routine.
+      // Captured BEFORE the merge so it reflects this device's prior
+      // content exactly; compared AFTER against the same task object once
+      // mergeRemoteTask() has recomputed its checksum from the new fields.
+      const checksumBefore = localTask._sync && localTask._sync.checksum;
+      const deletedBefore = !!(localTask._sync && localTask._sync.deleted);
 
       // Requirement 3/5 — reuses Phase 10's OWN merge (mergeRemoteTask) and
       // its own effect-coordination (Last Sync/Sync Status/Dirty/Queue),
       // via the exact same completeTaskMerge() entry point Phase 10's own
       // mergeSingleTask() calls. No merge rule is duplicated here.
       SingleTaskMerge.completeTaskMerge(localTask, remoteTask);
-      return { syncId: syncId, outcome: 'updated', taskId: localTask.id };
+
+      // A version/modifiedAt bump (isRemoteNewer===true) does not by itself
+      // mean the BUSINESS content changed — e.g. a defensive re-save on the
+      // sending device. checksum (computeTaskChecksum(), business fields
+      // only) and the deleted flag (never part of checksum, since it lives
+      // in _sync) together cover every UI-relevant change: card content and
+      // card visibility (tombstoning).
+      const checksumAfter = localTask._sync && localTask._sync.checksum;
+      const deletedAfter = !!(localTask._sync && localTask._sync.deleted);
+      const effectiveChange = (checksumAfter !== checksumBefore) || (deletedAfter !== deletedBefore);
+      return { syncId: syncId, outcome: 'updated', taskId: localTask.id, effectiveChange: effectiveChange };
     } catch (err) {
       return {
         syncId: (remoteTask && remoteTask._sync && remoteTask._sync.syncId) || null,
@@ -5234,6 +5393,21 @@ const BatchCloudMerge = (function () {
   function mergeRemoteTasks(parsedState) {
     const remoteTasks = (parsedState && Array.isArray(parsedState.tasks)) ? parsedState.tasks : [];
     return remoteTasks.map(mergeOneRemoteTask);
+  }
+
+  // getChangedTaskIdsFromResults() — Phase 19F: the single place the UI
+  // reconciliation layer (renderList()'s onlyIds path, see below) learns
+  // which task ids actually need a card update after a batch merge. Reads
+  // ONLY the effectiveChange flag mergeOneRemoteTask() above already
+  // computed from checksum/deleted-flag comparison — no second comparison,
+  // no reference-equality check, per task brief §4.
+  function getChangedTaskIdsFromResults(results) {
+    if (!Array.isArray(results)) return [];
+    const ids = [];
+    results.forEach(r => {
+      if (r && r.effectiveChange && typeof r.taskId === 'number') ids.push(r.taskId);
+    });
+    return ids;
   }
 
   // completeBatchMerge(): Requirement 7/8 — tallies per-task outcomes into
@@ -5329,6 +5503,7 @@ const BatchCloudMerge = (function () {
       _status = 'failed';
       const result = {
         ok: false, reason: 'error', error: (err && err.message) || String(err),
+        authFailure: !!(err && err.authFailure), httpStatus: (err && err.httpStatus) || null,
         tasksDownloaded: 0, tasksCreated: 0, tasksUpdated: 0, tasksSkipped: 0, tasksFailed: 0, results: []
       };
       _lastRun = result;
@@ -5348,7 +5523,11 @@ const BatchCloudMerge = (function () {
     mergeRemoteTasks,
     mergeTaskCollection,
     completeBatchMerge,
-    getBatchMergeSummary
+    getBatchMergeSummary,
+    // Phase 19F: read-only helper so BackgroundScheduler / refreshSyncTabIfOpen
+    // can ask "which task ids actually need a card update" without
+    // re-deriving the comparison themselves.
+    getChangedTaskIdsFromResults
   };
 })();
 // ── End Batch Cloud Merge (Phase 11) ──────────────────────────────────────────
@@ -5661,6 +5840,7 @@ const IncrementalSyncEngine = (function () {
       _status = 'failed';
       const result = {
         ok: false, reason: 'error', error: (err && err.message) || String(err),
+        authFailure: !!(err && err.authFailure), httpStatus: (err && err.httpStatus) || null,
         plan: [], statistics: emptyStatistics()
       };
       _lastPlan = result;
@@ -6646,6 +6826,17 @@ const BackgroundScheduler = (function () {
     if (!isNetworkAvailable())  return 'network-unavailable';
     if (!isAuthenticatedNow())  return 'not-authenticated';
     if (!isWorkspaceReadyNow()) return 'workspace-unavailable';
+    // Phase 20: hold automatic triggers (interval/focus/visibility/online/
+    // debounced-edit) off while a bounded backoff is counting down, or while
+    // a permanent/maxed-out failure needs manual attention — requirement 5
+    // ("avoid busy loops") and requirement 18 ("do not retry forever").
+    // Manual sync (startSynchronization('manual')) does not consult
+    // gatingBlockReason() at all (see scheduleSync() below), so "Synchronize
+    // Now" always remains available to retry immediately, per requirement 19.
+    if (typeof RetryEngine !== 'undefined') {
+      if (RetryEngine.isRecoveryRequired()) return 'recovery-required';
+      if (RetryEngine.isBackoffActive())    return 'retry-backoff';
+    }
     return null;
   }
 
@@ -6654,6 +6845,17 @@ const BackgroundScheduler = (function () {
   // plan says there is work, hand execution to the existing upload/download
   // pipelines. No comparison logic and no upload/merge logic is duplicated
   // anywhere in this function.
+  // finalizeRetryState(result): Phase 20 — the single place
+  // runSynchronizationPass() reports a finished pass's outcome to
+  // RetryEngine. Never called for 'cancelled' (not a failure) or
+  // 'sync-manager-unavailable' (a startup-configuration issue, not a
+  // network/auth/data failure this phase's retry policy is about).
+  function finalizeRetryState(result) {
+    if (typeof RetryEngine === 'undefined' || !result) return;
+    if (result.ok) { RetryEngine.recordSyncSuccess(); return; }
+    RetryEngine.recordSyncFailure(result);
+  }
+
   function runSynchronizationPass(trigger) {
     _running = true;
     _cancelRequested = false;
@@ -6685,6 +6887,7 @@ const BackgroundScheduler = (function () {
         _running = false;
         _status = 'failed';
         _lastResult = Object.assign({ ok: false, trigger }, planResult || { reason: 'unknown-error' });
+        finalizeRetryState(_lastResult);
         return _lastResult;
       }
 
@@ -6720,6 +6923,7 @@ const BackgroundScheduler = (function () {
         _lastSyncAt = new Date().toISOString();
         _status = 'completed';
         _lastResult = { ok: true, trigger, plan: planResult, uploaded: null, merged: null, noop: true, domainsMerged: domainMergeResult && domainMergeResult.changed };
+        finalizeRetryState(_lastResult);
         return _lastResult;
       }
 
@@ -6746,6 +6950,7 @@ const BackgroundScheduler = (function () {
           _lastSyncAt = new Date().toISOString();
           _status = (uploadOk && mergeOk) ? 'completed' : 'failed';
           _lastResult = { ok: uploadOk && mergeOk, trigger, plan: planResult, uploaded: uploadResult, merged: mergeResult, domainsMerged: domainMergeResult && domainMergeResult.changed };
+          finalizeRetryState(_lastResult);
           return _lastResult;
         });
       });
@@ -6755,7 +6960,11 @@ const BackgroundScheduler = (function () {
       // local data can be corrupted by a failure at this level.
       _running = false;
       _status = 'failed';
-      _lastResult = { ok: false, reason: 'error', error: (err && err.message) || String(err), trigger };
+      _lastResult = {
+        ok: false, reason: 'error', error: (err && err.message) || String(err), trigger,
+        authFailure: !!(err && err.authFailure), httpStatus: (err && err.httpStatus) || null
+      };
+      finalizeRetryState(_lastResult);
       return _lastResult;
     });
   }
@@ -6855,25 +7064,39 @@ const BackgroundScheduler = (function () {
   // existing "re-render if the sync tab happens to be open" pattern
   // elsewhere in this file (e.g. batchUploadClick(), batchMergeClick()) —
   // no new status display mechanism is invented for trigger-driven passes.
-  function refreshSyncTabIfOpen() {
+  function refreshSyncTabIfOpen(passResult) {
     if (typeof activeMastersTab !== 'undefined' && activeMastersTab === 'sync' &&
         typeof renderMastersContent === 'function') {
       renderMastersContent();
     }
-    // Phase 19 fix: a sync pass can create, update, or (via a tombstone merge)
-    // hide tasks — none of that was ever reflected in the main visible task-card
-    // list, since only the running task's own row was re-rendered below. This is
-    // the single funnel every automatic trigger already passes through, so it's
-    // the correct place to bring the visible list back in line with whatever the
-    // pass just settled on — e.g. a task deleted on another device must actually
-    // disappear here, not just have its underlying data updated. Cheap and
-    // idempotent (renderList() already diffs existing DOM rows against current
-    // task state), matching how it's already called after every local mutation.
-    if (typeof renderList === 'function') renderList();
+    // Phase 19F: this used to call renderList() unconditionally on every
+    // automatic pass — a full diffed re-render that still calls renderRow()
+    // (full innerHTML replace) for every currently-visible card even when
+    // the pass changed nothing at all (task brief PRIMARY GOAL / Test A/I).
+    // Now: read exactly which task ids the just-completed pass determined
+    // had an EFFECTIVE change (BatchCloudMerge.getChangedTaskIdsFromResults(),
+    // itself driven by mergeOneRemoteTask()'s checksum/deleted-flag
+    // comparison — never object-reference equality, per §4) and pass ONLY
+    // those to renderList()'s scoped path. A no-op pass (passResult with no
+    // merge, or a merge where nothing had an effective change) now does
+    // zero DOM work here — no blink, no rebuilt cards, per requirement.
+    const mergeResult = passResult && passResult.merged;
+    const changedIds = (mergeResult && Array.isArray(mergeResult.results) &&
+        typeof BatchCloudMerge !== 'undefined' && typeof BatchCloudMerge.getChangedTaskIdsFromResults === 'function')
+      ? BatchCloudMerge.getChangedTaskIdsFromResults(mergeResult.results)
+      : [];
+    if (changedIds.length > 0 && typeof renderList === 'function') renderList(changedIds);
+    // Phase 19F-B: modal preservation check — only acts if the complete/edit
+    // popup is open AND represents one of THIS pass's own changedIds (see
+    // checkCompleteModalForRemoteDeletion()'s own header comment).
+    if (changedIds.length > 0 && typeof checkCompleteModalForRemoteDeletion === 'function') checkCompleteModalForRemoteDeletion(changedIds);
     // Phase 16B, requirement 6: every automatic trigger funnels through
     // scheduleSync().then(refreshSyncTabIfOpen) — this is therefore the one
     // place to reconcile the running-task timer after ANY automatic pass
     // settles (success, no-op, or failure), without adding a new trigger.
+    // Phase 19F: reconcileRunningTaskAfterSync() itself is now change-aware
+    // too (see below) — safe to always call, it no longer re-renders the
+    // running task's row unless its timer state actually changed.
     if (typeof reconcileRunningTaskAfterSync === 'function') reconcileRunningTaskAfterSync();
   }
 
@@ -6894,7 +7117,7 @@ const BackgroundScheduler = (function () {
     // Scheduled interval — the fallback trigger, not the primary one. Not
     // part of Phase 18's smart-trigger list, so it stays owned here exactly
     // as Phase 13 originally defined it.
-    _intervalTimerId = setInterval(() => scheduleSync('interval').then(refreshSyncTabIfOpen), SCHEDULED_SYNC_INTERVAL_MS);
+    _intervalTimerId = setInterval(() => scheduleSync('interval').then(result => refreshSyncTabIfOpen(result)), SCHEDULED_SYNC_INTERVAL_MS);
 
     return getSchedulerStatus();
   }
@@ -6930,6 +7153,184 @@ const BackgroundScheduler = (function () {
 // second state machine are introduced: WAITING/SYNCING/PAUSED_*/COMPLETED/
 // FAILED below are all read from BackgroundScheduler's own status; the only
 // state genuinely new here is whether a debounce window is counting down.
+// ─────────────────────────────────────────────────────────────────────────
+// RetryEngine (Phase 20 — Synchronization Retry, Offline Recovery &
+// Resilience)
+//
+// Fills the `RetryEngine: null` slot reserved in LocalSyncManager.Extensions
+// and IncrementalSyncEngine.Extensions since Phase 19E/19F. This is NOT a
+// second sync engine, scheduler, queue, or timer — per requirement 1, it
+// wraps the existing pipeline:
+//   - It reuses the existing `retry` entry in `syncQueues` (reserved,
+//     unused, since Phase 3's QUEUE_NAMES list) instead of adding a new
+//     persistence mechanism, via the existing upsertQueueEntry()/
+//     findQueueEntry()/removeQueueEntry() helpers.
+//   - It reuses AutoSyncEngine's existing debounce timer (extended below to
+//     accept a variable delay) instead of adding a second timer.
+//   - It reuses BackgroundScheduler.gatingBlockReason() (extended below)
+//     to hold off automatic triggers during backoff, instead of adding a
+//     second gate.
+//   - It reuses GoogleAuthManager.refreshAuthentication() (Phase 16A) for
+//     the one authentication-failure recovery attempt, instead of adding a
+//     second authentication flow.
+//
+// One coalesced record represents "the current sync failure state" for the
+// whole app (requirement 6 — this app already does one whole-document
+// push/pull per pass, so there is naturally only ever one retryable failure
+// state at a time, never one per task).
+const RetryEngine = (function () {
+  const QUEUE_NAME = 'retry';
+  const RECORD_ID = 'sync-pass'; // the one coalesced record (requirement 6)
+
+  const BASE_DELAY_MS = 5000;         // 5s
+  const MAX_DELAY_MS = 5 * 60 * 1000; // 5 minutes — bounded (requirement 5)
+  const MAX_ATTEMPTS = 8;             // ~5s..5min backoff, then RECOVERY_REQUIRED
+
+  function getRecord() {
+    return findQueueEntry(RECORD_ID, QUEUE_NAME);
+  }
+
+  // Classifies a finished (non-cancelled) synchronization pass result into
+  // one of: 'ignore' (not a real failure — nothing to record), 'auth',
+  // 'permanent', or 'transient'. Looks at the top-level result plus its
+  // `plan`/`uploaded`/`merged` sub-results (BackgroundScheduler._lastResult
+  // shape), since the underlying failure (e.g. a 500 during download) is
+  // often only present on the sub-result, not re-stated at the top level.
+  function classify(result) {
+    if (!result) return 'ignore';
+    const parts = [result, result.plan, result.uploaded, result.merged].filter(Boolean);
+    if (parts.some(p => p.authFailure || p.httpStatus === 401 || p.httpStatus === 403)) return 'auth';
+
+    const reasons = parts.map(p => p.reason).filter(Boolean);
+    // Pre-flight gating rejections (the pass never actually ran) and
+    // conflict-adjacent outcomes are not retry-classified failures —
+    // conflicts belong to the existing conflict system (requirement 3), and
+    // an already-running/cancelled pass isn't a failure at all.
+    if (reasons.some(r => [
+      'not-authenticated', 'cancelled', 'already-running', 'already-uploading',
+      'already-merging', 'remote-changed', 'sync-disabled'
+    ].includes(r))) return 'ignore';
+
+    if (reasons.some(r => ['corrupt-json', 'checksum-mismatch', 'invalid-shape', 'invalid-metadata'].includes(r))) {
+      return 'permanent';
+    }
+
+    const statuses = parts.map(p => p.httpStatus).filter(Boolean);
+    if (statuses.some(s => s === 429 || (s >= 500 && s < 600))) return 'transient';
+    if (statuses.some(s => s >= 400 && s < 500)) return 'permanent';
+
+    // Default: network unreachable, generic/unexpected errors, workspace
+    // temporarily unavailable, etc. — treated as retryable per requirement 3
+    // ("Use the existing error information where possible" / conservative
+    // default when no more specific signal is available).
+    return 'transient';
+  }
+
+  function computeDelay(attempt) {
+    const delay = BASE_DELAY_MS * Math.pow(2, Math.max(0, attempt - 1));
+    return Math.min(delay, MAX_DELAY_MS);
+  }
+
+  // Called once per finished pass, from BackgroundScheduler.runSynchronizationPass().
+  function recordSyncFailure(result) {
+    const category = classify(result);
+    if (category === 'ignore') return null;
+
+    const existing = getRecord();
+    const now = Date.now();
+    const attempts = (existing ? existing.attempts : 0) + 1;
+
+    let status;
+    let nextRetryAt = null;
+    if (category === 'permanent') {
+      status = 'recovery_required'; // requirement: do not endlessly retry permanent failures
+    } else if (category === 'auth') {
+      status = 'auth_required'; // requirement 16: no blind repeated retry loop of our own —
+                                 // rely on the one refreshAuthentication() attempt below plus
+                                 // the existing 'not-authenticated' gating + auth-restored trigger
+    } else if (attempts >= MAX_ATTEMPTS) {
+      status = 'recovery_required'; // requirement 18: bounded retry count
+    } else {
+      status = 'retrying';
+      nextRetryAt = now + computeDelay(attempts);
+    }
+
+    const entry = upsertQueueEntry(QUEUE_NAME, RECORD_ID, {
+      operation: 'sync-retry',
+      attempts: attempts,
+      firstFailureAt: existing ? existing.firstFailureAt : now,
+      lastFailureAt: now,
+      nextRetryAt: nextRetryAt,
+      lastErrorCategory: category,
+      lastErrorMessage: (result && (result.error || result.reason)) || 'unknown',
+      status: status
+    });
+
+    if (status === 'retrying' && typeof AutoSyncEngine !== 'undefined' && AutoSyncEngine.scheduleRetryBackoff) {
+      AutoSyncEngine.scheduleRetryBackoff(nextRetryAt - now);
+    }
+    if (category === 'auth' && typeof GoogleAuthManager !== 'undefined' && typeof GoogleAuthManager.refreshAuthentication === 'function') {
+      // Existing silent-refresh path (Phase 16A) — never opens an interactive
+      // login prompt itself; falls back to its own existing
+      // handleAuthenticationExpired() on failure, which is what makes
+      // isAuthenticated() correctly report false afterward.
+      GoogleAuthManager.refreshAuthentication();
+    }
+    return entry;
+  }
+
+  // Called once per finished pass that succeeded — clears any retry/backoff
+  // state so gatingBlockReason() stops reporting it and the UI status hint
+  // goes away, exactly like a completed manual retry should.
+  function recordSyncSuccess() {
+    if (getRecord()) removeQueueEntry(RECORD_ID, QUEUE_NAME);
+  }
+
+  function isBackoffActive() {
+    const e = getRecord();
+    return !!(e && e.status === 'retrying' && e.nextRetryAt && Date.now() < e.nextRetryAt);
+  }
+
+  function isRecoveryRequired() {
+    const e = getRecord();
+    return !!(e && e.status === 'recovery_required');
+  }
+
+  // Used at startup/resume (LocalSyncManager.initialize()) to re-arm the
+  // backoff timer after a reload/iOS-suspend killed the in-memory
+  // setTimeout, using the durable nextRetryAt persisted in the queue —
+  // see requirement 11 (iOS/iPadOS lifecycle).
+  function resumePendingBackoff() {
+    const e = getRecord();
+    if (!e || e.status !== 'retrying' || !e.nextRetryAt) return;
+    const remaining = e.nextRetryAt - Date.now();
+    if (typeof AutoSyncEngine === 'undefined' || !AutoSyncEngine.scheduleRetryBackoff) return;
+    AutoSyncEngine.scheduleRetryBackoff(Math.max(0, remaining));
+  }
+
+  function getRetryStatus() {
+    const e = getRecord();
+    if (!e) return { active: false };
+    return {
+      active: true,
+      status: e.status,
+      attempts: e.attempts,
+      lastErrorCategory: e.lastErrorCategory,
+      lastErrorMessage: e.lastErrorMessage,
+      firstFailureAt: e.firstFailureAt,
+      lastFailureAt: e.lastFailureAt,
+      nextRetryAt: e.nextRetryAt
+    };
+  }
+
+  return {
+    recordSyncFailure, recordSyncSuccess,
+    isBackoffActive, isRecoveryRequired, resumePendingBackoff,
+    getRetryStatus,
+    _classify: classify // exposed for the test matrix only
+  };
+})();
+
 const AutoSyncEngine = (function () {
   // ── In-memory-only debounce/status state. Nothing here needs to be
   // durable — a page reload starts this module clean, exactly like
@@ -6997,7 +7398,7 @@ const AutoSyncEngine = (function () {
       // reconcile it. This is the single most common sync trigger in the app, so
       // its omission here was effectively "you have to open the sync tab."
       if (typeof BackgroundScheduler.refreshSyncTabIfOpen === 'function') {
-        BackgroundScheduler.refreshSyncTabIfOpen();
+        BackgroundScheduler.refreshSyncTabIfOpen(result);
       }
       return result;
     });
@@ -7025,6 +7426,20 @@ const AutoSyncEngine = (function () {
     clearDebounceTimer();
     _debounceUntil = Date.now() + DEBOUNCE_MS;
     _debounceTimerId = setTimeout(onDebounceElapsed, DEBOUNCE_MS);
+  }
+
+  // scheduleRetryBackoff(delayMs): Phase 20 — arms the exact same debounce
+  // timer/clear machinery above with a caller-supplied (backoff) delay
+  // instead of the fixed DEBOUNCE_MS, so RetryEngine's bounded exponential
+  // backoff (requirement 5) reuses this one timer rather than introducing a
+  // second one (requirement 1). onDebounceElapsed() re-checks
+  // hasPendingSyncWork() exactly as it does for a normal debounce, so a
+  // backoff retry that finds nothing left to do is still a safe no-op.
+  function scheduleRetryBackoff(delayMs) {
+    clearDebounceTimer();
+    const ms = Math.max(0, delayMs || 0);
+    _debounceUntil = Date.now() + ms;
+    _debounceTimerId = setTimeout(onDebounceElapsed, ms);
   }
 
   // scheduleAutoSync(): same debounce path as handleLocalChangeForSync(),
@@ -7103,6 +7518,8 @@ const AutoSyncEngine = (function () {
     else if (debouncing) status = 'DEBOUNCING';
     else if (schedulerStatus.blockReason === 'network-unavailable') status = 'PAUSED_OFFLINE';
     else if (schedulerStatus.blockReason === 'not-authenticated' || schedulerStatus.blockReason === 'workspace-unavailable') status = 'PAUSED_AUTH';
+    else if (schedulerStatus.blockReason === 'retry-backoff') status = 'PAUSED_RETRY';
+    else if (schedulerStatus.blockReason === 'recovery-required') status = 'RECOVERY_REQUIRED';
     else if (schedulerStatus.blockReason === 'sync-disabled') status = 'PAUSED';
     else if (hasPendingSyncWork()) status = 'WAITING';
     else if (schedulerStatus.status === 'failed') status = 'FAILED';
@@ -7127,7 +7544,8 @@ const AutoSyncEngine = (function () {
     requestAutoSync,
     shouldAutoSync,
     onSyncPassSettled,
-    getAutoSyncStatus
+    getAutoSyncStatus,
+    scheduleRetryBackoff
   };
 })();
 // ── End Automatic Sync After Local Changes (Phase 17) ─────────────────────────────
@@ -7289,7 +7707,7 @@ const SmartSyncTriggers = (function () {
     _nextAllowedAutoSyncAt = Date.now() + AUTO_SYNC_COOLDOWN_MS;
     return BackgroundScheduler.scheduleSync(trigger).then(result => {
       if (typeof BackgroundScheduler.refreshSyncTabIfOpen === 'function') {
-        BackgroundScheduler.refreshSyncTabIfOpen();
+        BackgroundScheduler.refreshSyncTabIfOpen(result);
       }
       return result;
     });
@@ -8265,6 +8683,41 @@ function closeCompleteModal() {
   document.getElementById('complete-modal').classList.add('hidden');
 }
 
+// Phase 19F-B — modal preservation check. #complete-modal is a DOM sibling of
+// #task-list (never a descendant of any #row-{id} card), so no sync-triggered
+// render (renderRow()/renderList()/reconcileRunningTaskAfterSync()) ever
+// touches it — the popup, its unsaved field values, its selected date, and
+// its focus/cursor position are already structurally safe from a background
+// sync just by virtue of never being in that code path (verified against
+// PHASE_19F_RESULT.md §2/§15.6's own trace of every render function reachable
+// from a sync pass, independently re-traced this session).
+//
+// The one real gap: `isTaskDeleted()` only hides a tombstoned task from
+// card-rendering views. It does NOT stop submitComplete() from writing to a
+// task that a remote device deleted while this popup was still open here —
+// that would silently resurrect it. This function is the proactive half of
+// that fix (submitComplete() itself carries the same check as a fallback —
+// see there — for a deletion that lands between this check and the user
+// clicking Save).
+//
+// Called ONLY from the existing changedIds pipeline (refreshSyncTabIfOpen(),
+// batchMergeClick()) — never introduces a second change-detection system, and
+// never runs (does nothing) unless BOTH the modal is open in "complete" mode
+// AND this specific sync pass's own changedIds says the task it represents
+// was one of the ones that changed. Any other change to that task (heading,
+// project, description, etc., not deletion) is deliberately left alone here —
+// the user's unsaved popup values keep priority over the synchronized task
+// state; nothing in the popup is re-read or re-populated from it.
+function checkCompleteModalForRemoteDeletion(changedIds) {
+  if (pendingCompleteId === null) return; // not open, or open in "edit log entry" mode (unaffected — logEntries has no download-merge yet)
+  if (!Array.isArray(changedIds) || changedIds.indexOf(pendingCompleteId) === -1) return; // this pass didn't touch this task
+  const t = tasks.find(x => x.id === pendingCompleteId);
+  if (!t || isTaskDeleted(t)) {
+    alert('This task was deleted on another device while this window was open. Your changes were not saved.');
+    closeCompleteModal();
+  }
+}
+
 
 // ── Edit a completed log entry ────────────────────────────────────────────────
 function editLogEntry(globalIdx) {
@@ -8467,7 +8920,16 @@ function deductFromBreak(workStart, workEnd) {
 function submitComplete() {
   const id = pendingCompleteId;
   const task = pendingEditIdx !== null ? {} : tasks.find(t => t.id === id);
-  if (!task && pendingEditIdx === null) return;
+  // Phase 19F-B: fallback guard — checkCompleteModalForRemoteDeletion() above
+  // already closes the popup proactively as soon as a sync pass reports this
+  // task deleted, but a deletion can in principle land in the narrow window
+  // between that check and this click (e.g. a pass settling mid-click). Never
+  // let Save write to / resurrect a tombstoned or vanished task.
+  if (pendingEditIdx === null && (!task || isTaskDeleted(task))) {
+    alert('This task was deleted on another device while this window was open. Your changes were not saved.');
+    closeCompleteModal();
+    return;
+  }
 
   const heading  = document.getElementById('cm-heading').value.trim();
   const project  = document.getElementById('cm-project').value.trim();
@@ -9681,6 +10143,25 @@ function renderRow(id) {
   }
 
   const dis = isDone ? 'disabled' : '';
+  // Phase 19F (task brief §11/§12): a card rebuild below fully replaces its
+  // DOM (buttons/timer/status can all change, so a partial patch isn't
+  // reliable) — but if the user is actively focused inside THIS SAME card
+  // (e.g. mid-edit in the task-name input) when a sync-triggered update
+  // fires for it, that replace must not silently steal focus/cursor
+  // position out from under them. The task heading VALUE is never at risk
+  // (oninput already commits every keystroke to task.heading
+  // synchronously, so nothing typed is lost even without this), but the
+  // DOM node identity is, and losing focus/cursor mid-type is a real,
+  // visible disruption this phase's brief calls out.
+  const activeEl = document.activeElement;
+  let focusRestore = null;
+  if (activeEl && container.contains(activeEl) && activeEl.id) {
+    focusRestore = {
+      id: activeEl.id,
+      selectionStart: (typeof activeEl.selectionStart === 'number') ? activeEl.selectionStart : null,
+      selectionEnd: (typeof activeEl.selectionEnd === 'number') ? activeEl.selectionEnd : null
+    };
+  }
   // Show module/ticket on card only (project & nature shown, no description on card)
   container.innerHTML = `
     <div class="task-top">
@@ -9706,6 +10187,19 @@ function renderRow(id) {
       <i class="ti ti-alert-circle"></i> Project, Nature of Task and Module are required before starting.
     </div>
   `;
+  // Phase 19F: restore focus/selection captured just above, now that the
+  // replacement DOM exists. Only fires when the user was actually focused
+  // in this exact card, so it never steals focus into a card the user
+  // wasn't interacting with.
+  if (focusRestore) {
+    const restored = document.getElementById(focusRestore.id);
+    if (restored) {
+      restored.focus();
+      if (focusRestore.selectionStart !== null && typeof restored.setSelectionRange === 'function') {
+        try { restored.setSelectionRange(focusRestore.selectionStart, focusRestore.selectionEnd); } catch (e) {}
+      }
+    }
+  }
 }
 
 // ── Drag & drop task reordering ─────────────────────────────────────────────────
@@ -9774,11 +10268,73 @@ function taskListDrop(e) {
   saveState();
 }
 
-function renderList() {
+function renderList(onlyIds) {
   enforcePastDateAutoPause();
   const list = document.getElementById('task-list');
   const selDate = getSelectedDate();
   const today = todayStr();
+
+  // Phase 19F: change-aware partial reconciliation. When called with a
+  // specific array of task ids (from a sync pass that already determined
+  // exactly which tasks had an EFFECTIVE change — see
+  // BatchCloudMerge.getChangedTaskIdsFromResults()), touch ONLY those rows'
+  // DOM. Every other currently-rendered card — including its buttons,
+  // focus, and any in-progress edit in its own input — is left completely
+  // untouched: no innerHTML replace, no blink. This is what makes the
+  // task brief's PRIMARY GOAL possible ("if synchronization produces no
+  // effective UI-relevant change, the DOM must not be rebuilt") without
+  // duplicating this function's own membership/date-filtering rules for
+  // the ids that DID change. Called with no argument (every existing
+  // caller — addTask/startTask/deleteTask/drag-drop/etc.), behavior is
+  // 100% unchanged from before this phase: a full diffed re-render.
+  if (Array.isArray(onlyIds)) {
+    if (onlyIds.length === 0) return; // nothing changed — zero DOM work, not even a query
+    const dateStrOf = (task) => {
+      const d = new Date(task.createdAt);
+      return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+    };
+    onlyIds.forEach(id => {
+      const task = tasks.find(t => t.id === id);
+      const container = document.getElementById('row-' + id);
+      const belongsHere = !!task && !isTaskDeleted(task) && task.status !== 'done' &&
+        (task.createdAt ? dateStrOf(task) === selDate : selDate === today);
+      if (!belongsHere) {
+        // No longer visible on the currently selected date — tombstoned,
+        // completed, or created for a different date by the merge. Remove
+        // only this row, if it exists; never touches any other row.
+        if (container) container.remove();
+        return;
+      }
+      if (!container) {
+        // Newly relevant to this date (e.g. a task created on another
+        // device) — insert a fresh slot at the top, same convention the
+        // full render below already uses for a brand-new row.
+        const d = document.createElement('div'); d.id = 'row-' + id;
+        list.insertBefore(d, list.firstChild);
+      }
+      renderRow(id);
+    });
+    // Reconcile the empty-state placeholder — the one shared element a
+    // partial update can still legitimately need to add or remove.
+    const stillHasRows = list.querySelector('[id^="row-"]') !== null;
+    const existingEmpty0 = document.getElementById('empty-state');
+    if (!stillHasRows && !existingEmpty0) {
+      if (selDate < today) {
+        list.innerHTML = '';
+      } else {
+        list.innerHTML = '';
+        const d = document.createElement('div');
+        d.className = 'empty-state'; d.id = 'empty-state';
+        d.innerHTML = '<i class="ti ti-clipboard-list"></i>No tasks for this date — hit "Add task" to begin.';
+        list.appendChild(d);
+      }
+    } else if (stillHasRows && existingEmpty0) {
+      existingEmpty0.remove();
+    }
+    updateLogPanel();
+    return;
+  }
+
   // Show only tasks created on the SELECTED date — a task belongs to the date
   // it was created on, regardless of its current status (running/paused/idle).
   // This keeps tasks from one day bleeding into another day's view.
@@ -10992,8 +11548,26 @@ function renderMastersContent() {
       'sync-disabled': 'Synchronization is turned off.',
       'network-unavailable': 'Waiting for network connection.',
       'not-authenticated': 'Not signed in to Google Drive.',
-      'workspace-unavailable': 'Waiting for Drive workspace to be ready.'
+      'workspace-unavailable': 'Waiting for Drive workspace to be ready.',
+      'retry-backoff': 'Sync failed — retry scheduled.',
+      'recovery-required': 'Sync recovery required — tap "Synchronize Now" to retry.'
     };
+    // Phase 20: minimal retry status detail (requirement 19 — "Provide
+    // minimal status information", explicitly NOT a diagnostics dashboard).
+    // Appends attempt count / next-retry time onto the existing block-reason
+    // hint below rather than adding a second status area.
+    const retryStatus = (typeof RetryEngine !== 'undefined') ? RetryEngine.getRetryStatus() : { active: false };
+    function describeRetryStatus() {
+      if (!retryStatus.active) return '';
+      if (retryStatus.status === 'retrying' && retryStatus.nextRetryAt) {
+        const secs = Math.max(0, Math.round((retryStatus.nextRetryAt - Date.now()) / 1000));
+        return ' (attempt ' + retryStatus.attempts + ', retrying in ~' + secs + 's)';
+      }
+      if (retryStatus.status === 'recovery_required') {
+        return ' (' + retryStatus.attempts + ' attempts failed — ' + (retryStatus.lastErrorCategory || 'error') + ')';
+      }
+      return '';
+    }
     const schedulerLastSyncLabel = schedulerStatus.lastSyncAt
       ? new Date(schedulerStatus.lastSyncAt).toLocaleString()
       : 'Never';
@@ -11014,7 +11588,7 @@ function renderMastersContent() {
     }
     const schedulerResultLabel = describeSchedulerResult(schedulerStatus.lastResult);
     const schedulerBlockHintHtml = (!schedulerStatus.running && schedulerStatus.blockReason && schedulerStatus.blockReason !== 'sync-disabled')
-      ? `<div style="font-size:11px;color:var(--text-tertiary);margin-top:8px">${esc(SCHEDULER_BLOCK_REASON_LABELS[schedulerStatus.blockReason] || schedulerStatus.blockReason)}</div>`
+      ? `<div style="font-size:11px;color:var(--text-tertiary);margin-top:8px">${esc((SCHEDULER_BLOCK_REASON_LABELS[schedulerStatus.blockReason] || schedulerStatus.blockReason) + describeRetryStatus())}</div>`
       : '';
     const manualSyncDisabledAttr = (!workspaceStatus.ready || schedulerStatus.running) ? 'disabled' : '';
     const manualSyncButtonLabel = schedulerStatus.running ? 'Synchronizing…' : 'Synchronize Now';
@@ -11564,8 +12138,19 @@ function mergeSelectedTaskClick() {
 // mergeSelectedTaskClick()'s existing pattern.
 function batchMergeClick() {
   if (activeMastersTab === 'sync') renderMastersContent();
-  BatchCloudMerge.mergeTaskCollection().then(() => {
+  BatchCloudMerge.mergeTaskCollection().then((result) => {
     if (activeMastersTab === 'sync') renderMastersContent();
+    // Phase 19F-B: connect this manual pass to the SAME changedIds-scoped
+    // card reconciliation + modal preservation check the automatic pass
+    // already uses (BackgroundScheduler.refreshSyncTabIfOpen()). result.results
+    // is already the same per-task {taskId, effectiveChange, ...} shape
+    // getChangedTaskIdsFromResults() reads (Phase 19F's own mergeTaskCollection()
+    // return value) — no new results shape or comparison engine introduced.
+    const changedIds = (result && Array.isArray(result.results) &&
+        typeof BatchCloudMerge.getChangedTaskIdsFromResults === 'function')
+      ? BatchCloudMerge.getChangedTaskIdsFromResults(result.results) : [];
+    if (changedIds.length > 0 && typeof renderList === 'function') renderList(changedIds);
+    if (changedIds.length > 0 && typeof checkCompleteModalForRemoteDeletion === 'function') checkCompleteModalForRemoteDeletion(changedIds);
     // Phase 16B, requirement 6/7: a batch merge can change the running
     // task's fields — reconcile the timer against whatever the merge already
     // settled on, never a new comparison here.
@@ -11637,8 +12222,14 @@ function toggleBackgroundSync(enabled) {
 // batchMergeClick()/batchUploadClick()'s existing pattern.
 function manualSyncClick() {
   if (activeMastersTab === 'sync') renderMastersContent();
-  BackgroundScheduler.startSynchronization('manual').then(() => {
+  BackgroundScheduler.startSynchronization('manual').then((result) => {
     if (activeMastersTab === 'sync') renderMastersContent();
+    // Phase 19F-B: Manual Sync runs through the exact same runSynchronizationPass()
+    // as every automatic trigger, but (unlike the automatic callers) never used to
+    // chain BackgroundScheduler.refreshSyncTabIfOpen() itself — so a manual pass's
+    // task-card reconciliation, running-timer check, and modal preservation check
+    // never ran. Connects it here; no change to refreshSyncTabIfOpen() itself.
+    if (typeof BackgroundScheduler.refreshSyncTabIfOpen === 'function') BackgroundScheduler.refreshSyncTabIfOpen(result);
   });
 }
 
@@ -13906,9 +14497,23 @@ function reconcileRunningTaskAfterSync() {
   const after = getRunningTaskState();
   if (typeof renderRow !== 'function') return;
   if (before.taskId !== after.taskId) {
+    // Which task is running actually changed (started/stopped/switched on
+    // another device) — both the old and new running task's card need to
+    // reflect their new status/buttons.
     if (before.taskId !== null) renderRow(before.taskId);
     if (after.taskId !== null) renderRow(after.taskId);
-  } else if (after.taskId !== null) {
+  } else if (after.taskId !== null && before.timerActive !== after.timerActive) {
+    // Phase 19F: the SAME task is (still) running — only re-render its card
+    // if the timer itself actually had to be started/stopped just now
+    // (e.g. recovered from a dead interval). Previously this branch called
+    // renderRow() unconditionally on every settled pass, which is exactly
+    // the "task-card blink for the running task on every sync" the task
+    // brief's Test F calls out — the running task's card, buttons, and
+    // input focus were rebuilt even when literally nothing about it had
+    // changed. Any change to the running task's OWN content (heading,
+    // project, etc.) still gets its card update from the caller's own
+    // changedIds-scoped renderList() — this function only owns the timer
+    // axis.
     renderRow(after.taskId);
   }
 }
@@ -14088,6 +14693,24 @@ function initializeSyncInfrastructure() {
   // AutoSyncEngine.handleLocalChangeForSync() directly; nothing here starts
   // a debounce window or a synchronization pass at startup.
   window.TTLSync.Modules.AutoSyncEngine = AutoSyncEngine;
+
+  // Phase 20 (Synchronization Retry, Offline Recovery & Resilience):
+  // register the Retry Engine into the two slots reserved for it since
+  // Phase 4/12 (LOCAL_SYNC_ENGINE.md §6), the same registration pattern
+  // Phase 5's AuthManager and Phase 13's BackgroundScheduler established
+  // above. Also: if a bounded backoff was still counting down when this
+  // session ended (page reload, browser close, iOS suspending the tab), its
+  // in-memory setTimeout did not survive — resumePendingBackoff() re-arms it
+  // from the durable nextRetryAt already persisted in the `retry` queue
+  // entry (requirement 11/12/13), instead of leaving it to be picked up
+  // only incidentally by the next unrelated trigger or the 5-minute
+  // interval fallback.
+  window.TTLSync.Modules.RetryEngine = RetryEngine;
+  LocalSyncManager.Extensions.RetryEngine = RetryEngine;
+  if (typeof IncrementalSyncEngine !== 'undefined') {
+    IncrementalSyncEngine.Extensions.RetryEngine = RetryEngine;
+  }
+  RetryEngine.resumePendingBackoff();
 
   // Phase 18: register the Smart Sync Triggers module. Registration only —
   // its listeners aren't attached until registerSmartSyncTriggers() is
