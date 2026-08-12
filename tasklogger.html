@@ -178,6 +178,32 @@ body {
 }
 .btn-highlight:hover { background: var(--blue-dark) !important; border-color: var(--blue-dark) !important; }
 
+/* ── Phase 21: Top-level Sync button + status dot ── */
+.sync-btn { position: relative; }
+.sync-dot {
+  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  margin-left: 2px; background: var(--text-tertiary); flex-shrink: 0;
+}
+.sync-dot.sync-syncing { background: var(--amber-mid); animation: syncDotBlink 1s ease-in-out infinite; }
+.sync-dot.sync-synced { background: var(--green-mid); }
+.sync-dot.sync-failed { background: var(--red-mid); animation: syncDotBlink 1s ease-in-out infinite; }
+.sync-dot.sync-neutral { background: var(--text-tertiary); }
+@keyframes syncDotBlink { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+
+/* ── Phase 21: More menu ── */
+.more-menu-wrap { position: relative; }
+.more-menu-dropdown {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 60;
+  display: flex; flex-direction: column; gap: 4px;
+  background: var(--bg); border: 1px solid var(--border-md); border-radius: var(--radius-md);
+  box-shadow: 0 6px 20px rgba(0,0,0,0.15); padding: 6px; min-width: 190px;
+}
+.more-menu-dropdown.hidden { display: none; }
+.more-menu-dropdown .btn { width: 100%; justify-content: flex-start; box-shadow: none; }
+@media (max-width: 640px) {
+  .more-menu-dropdown { right: 0; left: auto; }
+}
+
 /* Task card */
 .task-card {
   background: var(--bg); border: 1px solid var(--border);
@@ -1030,6 +1056,10 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
 @media (max-width: 360px) {
   .header-actions .btn span,
   .header-actions .btn-primary span { display: none; }
+  /* Phase 21: the sync status dot must never be hidden by the generic
+     "hide button label spans" rule above — it's the only visual state
+     indicator the Sync button has at this width. */
+  .header-actions .btn .sync-dot { display: inline-block !important; }
   .btn { padding: 8px 10px; }
 }
 
@@ -1125,14 +1155,22 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
         <span>Dashboard</span>
       </a>
-      <button class="btn" onclick="openCSVModal()" title="Import or export the log as CSV or Excel"><i class="ti ti-file-import"></i> Import / Export</button>
-      <button class="btn" onclick="startTour()" id="tour-btn" title="App Tour"><i class="ti ti-route"></i> Tour</button>
+      <button class="btn sync-btn" id="top-sync-btn" onclick="topSyncClick()" title="Synced">
+        <i class="ti ti-refresh"></i> Sync <span class="sync-dot sync-neutral" id="top-sync-dot"></span>
+      </button>
+      <div class="more-menu-wrap" id="more-menu-wrap">
+        <button class="btn" id="more-menu-btn" onclick="toggleMoreMenu(event)" title="More actions"><i class="ti ti-dots"></i> More <i class="ti ti-chevron-down" style="font-size:11px"></i></button>
+        <div class="more-menu-dropdown hidden" id="more-menu-dropdown">
+          <button class="btn" onclick="openCSVModal()" title="Import or export the log as CSV or Excel"><i class="ti ti-file-import"></i> Import / Export</button>
+          <button class="btn" onclick="startTour()" id="tour-btn" title="App Tour"><i class="ti ti-route"></i> Tour</button>
+          <button class="btn" onclick="cycleTheme()" id="theme-toggle-btn" title="Switch theme"><i class="ti ti-sun" id="theme-toggle-icon"></i> <span id="theme-toggle-label">Light</span></button>
+        </div>
+      </div>
       <div class="date-picker-wrap" onclick="try{document.getElementById('log-date-input').showPicker()}catch(e){document.getElementById('log-date-input').click()}">
         <i class="ti ti-calendar"></i>
         <input type="date" id="log-date-input" class="date-picker-input" onchange="onDateChange()" />
         <span id="today-badge" class="date-today-badge">Today</span>
       </div>
-      <button class="btn" onclick="cycleTheme()" id="theme-toggle-btn" title="Switch theme"><i class="ti ti-sun" id="theme-toggle-icon"></i> <span id="theme-toggle-label">Light</span></button>
       <button class="btn" onclick="openMasters()"><i class="ti ti-list-details"></i> Masters</button>
       <button class="btn btn-primary" onclick="addTask()"><i class="ti ti-plus"></i> Add task</button>
     </div>
@@ -6864,13 +6902,15 @@ const BackgroundScheduler = (function () {
   let _lastSyncAt = null;
   let _lastTrigger = null;
   let _cancelRequested = false;
-  let _intervalTimerId = null;
   let _initialized = false;
 
-  // Fallback trigger only, not the primary mechanism (requirement 3;
-  // BACKGROUND_SYNC.md §3 "Periodic synchronization... the fallback
-  // trigger, not the primary one").
-  const SCHEDULED_SYNC_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+  // Phase 21: periodic/interval synchronization has been removed entirely.
+  // Synchronization is now purely event-driven — see SmartSyncTriggers
+  // below, which covers startup, foreground/focus, resume, network
+  // recovery, authentication recovery, and debounced local mutations. No
+  // setInterval-based polling of Google Drive remains anywhere in this
+  // module. (Previously: SCHEDULED_SYNC_INTERVAL_MS fallback timer,
+  // Phase 13 — removed per PHASE_21_EVENT_DRIVEN_SYNC_RESULT.md.)
 
   // ── Gating (requirement 6) ───────────────────────────────────────────────
   // Each check below reuses an existing status getter — no new
@@ -7136,6 +7176,11 @@ const BackgroundScheduler = (function () {
   // elsewhere in this file (e.g. batchUploadClick(), batchMergeClick()) —
   // no new status display mechanism is invented for trigger-driven passes.
   function refreshSyncTabIfOpen(passResult) {
+    // Phase 21: single choke point for the top-level Sync dot too — every
+    // automatic trigger (SmartSyncTriggers) and manual sync already funnels
+    // through here after a pass settles, so this is the one place needed to
+    // keep the dot in sync with BackgroundScheduler's own status.
+    if (typeof refreshTopSyncIndicator === 'function') refreshTopSyncIndicator();
     if (typeof activeMastersTab !== 'undefined' && activeMastersTab === 'sync' &&
         typeof renderMastersContent === 'function') {
       renderMastersContent();
@@ -7171,24 +7216,25 @@ const BackgroundScheduler = (function () {
     if (typeof reconcileRunningTaskAfterSync === 'function') reconcileRunningTaskAfterSync();
   }
 
-  // initializeScheduler(): idempotent. As of Phase 18 (Smart Sync
-  // Triggers), this function ONLY sets up the Scheduled Interval fallback
-  // trigger (BACKGROUND_SYNC.md §3 — "the fallback trigger, not the
-  // primary one"). Every other automatic trigger this function used to
-  // wire directly (startup, focus, visibility, network) is now supervised
-  // by SmartSyncTriggers (Phase 18) further below, which funnels every
-  // decision back through THIS module's own scheduleSync() — never a
-  // second scheduler or sync engine. Kept as its own function/name for
-  // backward compatibility with its existing call site
-  // (initializeSyncInfrastructure()).
+  // initializeScheduler(): idempotent. As of Phase 21, this module no
+  // longer owns ANY timer of its own — the periodic/interval fallback
+  // trigger (Phase 13) has been removed entirely, per the new
+  // event-driven-only synchronization model. Every automatic trigger
+  // (startup, focus, visibility, resume, network, auth-restored, debounced
+  // local mutation) is supervised by SmartSyncTriggers/AutoSyncEngine
+  // further below, which funnel every decision back through THIS module's
+  // own scheduleSync() — never a second scheduler or sync engine. This
+  // function is kept (as a no-op idempotent marker) only for backward
+  // compatibility with its existing call site
+  // (initializeSyncInfrastructure()); it performs no scheduling of its own.
   function initializeScheduler() {
     if (_initialized) return getSchedulerStatus(); // idempotent — safe to call more than once
     _initialized = true;
 
-    // Scheduled interval — the fallback trigger, not the primary one. Not
-    // part of Phase 18's smart-trigger list, so it stays owned here exactly
-    // as Phase 13 originally defined it.
-    _intervalTimerId = setInterval(() => scheduleSync('interval').then(result => refreshSyncTabIfOpen(result)), SCHEDULED_SYNC_INTERVAL_MS);
+    // Phase 21: intentionally no setInterval/polling here. Automatic
+    // synchronization opportunities come exclusively from real events —
+    // see SmartSyncTriggers.registerSmartSyncTriggers() and
+    // AutoSyncEngine's local-mutation debounce.
 
     return getSchedulerStatus();
   }
@@ -7352,7 +7398,29 @@ const RetryEngine = (function () {
       // login prompt itself; falls back to its own existing
       // handleAuthenticationExpired() on failure, which is what makes
       // isAuthenticated() correctly report false afterward.
-      GoogleAuthManager.refreshAuthentication();
+      //
+      // Phase 22 (Authentication Reliability), requirement 7 (Drive 401):
+      // a 401 must resume the deferred synchronization work once — not
+      // leave it stranded until some unrelated future trigger happens to
+      // fire. `wasAlreadyAuthRequired` distinguishes the FIRST auth failure
+      // in this streak (existing record absent, or not yet 'auth_required')
+      // from a repeat one (this record was already 'auth_required' going
+      // into this call, meaning a retry already happened once and also hit
+      // 401). Only the first failure gets an automatic retry — a repeat
+      // failure still gets a silent refresh attempt (harmless, and it's the
+      // only way a since-fixed credential is ever noticed again), but never
+      // a second automatic resume, so a persistently-broken credential can
+      // never loop synchronization passes on its own. The deferred work is
+      // preserved either way (nothing here clears queues or dirty domains);
+      // a later genuine authentication-ready event (interactive reconnect)
+      // can still resume it.
+      const wasAlreadyAuthRequired = !!(existing && existing.status === 'auth_required');
+      GoogleAuthManager.refreshAuthentication().then(status => {
+        if (wasAlreadyAuthRequired) return; // already retried once this streak — wait for a real auth-ready event
+        if (!status || !status.authenticated) return; // silent refresh didn't actually recover — nothing to retry
+        if (typeof SmartSyncTriggers === 'undefined' || !SmartSyncTriggers.handleAuthenticationReady) return;
+        SmartSyncTriggers.handleAuthenticationReady('recovery');
+      });
     }
     return entry;
   }
@@ -7809,13 +7877,40 @@ const SmartSyncTriggers = (function () {
     return gap >= RESUME_IDLE_THRESHOLD_MS ? 'resume' : defaultTrigger;
   }
 
+  // Phase 22 (Authentication Reliability), requirement 5 (Token Expiry —
+  // "tolerate browser suspension"): a tab/window "resuming" after a long
+  // enough gap (RESUME_IDLE_THRESHOLD_MS) is exactly the scenario a
+  // suspended browser can leave the proactive refresh timer (setTimeout)
+  // unable to fire on schedule — the access token may already be expired
+  // by the time this trigger runs. Left alone, the sync request below would
+  // simply fail gatingBlockReason()'s 'not-authenticated' check and do
+  // nothing until some unrelated later trigger happened to succeed. Kick a
+  // silent (never interactive — refreshAuthentication() only ever attempts
+  // prompt:'none') reacquisition here whenever the app was previously
+  // connected, so a resume after suspension recovers on its own instead of
+  // silently sitting unsynced. Never opens a login prompt; if the silent
+  // attempt fails, the app is left exactly where it already was.
+  function ensureFreshAuthOnResume() {
+    if (typeof GoogleAuthManager === 'undefined') return;
+    if (GoogleAuthManager.isAuthenticated()) return; // token still valid — nothing to do
+    const status = GoogleAuthManager.getStatus();
+    if (!status || status.state === 'disconnected') return; // never connected, or the user explicitly signed out — not this trigger's place to prompt or guess
+    GoogleAuthManager.refreshAuthentication().then(newStatus => {
+      if (newStatus && newStatus.authenticated) handleAuthenticationReady('recovery');
+    });
+  }
+
   function handleVisibilityChange() {
     if (document.visibilityState !== 'visible') return;
-    requestSmartSync(classifyResumeOrElse('visibility'));
+    const trigger = classifyResumeOrElse('visibility');
+    if (trigger === 'resume') ensureFreshAuthOnResume();
+    requestSmartSync(trigger);
   }
 
   function handleWindowFocus() {
-    requestSmartSync(classifyResumeOrElse('focus'));
+    const trigger = classifyResumeOrElse('focus');
+    if (trigger === 'resume') ensureFreshAuthOnResume();
+    requestSmartSync(trigger);
   }
 
   function handleNetworkOnline() {
@@ -12113,6 +12208,7 @@ function connectGoogleDrive() {
   // authenticate() flips state to 'connecting' synchronously before any
   // network activity begins, so re-rendering immediately reflects that.
   if (activeMastersTab === 'sync') renderMastersContent();
+  refreshTopSyncIndicator();
   p.then(() => {
       // Phase 6: after successful authentication, prepare the Drive
       // workspace (folders only — no data is uploaded here). A workspace
@@ -12124,18 +12220,20 @@ function connectGoogleDrive() {
     })
    .then(() => {
       if (activeMastersTab === 'sync') renderMastersContent();
+      refreshTopSyncIndicator();
       // Phase 18, requirement 6: a successful manual Google login is its
       // own smart-sync trigger — requests synchronization if work is
       // pending. Never forces another login prompt; only reacts to a
       // login that has already succeeded.
       if (typeof SmartSyncTriggers !== 'undefined') SmartSyncTriggers.handleAuthenticationReady('login');
     })
-   .catch(() => { if (activeMastersTab === 'sync') renderMastersContent(); });
+   .catch(() => { if (activeMastersTab === 'sync') renderMastersContent(); refreshTopSyncIndicator(); });
 }
 
 function disconnectGoogleDrive() {
   GoogleAuthManager.disconnect().then(() => {
     if (activeMastersTab === 'sync') renderMastersContent();
+    refreshTopSyncIndicator();
   });
 }
 
@@ -12283,6 +12381,7 @@ function toggleBackgroundSync(enabled) {
   masters.flags.backgroundSyncEnabled = !!enabled;
   saveState();
   if (activeMastersTab === 'sync') renderMastersContent();
+  refreshTopSyncIndicator();
   // Phase 18, requirement 7: synchronization becoming enabled after being
   // disabled is its own smart-sync trigger. Disabling never triggers a
   // sync — handleSyncEnabledChange() itself only reacts to false→true.
@@ -12300,6 +12399,7 @@ function toggleBackgroundSync(enabled) {
 // batchMergeClick()/batchUploadClick()'s existing pattern.
 function manualSyncClick() {
   if (activeMastersTab === 'sync') renderMastersContent();
+  refreshTopSyncIndicator();
   BackgroundScheduler.startSynchronization('manual').then((result) => {
     if (activeMastersTab === 'sync') renderMastersContent();
     // Phase 19F-B: Manual Sync runs through the exact same runSynchronizationPass()
@@ -12310,6 +12410,112 @@ function manualSyncClick() {
     if (typeof BackgroundScheduler.refreshSyncTabIfOpen === 'function') BackgroundScheduler.refreshSyncTabIfOpen(result);
   });
 }
+
+// ── Phase 21: Top-level Sync button, status dot, and More menu ──────────────
+// Thin UI glue only, exactly like every other click handler in this section —
+// reuses BackgroundScheduler/AutoSyncEngine/GoogleAuthManager's own status
+// getters and reuses connectGoogleDrive()/manualSyncClick() rather than
+// creating a second synchronization engine or a second authentication flow.
+//
+// topSyncClick(): requirement (Part 14) — not authenticated → existing
+// authentication handling (connectGoogleDrive()); authenticated → one
+// synchronization pass (manualSyncClick(), which itself already guards
+// against starting a second pass via BackgroundScheduler's own overlap
+// guard/disabled state); already syncing → no-op (button is visually
+// disabled via renderTopSyncIndicator() below, but this is a second guard
+// against a stray click getting through).
+function topSyncClick() {
+  const authStatus = (typeof GoogleAuthManager !== 'undefined') ? GoogleAuthManager.getStatus() : { authenticated: false, state: 'disconnected' };
+  // Phase 22 (Authentication Reliability), requirement 3 (Startup Race):
+  // 'connecting' means a silent reconnect (or silent refresh) is already in
+  // flight — a tap here must not race it with an interactive login prompt.
+  // Let the silent attempt finish; the dot already reflects "Connecting…"
+  // for this same state (computeTopSyncStatus()) and will update on its own
+  // once it settles, exactly like every other automatic trigger already
+  // defers rather than forcing interactive auth during this state.
+  if (authStatus.state === 'connecting') return;
+  if (!authStatus.authenticated) { connectGoogleDrive(); return; }
+  if (typeof BackgroundScheduler !== 'undefined' && BackgroundScheduler.isSynchronizationRunning()) return;
+  manualSyncClick();
+}
+
+// computeTopSyncStatus(): read-only, derives the dot's visual state from
+// existing status getters only (Part 13 — reuses the existing sync state
+// model rather than inventing a new one). Never returns "synced" (green)
+// while offline, unauthenticated, or workspace-not-ready (Part 13's
+// explicit "do not falsely show green" requirement).
+function computeTopSyncStatus() {
+  const schedulerStatus = (typeof BackgroundScheduler !== 'undefined')
+    ? BackgroundScheduler.getSchedulerStatus()
+    : { running: false, blockReason: null, lastResult: null, lastSyncAt: null };
+  const authStatus = (typeof GoogleAuthManager !== 'undefined')
+    ? GoogleAuthManager.getStatus()
+    : { authenticated: false, state: 'disconnected' };
+  const debouncing = (typeof AutoSyncEngine !== 'undefined') && !!AutoSyncEngine.getAutoSyncStatus().debouncing;
+  const online = (typeof navigator === 'undefined') || navigator.onLine !== false;
+
+  if (schedulerStatus.running || debouncing) {
+    return { dot: 'sync-syncing', title: 'Syncing…' };
+  }
+  if (authStatus.state === 'connecting') {
+    return { dot: 'sync-neutral', title: 'Connecting…' };
+  }
+  if (!authStatus.authenticated) {
+    return { dot: 'sync-neutral', title: 'Authentication required — tap to sign in' };
+  }
+  if (!online) {
+    return { dot: 'sync-neutral', title: 'Waiting for network' };
+  }
+  if (schedulerStatus.blockReason === 'workspace-unavailable') {
+    return { dot: 'sync-neutral', title: 'Waiting for Drive workspace to be ready' };
+  }
+  if (schedulerStatus.lastResult && schedulerStatus.lastResult.ok === false) {
+    return { dot: 'sync-failed', title: 'Sync failed — tap to retry' };
+  }
+  if (!schedulerStatus.lastSyncAt) {
+    return { dot: 'sync-neutral', title: 'Not yet synced — tap Sync' };
+  }
+  return { dot: 'sync-synced', title: 'Synced' };
+}
+
+// refreshTopSyncIndicator(): the ONLY place that writes to the top-level dot's
+// DOM — every trigger above funnels here rather than touching the DOM
+// itself. Cheap (no Drive calls, no re-render of anything else); safe to
+// call as often as needed.
+function refreshTopSyncIndicator() {
+  const dot = document.getElementById('top-sync-dot');
+  const btn = document.getElementById('top-sync-btn');
+  if (!dot || !btn) return;
+  const status = computeTopSyncStatus();
+  dot.className = 'sync-dot ' + status.dot;
+  btn.title = status.title;
+}
+
+function toggleMoreMenu(evt) {
+  if (evt) evt.stopPropagation();
+  const dropdown = document.getElementById('more-menu-dropdown');
+  if (!dropdown) return;
+  dropdown.classList.toggle('hidden');
+}
+
+function openMoreMenu() {
+  const dropdown = document.getElementById('more-menu-dropdown');
+  if (dropdown) dropdown.classList.remove('hidden');
+}
+
+function closeMoreMenu() {
+  const dropdown = document.getElementById('more-menu-dropdown');
+  if (dropdown) dropdown.classList.add('hidden');
+}
+
+// Close the More menu on any click outside it (standard dropdown pattern);
+// clicks on the menu's own items are left alone so their onclick handlers
+// (openCSVModal(), startTour(), cycleTheme() — all reused unmodified) fire
+// normally, then the menu simply stays open until the next outside click.
+document.addEventListener('click', (evt) => {
+  const wrap = document.getElementById('more-menu-wrap');
+  if (wrap && !wrap.contains(evt.target)) closeMoreMenu();
+});
 
 function saveWorkHours() {
   const startVal = document.getElementById('wh-start').value;
@@ -14858,7 +15064,19 @@ function initializeSyncInfrastructure() {
         typeof renderMastersContent === 'function') {
       renderMastersContent();
     }
+    if (typeof refreshTopSyncIndicator === 'function') refreshTopSyncIndicator();
   });
+  // Phase 21: reflects immediately even before the reconnect attempt above
+  // settles (e.g. "Authentication required" while attemptSilentReconnectOnLoad()
+  // is still in flight), so the header never shows a blank/default dot on load.
+  if (typeof refreshTopSyncIndicator === 'function') refreshTopSyncIndicator();
+  // Phase 21: purely a UI refresh of the dot's tooltip/state (never triggers
+  // a synchronization pass by itself) — SmartSyncTriggers' own 'online'
+  // listener already handles the actual synchronization opportunity.
+  if (typeof window !== 'undefined') {
+    window.addEventListener('online', () => { if (typeof refreshTopSyncIndicator === 'function') refreshTopSyncIndicator(); });
+    window.addEventListener('offline', () => { if (typeof refreshTopSyncIndicator === 'function') refreshTopSyncIndicator(); });
+  }
 }
 
 // Called once at application startup, after initializeSyncInfrastructure().
@@ -14931,9 +15149,9 @@ const TOUR_STEPS = [
   { target: '#copy-btn', pos: 'top', title: '📋 Copy Log', body: 'Copy the effort log as a tab-separated table — paste directly into Excel or Google Sheets.' },
   { target: '#mail-btn', pos: 'top', title: '✉️ Email Log', body: 'Opens your mail app pre-filled and simultaneously copies a styled Excel-compatible table to clipboard. Template is configured in Masters → Email.' },
   { target: '#work-widget', pos: 'left', title: '⏱ Work & Break Tracker', body: 'Shows your <strong>total work time</strong> for today, updated live as timers run.' },
-  { target: '#theme-toggle-btn', pos: 'bottom', title: '🌙 Theme', body: 'Switch between <strong>Light</strong>, <strong>Dark</strong>, and <strong>System</strong> themes.' },
-  { target: 'button[onclick="openCSVModal()"]', pos: 'bottom', title: '📄 CSV', body: 'Export your log to a spreadsheet or import historical data, filtered by date range.' },
-  { target: '#tour-btn', pos: 'bottom', title: '🗺 Tour', body: 'Restart this tour anytime from the <strong>Tour</strong> button.' },
+  { target: '#theme-toggle-btn', pos: 'bottom', title: '🌙 Theme', body: 'Switch between <strong>Light</strong>, <strong>Dark</strong>, and <strong>System</strong> themes. Now tucked into the <strong>More</strong> menu.', onShow: () => { if (typeof openMoreMenu === 'function') openMoreMenu(); } },
+  { target: 'button[onclick="openCSVModal()"]', pos: 'bottom', title: '📄 CSV', body: 'Export your log to a spreadsheet or import historical data, filtered by date range. Found in the <strong>More</strong> menu.', onShow: () => { if (typeof openMoreMenu === 'function') openMoreMenu(); } },
+  { target: '#tour-btn', pos: 'bottom', title: '🗺 Tour', body: 'Restart this tour anytime from the <strong>More</strong> menu.', onShow: () => { if (typeof openMoreMenu === 'function') openMoreMenu(); } },
   // Masters — open it
   { target: 'button[onclick="openMasters()"]', pos: 'bottom', title: '⚙️ Masters', body: 'The <strong>Masters</strong> panel is your settings hub. Click Next to open it and explore each tab.', onNext: () => { openMasters(); } },
   // Masters tabs
