@@ -3277,6 +3277,35 @@ const GOOGLE_GIS_SCRIPT_URL   = 'https://accounts.google.com/gsi/client';
 // ever observe an expired token (GOOGLE_DRIVE_API.md §2 Refresh Strategy).
 const GOOGLE_AUTH_REFRESH_MARGIN_MS = 5 * 60 * 1000;
 
+// Phase 21 (Authentication Reliability): distinguishes an authentication-
+// shaped rejection (expired/revoked/invalid credential) from a genuine
+// Drive permission/authorization problem that also happens to arrive as an
+// HTTP 401/403. Google Drive uses 401 exclusively for "the credential
+// itself is unusable" (missing/expired/malformed token), so any 401 is
+// unconditionally treated as an auth failure. 403 is Forbidden-by-
+// definition and covers many non-auth cases too (insufficient permission on
+// a specific file/scope, per-user or per-project rate limiting, "app not
+// authorized to access this file") — folding every 403 into the same
+// silent-refresh path as a 401 would repeatedly re-authenticate a session
+// that was never actually broken. Inspect the JSON error body Google Drive
+// always returns for a distinguishing reason/status before deciding.
+function classifyDriveErrorBody(status, bodyText) {
+  if (status === 401) return { authFailure: true, permissionDenied: false };
+  if (status !== 403) return { authFailure: false, permissionDenied: false };
+  let reason = null, gStatus = null;
+  try {
+    const parsed = bodyText ? JSON.parse(bodyText) : null;
+    const errs = parsed && parsed.error && Array.isArray(parsed.error.errors) ? parsed.error.errors : null;
+    reason = (errs && errs[0] && errs[0].reason) || null;
+    gStatus = (parsed && parsed.error && parsed.error.status) || null;
+  } catch (e) { /* non-JSON or unparsable body — fall through as permission/unknown, never as auth */ }
+  // Reason/status codes Google actually returns for a truly broken credential
+  // (as opposed to a fine credential lacking permission on this resource).
+  const authReasons = ['authError', 'unauthorized', 'invalidCredentials', 'invalid_grant', 'insufficientScopes'];
+  const isAuthShaped = gStatus === 'UNAUTHENTICATED' || (reason && authReasons.indexOf(reason) !== -1);
+  return { authFailure: !!isAuthShaped, permissionDenied: !isAuthShaped };
+}
+
 const GoogleAuthManager = (function () {
   // ── In-memory-only session state (never persisted — see module header) ─────
   let _accessToken    = null;   // current OAuth access token, memory-only
@@ -3611,12 +3640,29 @@ const GoogleAuthManager = (function () {
       headers: { Authorization: 'Bearer ' + _accessToken }
     }).then(res => {
       if (res.ok) return { result: 'valid' };
-      if (res.status === 401 || res.status === 403) {
-        // Per GOOGLE_DRIVE_CLIENT.md, a rejected token here may mean expired
-        // or revoked — both route through the same handler (see
-        // handleAuthenticationRevoked()'s comment above for why).
-        handleAuthenticationExpired(new Error('Google rejected the current authentication (' + res.status + ').'));
-        return { result: 'invalid', reason: 'rejected', status: res.status };
+      if (res.status === 401) {
+        // Per GOOGLE_DRIVE_CLIENT.md, a 401 always means the credential
+        // itself is expired/revoked/invalid — route through the same
+        // handler (see handleAuthenticationRevoked()'s comment above for
+        // why) so the app correctly falls back to a silent-reconnect-or-
+        // interactive-reconnect flow next time.
+        handleAuthenticationExpired(new Error('Google rejected the current authentication (401).'));
+        return { result: 'invalid', reason: 'rejected', status: 401 };
+      }
+      if (res.status === 403) {
+        // Requirement (403 handling): a 403 is not automatically an
+        // authentication failure — inspect the response before deciding.
+        return res.text().then(text => {
+          const cls = classifyDriveErrorBody(403, text);
+          if (cls.authFailure) {
+            handleAuthenticationExpired(new Error('Google rejected the current authentication (403).'));
+            return { result: 'invalid', reason: 'rejected', status: 403 };
+          }
+          // A genuine permission/authorization problem — the credential
+          // itself is fine, so authentication state is left untouched
+          // (never continuously refresh authentication for this).
+          return { result: 'valid', reason: 'permission-denied', status: 403 };
+        });
       }
       return { result: 'inconclusive', reason: 'http-' + res.status };
     }).catch(() => ({ result: 'inconclusive', reason: 'network-unreachable' }));
@@ -3891,11 +3937,24 @@ const GoogleDriveWorkspace = (function () {
     options = options || {};
     options.headers = Object.assign({ Authorization: 'Bearer ' + token }, options.headers || {});
     return fetch(url, options).then(res => {
-      if (res.status === 401 || res.status === 403) {
-        const err = new Error('Google Drive authentication failed (' + res.status + ').');
+      if (res.status === 401) {
+        const err = new Error('Google Drive authentication failed (401).');
         err.authFailure = true;
-        err.httpStatus = res.status;
+        err.httpStatus = 401;
         throw err;
+      }
+      if (res.status === 403) {
+        // Requirement (403 handling): don't blindly treat every 403 as an
+        // authentication failure — inspect the body first (see
+        // classifyDriveErrorBody() above the Google Authentication Manager).
+        return res.text().then(text => {
+          const cls = classifyDriveErrorBody(403, text);
+          const err = new Error('Google Drive request failed (403): ' + (text || res.statusText));
+          err.httpStatus = 403;
+          if (cls.authFailure) err.authFailure = true;
+          else err.permissionDenied = true; // real permission/authorization problem — not an auth failure
+          throw err;
+        });
       }
       if (!res.ok) {
         return res.text().then(text => {
@@ -3930,11 +3989,23 @@ const GoogleDriveWorkspace = (function () {
     options = options || {};
     options.headers = Object.assign({ Authorization: 'Bearer ' + token }, options.headers || {});
     return fetch(url, options).then(res => {
-      if (res.status === 401 || res.status === 403) {
-        const err = new Error('Google Drive authentication failed (' + res.status + ').');
+      if (res.status === 401) {
+        const err = new Error('Google Drive authentication failed (401).');
         err.authFailure = true;
-        err.httpStatus = res.status;
+        err.httpStatus = 401;
         throw err;
+      }
+      if (res.status === 403) {
+        // Requirement (403 handling): identical treatment to driveFetch()
+        // above — inspect the body before assuming an authentication failure.
+        return res.text().then(text => {
+          const cls = classifyDriveErrorBody(403, text);
+          const err = new Error('Google Drive request failed (403): ' + (text || res.statusText));
+          err.httpStatus = 403;
+          if (cls.authFailure) err.authFailure = true;
+          else err.permissionDenied = true;
+          throw err;
+        });
       }
       if (!res.ok) {
         return res.text().then(text => {
@@ -7199,7 +7270,14 @@ const RetryEngine = (function () {
   function classify(result) {
     if (!result) return 'ignore';
     const parts = [result, result.plan, result.uploaded, result.merged].filter(Boolean);
-    if (parts.some(p => p.authFailure || p.httpStatus === 401 || p.httpStatus === 403)) return 'auth';
+    // Phase 21: only a true authentication-shaped failure (401, or a 403
+    // classified as auth-shaped by classifyDriveErrorBody()) routes into the
+    // silent-refresh recovery path below. A genuine 403 permission/
+    // authorization problem is NOT an auth failure — it falls through to
+    // the ordinary httpStatus-based classification further down (a plain
+    // 4xx → 'permanent'), so it surfaces as its own error state instead of
+    // triggering a pointless, repeated authentication refresh loop.
+    if (parts.some(p => p.authFailure)) return 'auth';
 
     const reasons = parts.map(p => p.reason).filter(Boolean);
     // Pre-flight gating rejections (the pass never actually ran) and
