@@ -1,4 +1,4 @@
-const CACHE = 'ttl-pwa-v2.3';
+const CACHE = 'ttl-pwa-v2.4';
 const ASSETS = ['./', './index.html'];
 
 self.addEventListener('install', e => {
