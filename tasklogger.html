@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <title>Task Time Logger</title>
 <script>
   // Apply saved theme before first paint to avoid a flash of the wrong theme.
@@ -32,6 +32,7 @@ if ('serviceWorker' in navigator) {
 </script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { max-width: 100%; overflow-x: hidden; }
 
 :root {
   --bg: #fffdf8;
@@ -130,11 +131,26 @@ body {
 
 .header {
   display: flex; align-items: flex-start; justify-content: space-between;
-  margin-bottom: 1.5rem; gap: 12px;
+  margin-bottom: 1.5rem; gap: 12px; min-width: 0;
 }
-.title { font-family: var(--font-head); font-size: 24px; font-weight: 700; letter-spacing: -0.3px; }
-.subtitle { font-family: var(--font-mono); font-size: 12px; color: var(--text-tertiary); margin-top: 5px; letter-spacing: 0.02em; }
-.header-actions { display: flex; gap: 8px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
+.header-titlebar { min-width: 0; flex: 1 1 auto; }
+.title {
+  font-family: var(--font-head); font-size: 24px; font-weight: 700; letter-spacing: -0.3px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;
+}
+.subtitle {
+  font-family: var(--font-mono); font-size: 12px; color: var(--text-tertiary); margin-top: 5px; letter-spacing: 0.02em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;
+}
+/* flex-shrink:0 keeps the action cluster from being crushed; min-width:0 on the
+   flex item itself (not just children) is what actually lets the row wrap
+   instead of forcing horizontal overflow on narrow viewports. */
+.header-actions { display: flex; gap: 8px; flex-shrink: 1; flex-wrap: wrap; justify-content: flex-end; min-width: 0; max-width: 100%; }
+/* Sync and More are the primary controls (Part 2/Final Acceptance Criteria) —
+   pin them to the front of the flex order so wrapping never pushes them
+   behind secondary controls (Dashboard link, date picker, Masters, Add task). */
+.header-actions .sync-btn { order: -2; }
+.header-actions .more-menu-wrap { order: -1; }
 
 /* Buttons */
 .btn {
@@ -197,6 +213,7 @@ body {
   display: flex; flex-direction: column; gap: 4px;
   background: var(--bg); border: 1px solid var(--border-md); border-radius: var(--radius-md);
   box-shadow: 0 6px 20px rgba(0,0,0,0.15); padding: 6px; min-width: 190px;
+  max-width: calc(100vw - 24px); /* never push the page into horizontal scroll */
 }
 .more-menu-dropdown.hidden { display: none; }
 .more-menu-dropdown .btn { width: 100%; justify-content: flex-start; box-shadow: none; }
@@ -765,13 +782,104 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
 .timer-summary-label { font-family: var(--font-mono); font-size: 12px; color: var(--green-dark); }
 
 /* Masters modal */
-.masters-tabs { display: flex; gap: 6px; margin-bottom: 14px; }
 .tab-btn {
   padding: 6px 14px; border-radius: 20px; border: 1px solid var(--border-md);
   background: transparent; cursor: pointer; font-size: 13px; font-weight: 500;
   color: var(--text-secondary); font-family: inherit; transition: all 0.15s;
 }
 .tab-btn.active { background: var(--blue-mid); color: #1a1108; border-color: var(--blue-mid); font-weight: 600; }
+
+/* ── Phase 24: Master popup — fixed-workspace layout ─────────────────────
+   Four structural regions: header / nav / content workspace / footer.
+   The popup's OUTER size is fixed by the viewport alone (never by which
+   master is selected or how much content it has) — only the content
+   workspace scrolls. See PHASE_24_RESPONSIVE_UI_RESULT.md for the full
+   before/after writeup. */
+.master-modal {
+  width: min(920px, calc(100vw - 32px));
+  height: min(640px, calc(100vh - 64px));
+  height: min(640px, calc(100dvh - 64px)); /* progressive enhancement; ignored where unsupported */
+  max-height: none; /* height above already accounts for viewport margins */
+}
+.master-modal .modal-header { flex-shrink: 0; }
+.master-header-actions { display: flex; align-items: center; gap: 4px; }
+.master-nav-toggle { display: none; } /* phone-only, see breakpoint below */
+
+.master-body {
+  display: flex;
+  flex: 1;
+  min-height: 0; /* the trick that lets children scroll instead of stretching the popup */
+  position: relative;
+  overflow: hidden;
+}
+.master-nav {
+  flex: 0 0 200px;
+  width: 200px;
+  border-right: 1px solid var(--border);
+  padding: 12px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.master-nav .tab-btn {
+  width: 100%;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-start;
+  text-align: left;
+}
+.master-content-workspace {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 20px;
+}
+.master-nav-backdrop { display: none; }
+
+.master-modal .modal-footer {
+  flex-shrink: 0;
+  padding-bottom: calc(12px + env(safe-area-inset-bottom));
+}
+
+/* Phone: nav collapses into an off-canvas drawer opened by the ☰ toggle. */
+@media (max-width: 760px) {
+  .master-modal {
+    width: calc(100vw - 16px);
+    height: calc(100vh - 24px);
+    height: calc(100dvh - 24px);
+  }
+  .master-nav-toggle { display: inline-flex; }
+  .master-nav {
+    position: absolute; top: 0; left: 0; bottom: 0; z-index: 20;
+    width: min(78vw, 280px);
+    background: var(--bg);
+    box-shadow: 4px 0 20px rgba(0,0,0,0.25);
+    transform: translateX(-100%);
+    transition: transform .18s ease;
+  }
+  .master-body.nav-open .master-nav { transform: translateX(0); }
+  .master-nav-backdrop {
+    display: block;
+    position: absolute; inset: 0; z-index: 15;
+    background: rgba(0,0,0,0.35);
+    opacity: 0; pointer-events: none;
+    transition: opacity .18s ease;
+  }
+  .master-body.nav-open .master-nav-backdrop { opacity: 1; pointer-events: auto; }
+  .master-content-workspace { padding: 14px 16px; }
+}
+@media (max-width: 400px) {
+  .master-modal { width: calc(100vw - 10px); height: calc(100vh - 14px); height: calc(100dvh - 14px); }
+}
+/* Slightly larger touch targets for the header icon buttons inside the
+   master popup on touch-sized viewports (Part 18 — Accessibility). */
+@media (max-width: 760px) {
+  .master-modal .modal-header .btn-icon { width: 38px; height: 38px; font-size: 17px; }
+}
 .master-list { display: flex; flex-direction: column; gap: 6px; }
 .master-item {
   display: flex; align-items: center; gap: 8px; padding: 8px 10px;
@@ -948,14 +1056,28 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
 }
 
 /* ── Header ── */
+/* Tablet (600–1024px): keep the title + actions on one row where there's
+   room; only drop to a stacked layout once space actually runs out. */
+@media (min-width: 641px) and (max-width: 1024px) {
+  .header { flex-wrap: wrap; }
+  .header-actions { gap: 6px; }
+}
 @media (max-width: 640px) {
   .header { flex-direction: column; gap: 10px; align-items: stretch; }
+  .header-titlebar { max-width: 100%; }
   .header-actions {
     display: flex; flex-wrap: wrap; gap: 6px;
     justify-content: flex-start;
   }
   .header-actions .date-picker-wrap { flex: 1; min-width: 140px; }
   .title { font-size: 18px; }
+}
+/* Very narrow phones: let the title shrink further and tighten gaps before
+   anything is ever hidden — Sync and More stay full-size and labeled. */
+@media (max-width: 400px) {
+  .title { font-size: 16px; }
+  .subtitle { font-size: 10.5px; }
+  .header-actions { gap: 5px; }
 }
 
 /* ── Task card ── */
@@ -1012,8 +1134,10 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
 }
 
 /* ── Masters modal ── */
+/* Structural nav collapse/backdrop rules for the master popup now live
+   with the rest of the .master-modal / .master-nav block above (Phase 24) —
+   kept as a single source of truth instead of stacking extra overrides here. */
 @media (max-width: 600px) {
-  .masters-tabs { flex-wrap: wrap; }
   .tab-btn { font-size: 12px; padding: 5px 10px; }
 }
 
@@ -1146,7 +1270,7 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
 
 <div class="app-constrained">
   <div class="header">
-    <div>
+    <div class="header-titlebar">
       <div class="title">Task Time Logger</div>
       <div class="subtitle">Track effort · saved in browser · exports to XLSX</div>
     </div>
@@ -1544,30 +1668,37 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
 
 <!-- Masters modal -->
 <div class="modal-overlay hidden" id="masters-modal">
-  <div class="modal" id="masters-modal-box" style="max-width:560px">
+  <div class="modal master-modal" id="masters-modal-box">
     <div class="modal-header">
       <div class="modal-title"><i class="ti ti-settings" style="vertical-align:-2px;margin-right:6px"></i>Edit Masters</div>
-      <button class="btn-icon" onclick="closeMasters()"><i class="ti ti-x"></i></button>
+      <div class="master-header-actions">
+        <button class="btn-icon master-nav-toggle" id="master-nav-toggle" onclick="toggleMasterNav()" title="Menu" aria-label="Toggle master menu" aria-expanded="false" aria-controls="master-nav"><i class="ti ti-menu-2"></i></button>
+        <button class="btn-icon" onclick="closeMasters()" aria-label="Close"><i class="ti ti-x"></i></button>
+      </div>
     </div>
-    <div class="modal-body">
-      <div class="masters-tabs">
+    <div class="master-body" id="master-body">
+      <nav class="master-nav" id="master-nav" aria-label="Master sections">
         <button class="tab-btn" onclick="switchTab('user')"><i class="ti ti-user" style="font-size:13px"></i> User</button>
         <button class="tab-btn active" onclick="switchTab('lists')"><i class="ti ti-list" style="font-size:13px"></i> Lists</button>
         <button class="tab-btn" onclick="switchTab('columns')"><i class="ti ti-table" style="font-size:13px"></i> Columns</button>
-        <button class="tab-btn" onclick="switchTab('weekends')">Weekends</button>
-        <button class="tab-btn" onclick="switchTab('workhours')">Work Hours</button>
+        <button class="tab-btn" onclick="switchTab('weekends')"><i class="ti ti-calendar-off" style="font-size:13px"></i> Weekends</button>
+        <button class="tab-btn" onclick="switchTab('workhours')"><i class="ti ti-clock" style="font-size:13px"></i> Work Hours</button>
         <button class="tab-btn" onclick="switchTab('email')"><i class="ti ti-mail" style="font-size:13px"></i> Email</button>
         <button class="tab-btn" onclick="switchTab('data')"><i class="ti ti-database" style="font-size:13px"></i> Data</button>
         <button class="tab-btn" onclick="switchTab('sync')"><i class="ti ti-cloud" style="font-size:13px"></i> Synchronization</button>
-      </div>
-      <div id="masters-content"></div>
-      <div id="master-add-section" class="master-add-row">
-        <input class="master-add-input" id="master-add-input" placeholder="Add new item…" onkeydown="if(event.key==='Enter') addMasterItem()" />
-        <button class="btn btn-primary" onclick="addMasterItem()"><i class="ti ti-plus"></i> Add</button>
+      </nav>
+      <div class="master-nav-backdrop" id="master-nav-backdrop" onclick="closeMasterNav()"></div>
+      <div class="master-content-workspace">
+        <div id="masters-content"></div>
+        <div id="master-add-section" class="master-add-row">
+          <input class="master-add-input" id="master-add-input" placeholder="Add new item…" onkeydown="if(event.key==='Enter') addMasterItem()" />
+          <button class="btn btn-primary" onclick="addMasterItem()"><i class="ti ti-plus"></i> Add</button>
+        </div>
       </div>
     </div>
     <div class="modal-footer">
-      <button class="btn" onclick="closeMasters()">Done</button>
+      <button class="btn" onclick="closeMasters()">Cancel</button>
+      <button class="btn btn-primary" onclick="closeMasters()">Done</button>
     </div>
   </div>
 </div>
@@ -11092,32 +11223,72 @@ function clearLog() {
 }
 
 // ── Masters modal ─────────────────────────────────────────────────────────────
+// Phase 24: remembers whichever control opened the popup so focus can return
+// there on close (Part 18 — Accessibility: sensible focus in/out of the drawer).
+var _masterNavReturnFocusEl = null;
 function openMasters() {
+  _masterNavReturnFocusEl = document.activeElement;
   document.getElementById('masters-modal').classList.remove('hidden');
   // Default to user tab so name is easy to set; switch to projects tab otherwise
   const addSec = document.getElementById('master-add-section');
   if (addSec) addSec.style.display = (activeMastersTab === 'projects' || activeMastersTab === 'natures') ? '' : 'none';
+  closeMasterNav(); // never open the popup with the mobile drawer already expanded
   renderMastersContent();
 }
 function closeMasters() {
   document.getElementById('masters-modal').classList.add('hidden');
+  closeMasterNav();
   tasks.forEach(task => { if(task.status!=='done') renderRow(task.id); });
   // If left inside a custom-list sub-view, return to the Columns tab for next time
   if (activeMastersTab.startsWith('customlist:')) activeMastersTab = 'columns';
+  if (_masterNavReturnFocusEl && typeof _masterNavReturnFocusEl.focus === 'function') _masterNavReturnFocusEl.focus();
+  _masterNavReturnFocusEl = null;
+}
+// Phase 24: master navigation drawer (phone only — desktop/tablet keep the
+// nav permanently visible via CSS, these are no-ops there since #master-body
+// only responds to the .nav-open class inside the <=760px breakpoint).
+function toggleMasterNav() {
+  const body = document.getElementById('master-body');
+  if (!body) return;
+  if (body.classList.contains('nav-open')) closeMasterNav(); else openMasterNav();
+}
+function openMasterNav() {
+  const body = document.getElementById('master-body');
+  const toggle = document.getElementById('master-nav-toggle');
+  if (!body) return;
+  body.classList.add('nav-open');
+  if (toggle) toggle.setAttribute('aria-expanded', 'true');
+}
+function closeMasterNav() {
+  const body = document.getElementById('master-body');
+  const toggle = document.getElementById('master-nav-toggle');
+  if (!body) return;
+  body.classList.remove('nav-open');
+  if (toggle) toggle.setAttribute('aria-expanded', 'false');
 }
 function switchTab(tab) {
   activeMastersTab = tab;
   const TAB_ORDER = ['user','lists','columns','weekends','workhours','email','data','sync'];
-  document.querySelectorAll('.tab-btn').forEach((b,i) => {
+  document.querySelectorAll('.master-nav .tab-btn').forEach((b,i) => {
     b.classList.toggle('active', TAB_ORDER[i] === tab);
   });
   document.getElementById('master-add-input').value='';
   const addSec = document.getElementById('master-add-section');
   // The Lists tab and Columns tab now have their own dedicated, self-contained controls.
   if (addSec) addSec.style.display = 'none';
-  const box = document.getElementById('masters-modal-box');
-  if (box) box.style.maxWidth = (tab === 'columns' || tab === 'lists') ? '600px' : '560px';
+  // Phase 24: the popup's outer size is fixed by the viewport alone (Part 5/11 —
+  // "STABLE WORKSPACE, RESPONSIVE OUTER BOUNDARY"). It used to be resized per
+  // tab here (Columns/Lists got a wider box) — that's exactly the pattern the
+  // fixed-workspace redesign replaces; only .master-content-workspace scrolls now.
   renderMastersContent();
+  // Phone: selecting a section closes the drawer and returns focus to the
+  // content workspace so the person lands on what they picked (Part 10).
+  const body = document.getElementById('master-body');
+  if (body && body.classList.contains('nav-open')) {
+    closeMasterNav();
+    const workspace = document.querySelector('.master-content-workspace');
+    if (workspace) { workspace.setAttribute('tabindex', '-1'); workspace.focus(); }
+  }
 }
 // ── Columns tab: configure log table / task card columns ───────────────────
 function renderColumnsTabHTML() {
