@@ -4772,6 +4772,12 @@ const GoogleDriveWorkspace = (function () {
     if (_status !== 'ready') {
       return Promise.resolve({ ok: false, reason: 'workspace-not-ready' });
     }
+    // Phase 22F: account identity captured once, up front — used only to
+    // guard the stale-state-file recovery path's own extra round trip below
+    // (the update branch's .catch). The ordinary create/update paths are
+    // unchanged and still rely on the caller's own (Phase 22B) account-
+    // isolation checks wrapped around this whole call.
+    const pushAccountIdentity = getAuthenticatedAccountKey();
     getOrCreateStateSyncId();
     _pushStatus = 'pushing';
     const payload = buildStatePayload();
@@ -4832,6 +4838,73 @@ const GoogleDriveWorkspace = (function () {
         _lastPushedVersion = payload._syncMeta.version;
         saveStateSyncMeta();
         return { ok: true, mode: 'updated', fileId: confirmed.id, modifiedTime: confirmed.modifiedTime, version: payload._syncMeta.version };
+      }).catch(err => {
+        // Phase 22F (Stale/Missing State File 404 Recovery): the state.json
+        // this pass just discovered via findStateFile() above can become
+        // unavailable before this update lands — e.g. another device's own
+        // recreate, or a manual removal, in the gap between discovery and
+        // write. A 404 specifically HERE is neither an authentication
+        // failure nor a generic transient failure; it means only this
+        // device's state-file bookkeeping is stale, not that the workspace
+        // itself (Case A — root/Tasks folder 404) is invalid. Recovered with
+        // exactly ONE fresh discovery below — never a retry loop, never a
+        // second automatic synchronization.
+        if (!err || err.httpStatus !== 404) throw err;
+
+        // Invalidate ONLY this device's cached state-file bookkeeping — never
+        // tasks/logs/masters/configuration/theme/timer/attachments, and
+        // never the workspace/root/Tasks folder ids.
+        _stateFileId = null;
+        _stateFileRevision = null;
+
+        return findStateFile('sync: rediscover state.json after stale-file 404').then(rediscovered => {
+          // Account-isolation guard (Phase 22B posture, applied to this
+          // recovery's own extra round trip too): re-check right before this
+          // recovery's result is accepted, so a mid-recovery account switch
+          // can never let Account A's recovered state-file id be persisted
+          // or reported as Account B's.
+          if (pushAccountIdentity !== getAuthenticatedAccountKey()) {
+            return { ok: false, reason: 'account-changed' };
+          }
+
+          if (rediscovered) {
+            // The fresh lookup still finds A file — retrying update blindly
+            // would risk repeating the exact same race with no evidence
+            // anything has actually changed. Surface a specific, non-
+            // retrying failure instead; the user must tap Synchronize Now
+            // again to try once more.
+            return {
+              ok: false, reason: 'stale-state-file-unresolved', httpStatus: 404,
+              error: 'state.json was found twice in a row but could not be updated (file id changed between lookups).',
+              firstFileId: existing.id, secondFileId: rediscovered.id
+            };
+          }
+
+          // Legitimate missing-file condition (no state.json found on the
+          // fresh lookup) — same Upload File primitive and confirmation
+          // posture as the ordinary first-push branch above.
+          return uploadStateFile(contentString, 'sync: recreate state.json (stale-file recovery)').then(created => {
+            if (!created || !created.id || !created.modifiedTime) {
+              return { ok: false, reason: 'bootstrap-create-failed', error: 'Recreate upload could not be confirmed.' };
+            }
+            if (pushAccountIdentity !== getAuthenticatedAccountKey()) {
+              return { ok: false, reason: 'account-changed' };
+            }
+            _stateFileId       = created.id;
+            _stateFileRevision = created.modifiedTime;
+            _lastPushedVersion = payload._syncMeta.version;
+            _stateCreatedAt     = payload._syncMeta.createdAt;
+            saveStateSyncMeta();
+            return {
+              ok: true, mode: 'recovered', fileId: created.id, modifiedTime: created.modifiedTime,
+              version: payload._syncMeta.version, recoveredFromStaleStateFile: true
+            };
+          }).catch(createErr => ({
+            ok: false, reason: 'bootstrap-create-failed',
+            httpStatus: (createErr && createErr.httpStatus) || null,
+            error: (createErr && createErr.message) || String(createErr)
+          }));
+        });
       });
     })
     .then(result => { _pushStatus = result.ok ? 'idle' : 'error'; _lastPushResult = result; return result; })
