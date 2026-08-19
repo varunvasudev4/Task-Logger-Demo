@@ -5050,6 +5050,39 @@ const GoogleDriveWorkspace = (function () {
     };
   }
 
+  // ── Phase 22B PART 3/4 (Account Switch Fix): Google Drive Workspace Reset
+  // Clears every in-memory, account-scoped Drive workspace + state.json
+  // runtime field back to its startup default, so a newly authenticated
+  // account starts this module from a clean slate instead of momentarily
+  // showing (or, worse, briefly trusting) whatever the PREVIOUS account's
+  // session left in memory. In-memory only — never touches
+  // tasks/logs/masters/settings/timer data, and never deletes anything on
+  // Drive itself (PART 3/PART 4). The persisted localStorage hints
+  // (savePersisted()/saveStateSyncMeta()) are intentionally left alone:
+  // they're already scoped per accountEmail (Phase 21A/21B above), and
+  // restoreFromPersisted()/getOrCreateStateSyncId() already refuse to trust
+  // a hint that doesn't match the account now authenticated — so leaving
+  // Account A's own hint in localStorage is harmless and lets Account A
+  // resume instantly if they sign back in later.
+  function resetForAccountChange() {
+    _status = 'not_initialized';
+    _lastError = null;
+    _rootFolderId = null;
+    _subfolderIds = {};
+    _initPromise = null;
+
+    _stateFileId = null;
+    _stateAccountKey = null;
+    _stateFileRevision = null;
+    _stateSyncId = null;
+    _lastPushedVersion = 0;
+    _stateCreatedAt = null;
+    _pushStatus = 'idle';
+    _pullStatus = 'idle';
+    _lastPushResult = null;
+    _lastPullResult = null;
+  }
+
   return {
     initializeWorkspace,
     findRootFolder,
@@ -5058,6 +5091,7 @@ const GoogleDriveWorkspace = (function () {
     createFolder,
     validateWorkspace,
     getWorkspaceStatus,
+    resetForAccountChange,
     // Phase 7: Tasks/state.json core read/write (manual trigger only)
     findStateFile,
     pushStateToStateFile,
@@ -7350,6 +7384,23 @@ const ConflictResolver = (function () {
 // engine, and a diagnostics panel. A stalled/failed pass here is simply
 // reported as Failed (requirement 9) — nothing further is attempted
 // automatically until the next trigger fires.
+
+// ── Phase 22B (Account Switch + Manual Sync Isolation Fix) ──────────────────
+// Single authoritative "what account are we authenticated as right now"
+// reader, shared by every account-isolation check in this file (PART 2's
+// "one authoritative account identity boundary" requirement) — never a
+// second identity lookup invented per module. A plain top-level function
+// (not inside any one module's IIFE) so both BackgroundScheduler's
+// mid-transaction check (PART 12, below) and the top-level connect/
+// disconnect handlers (PART 2/PART 7/PART 18, near connectGoogleDrive())
+// can call the exact same thing. Never makes a network call itself — just
+// reads GoogleAuthManager's already-cached display identity.
+function getAuthenticatedAccountKey() {
+  if (typeof GoogleAuthManager === 'undefined' || !GoogleAuthManager.getCurrentUser) return null;
+  const user = GoogleAuthManager.getCurrentUser();
+  return (user && user.email) || null;
+}
+
 const BackgroundScheduler = (function () {
   // ── In-memory scheduler state only. Nothing here is durable on its own —
   // every fact this module reasons about (dirty tasks, queue contents, sync
@@ -7437,8 +7488,18 @@ const BackgroundScheduler = (function () {
   // state → confirm → persist file metadata" exactly as CASE A requires.
   // Nothing about that Find File / Upload File / Verification pipeline is
   // duplicated here.
-  function bootstrapFirstSyncState(trigger) {
+  function bootstrapFirstSyncState(trigger, syncAccountIdentity) {
     return GoogleDriveWorkspace.pushStateToStateFile().then(pushResult => {
+      // Phase 22B PART 12: verify the authenticated account hasn't changed
+      // since this manual Sync transaction started, before committing this
+      // bootstrap push's result. If it has, abort safely rather than write
+      // Account A's just-uploaded state as if it were Account B's outcome.
+      if (syncAccountIdentity !== getAuthenticatedAccountKey()) {
+        _running = false;
+        _status = 'idle';
+        _lastResult = { ok: false, reason: 'account-changed', trigger };
+        return _lastResult;
+      }
       if (!pushResult || !pushResult.ok) {
         _running = false;
         _status = 'failed';
@@ -7496,6 +7557,15 @@ const BackgroundScheduler = (function () {
     _status = 'synchronizing';
     _lastTrigger = trigger;
 
+    // Phase 22B PART 12 (Account Identity Snapshot): capture which account
+    // this transaction is running for, right now, before any async Drive
+    // work begins. Every commit point below re-checks this before writing a
+    // result or persisting anything, so a mid-transaction account switch
+    // (disconnect Account A / connect Account B while a pass is in flight)
+    // can never let Account A's in-flight work be reported or persisted as
+    // if it belonged to Account B.
+    const syncAccountIdentity = getAuthenticatedAccountKey();
+
     if (typeof LocalSyncManager === 'undefined') {
       _running = false;
       _status = 'failed';
@@ -7512,6 +7582,15 @@ const BackgroundScheduler = (function () {
         _lastResult = { ok: false, reason: 'cancelled', trigger };
         return _lastResult;
       }
+      // Phase 22B PART 12: account changed while buildSyncPlan() was
+      // in flight — abort before acting on a plan that was resolved against
+      // whichever account was current when it started.
+      if (syncAccountIdentity !== getAuthenticatedAccountKey()) {
+        _running = false;
+        _status = 'idle';
+        _lastResult = { ok: false, reason: 'account-changed', trigger };
+        return _lastResult;
+      }
       if (!planResult || !planResult.ok) {
         // Phase 21A: 'no-remote-file' is CASE A — a valid first-sync
         // bootstrap condition, not a failure. Route to the bootstrap helper
@@ -7521,7 +7600,7 @@ const BackgroundScheduler = (function () {
         // still reported exactly as before — CASE C/D (a corrupt or
         // conflicting existing state.json) are never treated as "missing."
         if (planResult && planResult.reason === 'no-remote-file' && typeof GoogleDriveWorkspace !== 'undefined') {
-          return bootstrapFirstSyncState(trigger);
+          return bootstrapFirstSyncState(trigger, syncAccountIdentity);
         }
         // Planning itself failed — every reason (not-authenticated /
         // corrupt-json / checksum-mismatch / workspace-not-ready / error) is
@@ -7559,6 +7638,16 @@ const BackgroundScheduler = (function () {
       const needsDownload = (stats.downloadsRequired > 0) || (stats.createLocal > 0);
 
       if (!needsUpload && !needsDownload) {
+        // Phase 22B PART 12: re-check before this early no-op commit too —
+        // the domain merge just above is local-only/synchronous, but the
+        // account could still have changed between transaction start and
+        // this point via a disconnect triggered from elsewhere.
+        if (syncAccountIdentity !== getAuthenticatedAccountKey()) {
+          _running = false;
+          _status = 'idle';
+          _lastResult = { ok: false, reason: 'account-changed', trigger };
+          return _lastResult;
+        }
         // Nothing for the existing pipelines to do — the cheapest possible
         // wake-up: a plan was built, but neither upload nor download is
         // invoked (BACKGROUND_SYNC.md §10 CPU usage). The domain merge above
@@ -7585,6 +7674,16 @@ const BackgroundScheduler = (function () {
           _lastResult = { ok: false, reason: 'cancelled', trigger, uploaded: uploadResult };
           return _lastResult;
         }
+        // Phase 22B PART 12: the upload step just talked to Drive under
+        // syncAccountIdentity — verify that's still the authenticated account
+        // before starting the download/merge step (and before committing
+        // uploadResult as this transaction's outcome).
+        if (syncAccountIdentity !== getAuthenticatedAccountKey()) {
+          _running = false;
+          _status = 'idle';
+          _lastResult = { ok: false, reason: 'account-changed', trigger, uploaded: uploadResult };
+          return _lastResult;
+        }
         // Phase 21D (PART 3/9): buildSyncPlan() above already downloaded and
         // checksum-validated Tasks/state.json once for this Sync transaction
         // (planResult.remoteState/fileId/modifiedTime) — hand that same
@@ -7598,6 +7697,14 @@ const BackgroundScheduler = (function () {
 
         return downloadStep.then(mergeResult => {
           _running = false;
+          // Phase 22B PART 12: final commit point of this transaction —
+          // one last check before writing/persisting anything under the
+          // current account's identity.
+          if (syncAccountIdentity !== getAuthenticatedAccountKey()) {
+            _status = 'idle';
+            _lastResult = { ok: false, reason: 'account-changed', trigger, uploaded: uploadResult, merged: mergeResult };
+            return _lastResult;
+          }
           const uploadOk = !uploadResult || uploadResult.ok !== false;
           const mergeOk = !mergeResult || mergeResult.ok !== false;
           _lastSyncAt = new Date().toISOString();
@@ -7736,6 +7843,23 @@ const BackgroundScheduler = (function () {
     return _running;
   }
 
+  // ── Phase 22B PART 18 (Account Switch Fix): Synchronization UI State Reset
+  // A newly authenticated account must show "Not Synced", never whatever
+  // status/result/timestamp the PREVIOUS account's last pass left behind —
+  // this is purely in-memory scheduler state (see the module header above),
+  // so nothing here touches tasks/logs/masters/settings/timer data. If a
+  // pass happens to be in flight when the account changes, best-effort
+  // request its cancellation (mirrors cancelSynchronization() above) — the
+  // authoritative protection against it writing under the wrong account is
+  // runSynchronizationPass()'s own per-transaction identity check (PART 12).
+  function resetForAccountChange() {
+    if (_running) _cancelRequested = true;
+    _status = 'idle';
+    _lastResult = null;
+    _lastSyncAt = null;
+    _lastTrigger = null;
+  }
+
   // getSchedulerStatus(): read-only status (requirement 8), matching every
   // other sync module's status getter in this file. Always a fresh object.
   function getSchedulerStatus() {
@@ -7829,6 +7953,7 @@ const BackgroundScheduler = (function () {
     cancelSynchronization,
     isSynchronizationRunning,
     getSchedulerStatus,
+    resetForAccountChange,
     // Phase 18: exposed so SmartSyncTriggers can reuse the exact same
     // "re-render sync tab + reconcile running task" glue every other
     // automatic trigger already used, instead of duplicating it.
@@ -8054,10 +8179,32 @@ const RetryEngine = (function () {
     };
   }
 
+  // ── Phase 22B PART 5/7 (Account Switch Fix): Retry State Cleanup ─────────
+  // The retry record above (QUEUE_NAME/RECORD_ID) is a single, whole-app
+  // coalesced record with no per-account scoping at all (see this module's
+  // own header comment, requirement 6: "one coalesced record... for the
+  // whole app"). Redesigning it into a per-account-keyed record is out of
+  // scope for this targeted fix (PART 24 "smallest safe change"); instead,
+  // the safe fix is to clear it outright whenever the authenticated account
+  // identity changes, so a stale "attempt 4, retrying in ~40s" left behind
+  // by the PREVIOUS account can never be shown/consulted for a newly
+  // connected one. Also clears any armed backoff timer for the same reason
+  // (mirrors what recordSyncSuccess() already leaves for a completed retry).
+  function resetForAccountChange() {
+    if (getRecord()) removeQueueEntry(RECORD_ID, QUEUE_NAME);
+    // AutoSyncEngine.scheduleRetryBackoff() (below) is already a no-op
+    // beyond clearing its own debounce timer (Phase 21: no automatic
+    // follow-up transaction), but clear it explicitly too via the existing
+    // cancelAutoSync() so no stale timer is left armed across the switch.
+    if (typeof AutoSyncEngine !== 'undefined' && AutoSyncEngine.cancelAutoSync) {
+      AutoSyncEngine.cancelAutoSync();
+    }
+  }
+
   return {
     recordSyncFailure, recordSyncSuccess,
     isBackoffActive, isRecoveryRequired, resumePendingBackoff,
-    getRetryStatus,
+    getRetryStatus, resetForAccountChange,
     _classify: classify // exposed for the test matrix only
   };
 })();
@@ -12711,6 +12858,52 @@ function renderMastersContent() {
 // ensureAuthenticatedForManualSync(), PART 9) can continue that SAME
 // transaction once login settles — this function never starts a sync
 // itself.
+// ── Phase 22B PART 2 (Account Switch Fix): Account Identity Boundary ───────
+// The one authoritative place that notices the authenticated Google account
+// identity has actually changed (a different account signed in, or signed
+// out entirely) and, when it has, resets every account-scoped
+// synchronization RUNTIME module in one place (PART 2's "OLD ACCOUNT →
+// ACCOUNT CHANGE → RESET ACCOUNT-SCOPED SYNC RUNTIME → NEW ACCOUNT"
+// diagram). Deliberately narrow: only the three modules that hold
+// account-scoped in-memory sync state get reset here — never task/log/
+// master/timer data, never anything routed through enqueueTask()/saveState().
+// `undefined` (as opposed to `null`) means "not yet observed this page
+// load" so the very first observation (right after silent restore, or the
+// very first interactive connect) only seeds the baseline instead of
+// treating "nothing → something" as a change to reset for — there is
+// nothing stale in these modules to clear on a fresh page load.
+let _lastKnownSyncAccountKey;
+
+function resetSyncRuntimeForAccountChange() {
+  if (typeof GoogleDriveWorkspace !== 'undefined' && GoogleDriveWorkspace.resetForAccountChange) {
+    GoogleDriveWorkspace.resetForAccountChange();
+  }
+  if (typeof RetryEngine !== 'undefined' && RetryEngine.resetForAccountChange) {
+    RetryEngine.resetForAccountChange();
+  }
+  if (typeof BackgroundScheduler !== 'undefined' && BackgroundScheduler.resetForAccountChange) {
+    BackgroundScheduler.resetForAccountChange();
+  }
+}
+
+// checkAccountIdentityBoundary(): called after every event that can change
+// (or first establish) the authenticated account identity — silent restore
+// on page load, a successful interactive connect, and disconnect. Reads the
+// same getAuthenticatedAccountKey() BackgroundScheduler's own PART 12
+// mid-transaction check uses, so "what account are we on" is answered
+// exactly one way everywhere in this file.
+function checkAccountIdentityBoundary() {
+  const currentKey = getAuthenticatedAccountKey();
+  if (_lastKnownSyncAccountKey === undefined) {
+    _lastKnownSyncAccountKey = currentKey; // first observation — seed only
+    return;
+  }
+  if (currentKey !== _lastKnownSyncAccountKey) {
+    resetSyncRuntimeForAccountChange();
+    _lastKnownSyncAccountKey = currentKey;
+  }
+}
+
 function connectGoogleDrive() {
   const p = GoogleAuthManager.authenticate();
   // authenticate() flips state to 'connecting' synchronously before any
@@ -12718,6 +12911,14 @@ function connectGoogleDrive() {
   if (activeMastersTab === 'sync') renderMastersContent();
   refreshTopSyncIndicator();
   return p.then(() => {
+      // PART 2/PART 8/PART 18: check the account boundary BEFORE any
+      // re-render, so if this login is actually a different Google account
+      // than whatever this page session last observed, every account-scoped
+      // sync module (workspace, retry, scheduler status) is already reset
+      // to a clean "Not Synced" state by the time the Synchronization tab
+      // paints. Still makes zero Drive calls itself — resetForAccountChange()
+      // on each module is in-memory bookkeeping only.
+      checkAccountIdentityBoundary();
       if (activeMastersTab === 'sync') renderMastersContent();
       refreshTopSyncIndicator();
       // Diagnostics only (see handleAuthenticationReady()'s own header) —
@@ -12734,6 +12935,11 @@ function connectGoogleDrive() {
 
 function disconnectGoogleDrive() {
   GoogleAuthManager.disconnect().then(() => {
+    // PART 2/PART 18: disconnecting is itself an account-identity change
+    // (authenticated account → none) — reset the same account-scoped sync
+    // runtime here too, so a subsequent Connect (as any account) starts
+    // clean rather than relying solely on the next connect's own check.
+    checkAccountIdentityBoundary();
     if (activeMastersTab === 'sync') renderMastersContent();
     refreshTopSyncIndicator();
   });
@@ -15578,6 +15784,14 @@ function initializeSyncInfrastructure() {
   // Scenario A/B).
   GoogleAuthManager.attemptSilentReconnectOnLoad().then(authStatus => {
     const authRestored = !!(authStatus && authStatus.authenticated);
+    // Phase 22B PART 2/PART 10: seed the account-identity baseline for this
+    // page load. This is the FIRST observation, so checkAccountIdentityBoundary()
+    // only records the restored (or absent) account — it does not reset
+    // anything, since there is nothing stale to clear on a fresh load. This
+    // is what lets a LATER disconnect/connect within this same page session
+    // be correctly recognized as a real account change (see checkAccountIdentityBoundary()'s
+    // own header comment). Never makes a Drive call itself.
+    checkAccountIdentityBoundary();
     // Phase 13: start the scheduler (Scheduled Interval fallback only, as
     // of Phase 18 — see BackgroundScheduler.initializeScheduler() above).
     // BackgroundScheduler's own gating (requirement 6) already handles a
