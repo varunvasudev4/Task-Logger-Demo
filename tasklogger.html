@@ -7448,16 +7448,14 @@ const BackgroundScheduler = (function () {
     if (!isNetworkAvailable())  return 'network-unavailable';
     if (!isAuthenticatedNow())  return 'not-authenticated';
     if (!isWorkspaceReadyNow()) return 'workspace-unavailable';
-    // Phase 20: hold automatic triggers (interval/focus/visibility/online/
-    // debounced-edit) off while a bounded backoff is counting down, or while
-    // a permanent/maxed-out failure needs manual attention — requirement 5
-    // ("avoid busy loops") and requirement 18 ("do not retry forever").
-    // Manual sync (startSynchronization('manual')) does not consult
-    // gatingBlockReason() at all (see scheduleSync() below), so "Synchronize
-    // Now" always remains available to retry immediately, per requirement 19.
-    if (typeof RetryEngine !== 'undefined') {
-      if (RetryEngine.isRecoveryRequired()) return 'recovery-required';
-      if (RetryEngine.isBackoffActive())    return 'retry-backoff';
+    // Phase 22D: no backoff exists to gate on any more (there is no
+    // automatic retry at all) — this only flags a permanent/maxed-out
+    // failure that needs manual attention. Manual sync
+    // (startSynchronization('manual')) never consults gatingBlockReason() at
+    // all (see scheduleSync() above), so "Synchronize Now" always remains
+    // available immediately, regardless of this value.
+    if (typeof RetryEngine !== 'undefined' && RetryEngine.isRecoveryRequired()) {
+      return 'recovery-required';
     }
     return null;
   }
@@ -7979,37 +7977,47 @@ const BackgroundScheduler = (function () {
 // FAILED below are all read from BackgroundScheduler's own status; the only
 // state genuinely new here is whether a debounce window is counting down.
 // ─────────────────────────────────────────────────────────────────────────
-// RetryEngine (Phase 20 — Synchronization Retry, Offline Recovery &
-// Resilience)
+// RetryEngine (Phase 20, corrected in Phase 22D — Manual Sync Final Fix)
 //
 // Fills the `RetryEngine: null` slot reserved in LocalSyncManager.Extensions
-// and IncrementalSyncEngine.Extensions since Phase 19E/19F. This is NOT a
-// second sync engine, scheduler, queue, or timer — per requirement 1, it
-// wraps the existing pipeline:
+// and IncrementalSyncEngine.Extensions since Phase 19E/19F. This is a pure
+// FAILURE RECORD-KEEPER, not a retry mechanism: it has no timer of its own,
+// schedules nothing, and never starts a synchronization pass by itself.
 //   - It reuses the existing `retry` entry in `syncQueues` (reserved,
 //     unused, since Phase 3's QUEUE_NAMES list) instead of adding a new
 //     persistence mechanism, via the existing upsertQueueEntry()/
 //     findQueueEntry()/removeQueueEntry() helpers.
-//   - It reuses AutoSyncEngine's existing debounce timer (extended below to
-//     accept a variable delay) instead of adding a second timer.
-//   - It reuses BackgroundScheduler.gatingBlockReason() (extended below)
-//     to hold off automatic triggers during backoff, instead of adding a
-//     second gate.
+//   - It reuses BackgroundScheduler.gatingBlockReason() only to surface a
+//     'recovery-required' hint after enough consecutive manual failures —
+//     that hint never blocks or defers Synchronize Now itself (Sync always
+//     bypasses gatingBlockReason(); see scheduleSync() above).
 //   - It reuses GoogleAuthManager.refreshAuthentication() (Phase 16A) for
 //     the one authentication-failure recovery attempt, instead of adding a
 //     second authentication flow.
 //
+// Phase 22D removed the module's former backoff timer entirely
+// (BASE_DELAY_MS/MAX_DELAY_MS/computeDelay(), the 'retrying' status,
+// nextRetryAt, isBackoffActive(), and resumePendingBackoff()) along with the
+// "retry scheduled... attempt N, retrying in ~Xs" UI text that depended on
+// it. A failure is now always terminal: the only thing that starts another
+// synchronization pass is the user clicking "Synchronize Now" again.
+//
 // One coalesced record represents "the current sync failure state" for the
 // whole app (requirement 6 — this app already does one whole-document
-// push/pull per pass, so there is naturally only ever one retryable failure
-// state at a time, never one per task).
+// push/pull per pass, so there is naturally only ever one such record at a
+// time, never one per task).
 const RetryEngine = (function () {
   const QUEUE_NAME = 'retry';
   const RECORD_ID = 'sync-pass'; // the one coalesced record (requirement 6)
 
-  const BASE_DELAY_MS = 5000;         // 5s
-  const MAX_DELAY_MS = 5 * 60 * 1000; // 5 minutes — bounded (requirement 5)
-  const MAX_ATTEMPTS = 8;             // ~5s..5min backoff, then RECOVERY_REQUIRED
+  // Phase 22D (Manual Sync Final Fix): there is no automatic retry, so there
+  // is no backoff delay to compute — BASE_DELAY_MS/MAX_DELAY_MS/computeDelay()
+  // have been removed entirely. MAX_ATTEMPTS is kept only as a diagnostic
+  // threshold: after this many *manual* Sync failures in a row with the same
+  // transient-error shape, the record is marked 'recovery_required' so the
+  // UI can say so — it never triggers, schedules, or waits for anything by
+  // itself.
+  const MAX_ATTEMPTS = 8;
 
   function getRecord() {
     return findQueueEntry(RECORD_ID, QUEUE_NAME);
@@ -8058,12 +8066,11 @@ const RetryEngine = (function () {
     return 'transient';
   }
 
-  function computeDelay(attempt) {
-    const delay = BASE_DELAY_MS * Math.pow(2, Math.max(0, attempt - 1));
-    return Math.min(delay, MAX_DELAY_MS);
-  }
-
   // Called once per finished pass, from BackgroundScheduler.runSynchronizationPass().
+  // Phase 22D: this is a pure record-keeping call now — it NEVER schedules,
+  // arms, or resumes anything. A failure is terminal the moment it happens;
+  // the only way another synchronization pass starts is the user clicking
+  // "Synchronize Now" again.
   function recordSyncFailure(result) {
     const category = classify(result);
     if (category === 'ignore') return null;
@@ -8073,18 +8080,16 @@ const RetryEngine = (function () {
     const attempts = (existing ? existing.attempts : 0) + 1;
 
     let status;
-    let nextRetryAt = null;
     if (category === 'permanent') {
-      status = 'recovery_required'; // requirement: do not endlessly retry permanent failures
+      status = 'recovery_required'; // a permanent failure needs the user's attention, not another click yet
     } else if (category === 'auth') {
-      status = 'auth_required'; // requirement 16: no blind repeated retry loop of our own —
+      status = 'auth_required'; // no blind repeated retry loop of our own —
                                  // rely on the one refreshAuthentication() attempt below plus
                                  // the existing 'not-authenticated' gating + auth-restored trigger
     } else if (attempts >= MAX_ATTEMPTS) {
-      status = 'recovery_required'; // requirement 18: bounded retry count
+      status = 'recovery_required'; // this many manual attempts have failed the same way — flag it
     } else {
-      status = 'retrying';
-      nextRetryAt = now + computeDelay(attempts);
+      status = 'failed'; // plain failure — tap Synchronize Now to try again; nothing automatic follows
     }
 
     const entry = upsertQueueEntry(QUEUE_NAME, RECORD_ID, {
@@ -8092,15 +8097,11 @@ const RetryEngine = (function () {
       attempts: attempts,
       firstFailureAt: existing ? existing.firstFailureAt : now,
       lastFailureAt: now,
-      nextRetryAt: nextRetryAt,
       lastErrorCategory: category,
       lastErrorMessage: (result && (result.error || result.reason)) || 'unknown',
       status: status
     });
 
-    if (status === 'retrying' && typeof AutoSyncEngine !== 'undefined' && AutoSyncEngine.scheduleRetryBackoff) {
-      AutoSyncEngine.scheduleRetryBackoff(nextRetryAt - now);
-    }
     if (category === 'auth' && typeof GoogleAuthManager !== 'undefined' && typeof GoogleAuthManager.refreshAuthentication === 'function') {
       // Existing silent-refresh path (Phase 16A) — never opens an interactive
       // login prompt itself; falls back to its own existing
@@ -8115,8 +8116,8 @@ const RetryEngine = (function () {
       // automatically (that would be exactly the "authentication success
       // starts Sync" coupling this phase removes — PART 2/PART 8). The
       // deferred work is preserved either way (nothing here clears queues
-      // or dirty domains); it resumes the next time the user clicks Sync,
-      // or the next time AutoSyncEngine debounces a genuine local edit.
+      // or dirty domains); it resumes only the next time the user clicks
+      // Synchronize Now — there is no automatic follow-up of any kind.
       // `wasAlreadyAuthRequired` avoids repeatedly hammering Google with a
       // silent refresh call for the same broken-credential streak once it's
       // already known to need attention — a later attempt (a fresh failure,
@@ -8135,33 +8136,16 @@ const RetryEngine = (function () {
     return entry;
   }
 
-  // Called once per finished pass that succeeded — clears any retry/backoff
-  // state so gatingBlockReason() stops reporting it and the UI status hint
-  // goes away, exactly like a completed manual retry should.
+  // Called once per finished pass that succeeded — clears any prior failure
+  // record so gatingBlockReason() stops reporting it and the UI status hint
+  // goes away, exactly like a fresh successful Sync should.
   function recordSyncSuccess() {
     if (getRecord()) removeQueueEntry(RECORD_ID, QUEUE_NAME);
-  }
-
-  function isBackoffActive() {
-    const e = getRecord();
-    return !!(e && e.status === 'retrying' && e.nextRetryAt && Date.now() < e.nextRetryAt);
   }
 
   function isRecoveryRequired() {
     const e = getRecord();
     return !!(e && e.status === 'recovery_required');
-  }
-
-  // Used at startup/resume (LocalSyncManager.initialize()) to re-arm the
-  // backoff timer after a reload/iOS-suspend killed the in-memory
-  // setTimeout, using the durable nextRetryAt persisted in the queue —
-  // see requirement 11 (iOS/iPadOS lifecycle).
-  function resumePendingBackoff() {
-    const e = getRecord();
-    if (!e || e.status !== 'retrying' || !e.nextRetryAt) return;
-    const remaining = e.nextRetryAt - Date.now();
-    if (typeof AutoSyncEngine === 'undefined' || !AutoSyncEngine.scheduleRetryBackoff) return;
-    AutoSyncEngine.scheduleRetryBackoff(Math.max(0, remaining));
   }
 
   function getRetryStatus() {
@@ -8174,8 +8158,7 @@ const RetryEngine = (function () {
       lastErrorCategory: e.lastErrorCategory,
       lastErrorMessage: e.lastErrorMessage,
       firstFailureAt: e.firstFailureAt,
-      lastFailureAt: e.lastFailureAt,
-      nextRetryAt: e.nextRetryAt
+      lastFailureAt: e.lastFailureAt
     };
   }
 
@@ -8186,16 +8169,17 @@ const RetryEngine = (function () {
   // whole app"). Redesigning it into a per-account-keyed record is out of
   // scope for this targeted fix (PART 24 "smallest safe change"); instead,
   // the safe fix is to clear it outright whenever the authenticated account
-  // identity changes, so a stale "attempt 4, retrying in ~40s" left behind
-  // by the PREVIOUS account can never be shown/consulted for a newly
-  // connected one. Also clears any armed backoff timer for the same reason
-  // (mirrors what recordSyncSuccess() already leaves for a completed retry).
+  // identity changes, so a stale failure record left behind by the
+  // PREVIOUS account (e.g. "3 attempts failed") can never be shown or
+  // consulted for a newly connected one. Also clears any pending debounce
+  // timer for the same reason (mirrors what recordSyncSuccess() already
+  // leaves for a completed failure record).
   function resetForAccountChange() {
     if (getRecord()) removeQueueEntry(RECORD_ID, QUEUE_NAME);
-    // AutoSyncEngine.scheduleRetryBackoff() (below) is already a no-op
-    // beyond clearing its own debounce timer (Phase 21: no automatic
-    // follow-up transaction), but clear it explicitly too via the existing
-    // cancelAutoSync() so no stale timer is left armed across the switch.
+    // AutoSyncEngine has no timer of its own tied to synchronization retry
+    // (Phase 21/22D: no automatic follow-up transaction exists at all), but
+    // clear its debounce timer explicitly too via the existing
+    // cancelAutoSync() so nothing is left armed across the account switch.
     if (typeof AutoSyncEngine !== 'undefined' && AutoSyncEngine.cancelAutoSync) {
       AutoSyncEngine.cancelAutoSync();
     }
@@ -8203,7 +8187,7 @@ const RetryEngine = (function () {
 
   return {
     recordSyncFailure, recordSyncSuccess,
-    isBackoffActive, isRecoveryRequired, resumePendingBackoff,
+    isRecoveryRequired,
     getRetryStatus, resetForAccountChange,
     _classify: classify // exposed for the test matrix only
   };
@@ -8310,19 +8294,12 @@ const AutoSyncEngine = (function () {
     clearDebounceTimer();
   }
 
-  // scheduleRetryBackoff(delayMs): Phase 20 — arms the exact same debounce
-  // timer/clear machinery above with a caller-supplied (backoff) delay
-  // instead of the fixed DEBOUNCE_MS, so RetryEngine's bounded exponential
-  // backoff (requirement 5) reuses this one timer rather than introducing a
-  // second one (requirement 1). onDebounceElapsed() re-checks
-  // hasPendingSyncWork() exactly as it does for a normal debounce, so a
-  // backoff retry that finds nothing left to do is still a safe no-op.
-  function scheduleRetryBackoff(delayMs) {
-    // Phase 21: no automatic follow-up transaction is created on failure —
-    // see the Retry Rule. A failed manual Sync just leaves pending state in
-    // place; the user clicking Sync again is what starts a new transaction.
-    clearDebounceTimer();
-  }
+  // Phase 22D: scheduleRetryBackoff() has been removed. RetryEngine no
+  // longer schedules a backoff of any kind (see RetryEngine's header
+  // comment above) — a failed Sync just leaves its failure record in place;
+  // the user clicking Synchronize Now again is what starts a new
+  // transaction. Nothing in this file calls a retry-backoff scheduler any
+  // more.
 
   // scheduleAutoSync(): same debounce path as handleLocalChangeForSync(),
   // exposed under its own name (per this phase's helper-function list) for
@@ -8400,7 +8377,6 @@ const AutoSyncEngine = (function () {
     else if (debouncing) status = 'DEBOUNCING';
     else if (schedulerStatus.blockReason === 'network-unavailable') status = 'PAUSED_OFFLINE';
     else if (schedulerStatus.blockReason === 'not-authenticated' || schedulerStatus.blockReason === 'workspace-unavailable') status = 'PAUSED_AUTH';
-    else if (schedulerStatus.blockReason === 'retry-backoff') status = 'PAUSED_RETRY';
     else if (schedulerStatus.blockReason === 'recovery-required') status = 'RECOVERY_REQUIRED';
     else if (schedulerStatus.blockReason === 'sync-disabled') status = 'PAUSED';
     else if (hasPendingSyncWork()) status = 'WAITING';
@@ -8426,8 +8402,7 @@ const AutoSyncEngine = (function () {
     requestAutoSync,
     shouldAutoSync,
     onSyncPassSettled,
-    getAutoSyncStatus,
-    scheduleRetryBackoff
+    getAutoSyncStatus
   };
 })();
 // ── End Automatic Sync After Local Changes (Phase 17) ─────────────────────────────
@@ -12510,20 +12485,16 @@ function renderMastersContent() {
       'network-unavailable': 'Waiting for network connection.',
       'not-authenticated': 'Not signed in to Google Drive.',
       'workspace-unavailable': 'Waiting for Drive workspace to be ready.',
-      'retry-backoff': 'Sync failed — retry scheduled.',
-      'recovery-required': 'Sync recovery required — tap "Synchronize Now" to retry.'
+      'recovery-required': 'Sync failed — tap "Synchronize Now" to retry.'
     };
-    // Phase 20: minimal retry status detail (requirement 19 — "Provide
-    // minimal status information", explicitly NOT a diagnostics dashboard).
-    // Appends attempt count / next-retry time onto the existing block-reason
-    // hint below rather than adding a second status area.
+    // Phase 22D: minimal failure-record detail — explicitly NOT a
+    // diagnostics dashboard, and NEVER implies an automatic retry is
+    // coming (there is none). Only adds a plain attempt count for the
+    // 'recovery-required' case; a single ordinary failure needs no extra
+    // hint beyond the main "✗ Failed: <error>" line below.
     const retryStatus = (typeof RetryEngine !== 'undefined') ? RetryEngine.getRetryStatus() : { active: false };
     function describeRetryStatus() {
       if (!retryStatus.active) return '';
-      if (retryStatus.status === 'retrying' && retryStatus.nextRetryAt) {
-        const secs = Math.max(0, Math.round((retryStatus.nextRetryAt - Date.now()) / 1000));
-        return ' (attempt ' + retryStatus.attempts + ', retrying in ~' + secs + 's)';
-      }
       if (retryStatus.status === 'recovery_required') {
         return ' (' + retryStatus.attempts + ' attempts failed — ' + (retryStatus.lastErrorCategory || 'error') + ')';
       }
@@ -15723,19 +15694,16 @@ function initializeSyncInfrastructure() {
   // register the Retry Engine into the two slots reserved for it since
   // Phase 4/12 (LOCAL_SYNC_ENGINE.md §6), the same registration pattern
   // Phase 5's AuthManager and Phase 13's BackgroundScheduler established
-  // above. Also: if a bounded backoff was still counting down when this
-  // session ended (page reload, browser close, iOS suspending the tab), its
-  // in-memory setTimeout did not survive — resumePendingBackoff() re-arms it
-  // from the durable nextRetryAt already persisted in the `retry` queue
-  // entry (requirement 11/12/13), instead of leaving it to be picked up
-  // only incidentally by the next unrelated trigger or the 5-minute
-  // interval fallback.
+  // above. Phase 22D: RetryEngine has no timer to resume on startup —
+  // resumePendingBackoff() has been removed. A failure record left over
+  // from a prior session (page reload, browser close, iOS suspending the
+  // tab) simply stays as-is, causes zero Drive calls, and is only acted on
+  // the next time the user clicks Synchronize Now.
   window.TTLSync.Modules.RetryEngine = RetryEngine;
   LocalSyncManager.Extensions.RetryEngine = RetryEngine;
   if (typeof IncrementalSyncEngine !== 'undefined') {
     IncrementalSyncEngine.Extensions.RetryEngine = RetryEngine;
   }
-  RetryEngine.resumePendingBackoff();
 
   // Phase 18: register the Smart Sync Triggers module. Registration only —
   // its listeners aren't attached until registerSmartSyncTriggers() is
