@@ -7401,6 +7401,113 @@ function getAuthenticatedAccountKey() {
   return (user && user.email) || null;
 }
 
+// ── Phase 22E (Synchronization Root-Cause Diagnostics) ──────────────────────
+// Read-only diagnostic capture ONLY — no redesign of synchronization, no
+// retry, no automatic synchronization, no authentication/workspace change
+// (per this phase's own brief). Every field below already exists somewhere
+// in a finished pass's result tree — plan/uploaded/merged/bootstrap
+// sub-results already carry reason/error/httpStatus/authFailure/
+// permissionDenied (Phase 20/21). This only (1) identifies which STAGE
+// actually produced the failure and (2) promotes that exact stage's detail
+// onto one place, `result.diagnostic` (see finalizeRetryState() below),
+// instead of leaving it reachable only through RetryEngine's own
+// transient/permanent/auth classify() bucket. classify() itself is
+// untouched — errorCategory is attached to the diagnostic separately below,
+// never replacing stage/reason/message.
+function stageForPlanReason(reason) {
+  if (reason === 'corrupt-json' || reason === 'invalid-shape' || reason === 'checksum-mismatch') return 'STATE VALIDATION';
+  if (reason === 'no-remote-file') return 'STATE DISCOVERY';
+  if (reason === 'not-authenticated' || reason === 'workspace-not-ready' || reason === 'merge-unavailable') return 'PRE-FLIGHT';
+  return 'STATE DISCOVERY';
+}
+function driveFailureFields(sub, fallbackReason) {
+  return {
+    reason: (sub && sub.reason) || fallbackReason,
+    message: (sub && sub.error) || null,
+    httpStatus: (sub && sub.httpStatus) || null,
+    authFailure: !!(sub && sub.authFailure),
+    permissionDenied: !!(sub && sub.permissionDenied)
+  };
+}
+// locateSyncFailureStage(): identifies the ONE stage that actually failed
+// for a finished pass result, and that stage's own exact reason/message/
+// httpStatus — never a re-derived or generic one. Read-only; never mutates
+// `result`.
+function locateSyncFailureStage(result) {
+  if (!result || result.ok !== false) return null;
+
+  // Bootstrap (first-sync) push failure (Phase 21A) — the most specific
+  // stage available whenever present.
+  if (result.bootstrap) {
+    return Object.assign({ stage: 'BOOTSTRAP', stateFilePresent: false }, driveFailureFields(result.bootstrap, 'bootstrap-failed'));
+  }
+
+  // Planning failed outright — runSynchronizationPass() Object.assign()s
+  // IncrementalSyncEngine.buildSyncPlan()'s OWN fields directly onto the
+  // top-level result in this branch, so `.plan` here is still that engine's
+  // plain per-task array (possibly empty) — never the wrapping planResult
+  // object a LATER stage's result nests it as (see the check below).
+  if (Array.isArray(result.plan)) {
+    const stage = stageForPlanReason(result.reason);
+    return Object.assign(
+      { stage: stage, stateFilePresent: stage === 'STATE DISCOVERY' ? false : (stage === 'STATE VALIDATION' ? true : null) },
+      driveFailureFields(result, result.reason || 'unknown-error')
+    );
+  }
+
+  // Upload step failed (planning succeeded; `.plan` here is the full
+  // planResult object, not the bare array checked above).
+  if (result.uploaded && result.uploaded.ok === false) {
+    if (result.uploaded.reason) {
+      return Object.assign({ stage: 'UPLOAD', stateFilePresent: true }, driveFailureFields(result.uploaded, 'upload-failed'));
+    }
+    // Shared push itself succeeded but one or more queued task entries
+    // failed individually — surface the count instead of inventing detail
+    // that was never produced upstream.
+    return {
+      stage: 'UPLOAD', stateFilePresent: true, reason: 'task-upload-failures',
+      message: (result.uploaded.failed || 0) + ' of ' + (result.uploaded.processed || 0) + ' queued task uploads failed',
+      httpStatus: null, authFailure: false, permissionDenied: false
+    };
+  }
+
+  // Download/merge step failed.
+  if (result.merged && result.merged.ok === false) {
+    if (result.merged.reason) {
+      return Object.assign({ stage: 'MERGE', stateFilePresent: true }, driveFailureFields(result.merged, 'merge-failed'));
+    }
+    return {
+      stage: 'MERGE', stateFilePresent: true, reason: 'task-merge-failures',
+      message: (result.merged.tasksFailed || 0) + ' of ' + (result.merged.tasksDownloaded || 0) + ' downloaded tasks failed to merge',
+      httpStatus: null, authFailure: false, permissionDenied: false
+    };
+  }
+
+  // Pre-flight guard outcome (not-authenticated / workspace-unavailable /
+  // sync-manager-unavailable) or an unexpected top-level exception
+  // (runSynchronizationPass()'s own outer catch()).
+  const stage = (result.reason === 'not-authenticated' || result.reason === 'workspace-unavailable'
+    || result.reason === 'sync-manager-unavailable') ? 'PRE-FLIGHT' : 'UNEXPECTED';
+  return Object.assign({ stage: stage, stateFilePresent: null }, driveFailureFields(result, result.reason || 'unknown-error'));
+}
+// buildSyncFailureDiagnostic(): adds the surrounding context PHASE_22E asks
+// be preserved alongside the stage/reason above — trigger, authenticated
+// account identity, workspace status, and root/Tasks folder presence — all
+// read fresh from the existing status getters; nothing new is tracked.
+function buildSyncFailureDiagnostic(result) {
+  const located = locateSyncFailureStage(result);
+  if (!located) return null;
+  const ws = (typeof GoogleDriveWorkspace !== 'undefined') ? GoogleDriveWorkspace.getWorkspaceStatus() : null;
+  return Object.assign(located, {
+    trigger: (result && result.trigger) || null,
+    accountIdentity: getAuthenticatedAccountKey(),
+    workspaceStatus: ws ? ws.status : 'unavailable',
+    workspaceReady: !!(ws && ws.ready),
+    rootFolderIdPresent: !!(ws && ws.rootFolderId),
+    tasksFolderPresent: !!(ws && ws.subfolderIds && ws.subfolderIds.Tasks)
+  });
+}
+
 const BackgroundScheduler = (function () {
   // ── In-memory scheduler state only. Nothing here is durable on its own —
   // every fact this module reasons about (dirty tasks, queue contents, sync
@@ -7473,7 +7580,27 @@ const BackgroundScheduler = (function () {
   function finalizeRetryState(result) {
     if (typeof RetryEngine === 'undefined' || !result) return;
     if (result.ok) { RetryEngine.recordSyncSuccess(); return; }
+    // Phase 22E: capture the exact stage/reason/message/httpStatus BEFORE
+    // classify()/recordSyncFailure() runs below — this never changes what
+    // gets classified or recorded, it only preserves the original
+    // diagnostic alongside the category classify() assigns, so the UI can
+    // show both (see the Synchronization tab render further down) instead
+    // of the category alone.
+    result.diagnostic = buildSyncFailureDiagnostic(result);
     RetryEngine.recordSyncFailure(result);
+    // Manual attempt number (ATTEMPT COUNTER requirement): read back from
+    // the very record recordSyncFailure() just wrote/incremented above —
+    // never a second counter of this module's own. Stays unset when
+    // classify() ignored this outcome (e.g. a conflict-adjacent result
+    // reached here), exactly like the retry record itself stays absent
+    // in that case.
+    if (result.diagnostic) {
+      const retryStatus = RetryEngine.getRetryStatus();
+      if (retryStatus && retryStatus.active) {
+        result.diagnostic.manualAttemptNumber = retryStatus.attempts;
+        result.diagnostic.errorCategory = retryStatus.lastErrorCategory;
+      }
+    }
   }
 
   // ── Phase 21A: FIRST_SYNC / BOOTSTRAP ────────────────────────────────────
@@ -7568,6 +7695,12 @@ const BackgroundScheduler = (function () {
       _running = false;
       _status = 'failed';
       _lastResult = { ok: false, reason: 'sync-manager-unavailable', trigger };
+      // Phase 22E: a startup-configuration issue, not a Drive-request
+      // failure — still diagnosed (stage PRE-FLIGHT) so it's never shown as
+      // a bare "transient" either, but intentionally not routed through
+      // finalizeRetryState()/RetryEngine (unchanged from before this phase
+      // — see that function's own header comment).
+      _lastResult.diagnostic = buildSyncFailureDiagnostic(_lastResult);
       return Promise.resolve(_lastResult);
     }
 
@@ -7783,6 +7916,11 @@ const BackgroundScheduler = (function () {
     if (!isAuthenticatedNow()) {
       _status = 'failed';
       _lastResult = { ok: false, reason: 'not-authenticated', trigger };
+      // Phase 22E: pre-flight gate, never reaches runSynchronizationPass()/
+      // finalizeRetryState() — diagnosed directly here instead, same stage
+      // label (PRE-FLIGHT) locateSyncFailureStage() gives this reason
+      // wherever else it appears.
+      _lastResult.diagnostic = buildSyncFailureDiagnostic(_lastResult);
       notifyAutoSyncSettled();
       return Promise.resolve(finishManualDiagnostics(_lastResult));
     } else if (!isWorkspaceReadyNow()) {
@@ -7802,6 +7940,9 @@ const BackgroundScheduler = (function () {
         if (!workspaceStatus || !workspaceStatus.ready) {
           _status = 'failed';
           _lastResult = { ok: false, reason: 'workspace-unavailable', trigger };
+          // Phase 22E: same pre-flight diagnostic treatment as the
+          // not-authenticated branch above.
+          _lastResult.diagnostic = buildSyncFailureDiagnostic(_lastResult);
           notifyAutoSyncSettled();
           return finishManualDiagnostics(_lastResult);
         }
@@ -8185,13 +8326,36 @@ const RetryEngine = (function () {
     }
   }
 
+  // ── Phase 22E (ATTEMPT COUNTER — diagnostic testing only) ────────────────
+  // Clears ONLY the sync retry/failure record above (the same 'retry' queue
+  // entry recordSyncFailure() writes/increments) — nothing else. Never
+  // called from any normal app code path (not wired to any button or
+  // trigger); exists solely so a diagnostic test can start a clean manual
+  // attempt count. Does NOT touch tasks, logs, masters, configuration,
+  // theme, timer, attachments, authentication, or workspace data — none of
+  // those live in this module or this queue entry.
+  function resetSynchronizationFailureDiagnostics() {
+    if (getRecord()) removeQueueEntry(RECORD_ID, QUEUE_NAME);
+    return getRetryStatus();
+  }
+
   return {
     recordSyncFailure, recordSyncSuccess,
     isRecoveryRequired,
     getRetryStatus, resetForAccountChange,
+    resetSynchronizationFailureDiagnostics,
     _classify: classify // exposed for the test matrix only
   };
 })();
+
+// Phase 22E: bare global alias for resetSynchronizationFailureDiagnostics()
+// (diagnostic testing only — see RetryEngine's own function above for what
+// it does and does not clear). Not wired to any UI control.
+function resetSynchronizationFailureDiagnostics() {
+  return (typeof RetryEngine !== 'undefined' && RetryEngine.resetSynchronizationFailureDiagnostics)
+    ? RetryEngine.resetSynchronizationFailureDiagnostics()
+    : null;
+}
 
 const AutoSyncEngine = (function () {
   // ── In-memory-only debounce/status state. Nothing here needs to be
@@ -12489,26 +12653,39 @@ function renderMastersContent() {
     };
     // Phase 22D: minimal failure-record detail — explicitly NOT a
     // diagnostics dashboard, and NEVER implies an automatic retry is
-    // coming (there is none). Only adds a plain attempt count for the
-    // 'recovery-required' case; a single ordinary failure needs no extra
-    // hint beyond the main "✗ Failed: <error>" line below.
+    // coming (there is none).
     const retryStatus = (typeof RetryEngine !== 'undefined') ? RetryEngine.getRetryStatus() : { active: false };
-    function describeRetryStatus() {
-      if (!retryStatus.active) return '';
-      if (retryStatus.status === 'recovery_required') {
-        return ' (' + retryStatus.attempts + ' attempts failed — ' + (retryStatus.lastErrorCategory || 'error') + ')';
-      }
-      return '';
-    }
+    // Phase 22E: the block-reason hint (below) no longer appends the bare
+    // "(N attempts failed — category)" fragment on its own — that fragment
+    // is exactly what hid the actual root cause (a classify() category
+    // like "transient" IS only a classification, never the reason). Attempt
+    // count and category now render together WITH the real stage/reason/
+    // error inside schedulerDiagnosticHtml below instead.
     const schedulerLastSyncLabel = schedulerStatus.lastSyncAt
       ? new Date(schedulerStatus.lastSyncAt).toLocaleString()
       : 'Never';
+    // STAGE labels for the diagnostic box below — display text only, never
+    // fed back into any decision.
+    const DIAGNOSTIC_STAGE_LABELS = {
+      'PRE-FLIGHT': 'Pre-flight', 'STATE DISCOVERY': 'State Discovery',
+      'STATE VALIDATION': 'State Validation', 'BOOTSTRAP': 'Bootstrap',
+      'UPLOAD': 'Upload', 'MERGE': 'Download / Merge', 'UNEXPECTED': 'Unexpected'
+    };
+    function formatDiagnosticStage(stage) { return DIAGNOSTIC_STAGE_LABELS[stage] || stage || 'Unknown'; }
     // Reuses MERGE_REASON_LABELS (Phase 10) for any reason code the plan
     // itself surfaced (not-authenticated / no-remote-file / corrupt-json /
     // etc.) rather than inventing a second label map for the same codes.
+    // Phase 22E: when a diagnostic is present, this line now names the
+    // actual failed stage + its own reason (never the bare classify()
+    // category alone) — see schedulerDiagnosticHtml just below for the
+    // full stage/reason/HTTP/error breakdown.
     function describeSchedulerResult(result) {
       if (!result) return 'Never Run';
       if (!result.ok) {
+        if (result.diagnostic) {
+          return '✗ [' + formatDiagnosticStage(result.diagnostic.stage) + '] ' + result.diagnostic.reason
+            + (result.diagnostic.message ? (': ' + result.diagnostic.message) : '');
+        }
         const label = SCHEDULER_BLOCK_REASON_LABELS[result.reason] || MERGE_REASON_LABELS[result.reason] || result.reason || 'failed';
         return '✗ ' + label + (result.error ? (': ' + result.error) : '');
       }
@@ -12520,8 +12697,26 @@ function renderMastersContent() {
     }
     const schedulerResultLabel = describeSchedulerResult(schedulerStatus.lastResult);
     const schedulerBlockHintHtml = (!schedulerStatus.running && schedulerStatus.blockReason && schedulerStatus.blockReason !== 'sync-disabled')
-      ? `<div style="font-size:11px;color:var(--text-tertiary);margin-top:8px">${esc((SCHEDULER_BLOCK_REASON_LABELS[schedulerStatus.blockReason] || schedulerStatus.blockReason) + describeRetryStatus())}</div>`
+      ? `<div style="font-size:11px;color:var(--text-tertiary);margin-top:8px">${esc(SCHEDULER_BLOCK_REASON_LABELS[schedulerStatus.blockReason] || schedulerStatus.blockReason)}</div>`
       : '';
+    // ── Phase 22E: SYNC FAILED root-cause box ────────────────────────────
+    // Renders only when the last pass actually failed AND carries a
+    // diagnostic (see finalizeRetryState()/buildSyncFailureDiagnostic() in
+    // BackgroundScheduler above). Shows the exact stage/reason/HTTP/error —
+    // the real root cause "transient" alone was hiding — plus the
+    // classify() category and manual attempt number alongside it, never
+    // instead of it.
+    const failureDiagnostic = (schedulerStatus.lastResult && schedulerStatus.lastResult.ok === false)
+      ? schedulerStatus.lastResult.diagnostic : null;
+    const schedulerDiagnosticHtml = failureDiagnostic ? `
+      <div style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;line-height:1.7;background:var(--bg-secondary);border:1px solid var(--red-mid);border-radius:var(--radius-sm);padding:10px 12px;margin-top:8px;color:var(--text-primary)">
+        <div style="font-weight:700;color:var(--red-dark);margin-bottom:4px">SYNC FAILED</div>
+        <div>Stage: ${esc(formatDiagnosticStage(failureDiagnostic.stage))}</div>
+        <div>Reason: ${esc(failureDiagnostic.reason || 'unknown')}</div>
+        <div>HTTP: ${esc(failureDiagnostic.httpStatus != null ? String(failureDiagnostic.httpStatus) : '—')}</div>
+        <div>Error: ${esc(failureDiagnostic.message || '—')}</div>
+        ${(failureDiagnostic.errorCategory || failureDiagnostic.manualAttemptNumber != null) ? `<div>${esc((failureDiagnostic.manualAttemptNumber != null ? ('Manual attempt ' + failureDiagnostic.manualAttemptNumber) : '') + (failureDiagnostic.manualAttemptNumber != null && failureDiagnostic.errorCategory ? ' — ' : '') + (failureDiagnostic.errorCategory ? ('classified ' + failureDiagnostic.errorCategory) : ''))}</div>` : ''}
+      </div>` : '';
     // Phase 21A: no longer gated on workspaceStatus.ready — the manual Sync
     // transaction itself now performs workspace discovery/validation when
     // needed (scheduleSync()'s manual branch above), so a brand-new account
@@ -12657,6 +12852,7 @@ function renderMastersContent() {
         </div>
         <div style="font-size:11px;color:var(--text-secondary);margin-top:8px">${esc(schedulerResultLabel)}</div>
         ${schedulerBlockHintHtml}
+        ${schedulerDiagnosticHtml}
         ${authErrorHtml}
         <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
           ${connectionButtonHtml}
