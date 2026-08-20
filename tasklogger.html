@@ -1280,7 +1280,7 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
         <span>Dashboard</span>
       </a>
       <button class="btn sync-btn" id="top-sync-btn" onclick="topSyncClick()" title="Synced">
-        <i class="ti ti-refresh"></i> Sync <span class="sync-dot sync-neutral" id="top-sync-dot"></span>
+        <i class="ti ti-refresh"></i> <span id="top-sync-label">Sync</span> <span class="sync-dot sync-neutral" id="top-sync-dot"></span>
       </button>
       <div class="more-menu-wrap" id="more-menu-wrap">
         <button class="btn" id="more-menu-btn" onclick="toggleMoreMenu(event)" title="More actions"><i class="ti ti-dots"></i> More <i class="ti ti-chevron-down" style="font-size:11px"></i></button>
@@ -9893,6 +9893,10 @@ function startTask(id) {
     const el = document.getElementById('timer-'+id);
     if (el) { el.textContent = fmt(liveElapsedSecs(task)); el.className='timer-display running'; }
     updateLogTable();
+    // Phase 22H PART A: keep Total Working Hours ticking live from this
+    // same one-second callback — no second timer, per the existing
+    // intervals[]/liveElapsedSecs() architecture.
+    renderWorkWidget();
   }, 1000);
 
   // Phase 1: starting a task is a business-data edit — update sync metadata only.
@@ -9923,6 +9927,10 @@ function resumeTask(id) {
     const el = document.getElementById('timer-'+id);
     if (el) { el.textContent = fmt(liveElapsedSecs(task)); el.className='timer-display running'; }
     updateLogTable();
+    // Phase 22H PART A: keep Total Working Hours ticking live from this
+    // same one-second callback — no second timer, per the existing
+    // intervals[]/liveElapsedSecs() architecture.
+    renderWorkWidget();
   }, 1000);
   // Phase 1: resuming a task is a business-data edit — update sync metadata only.
   touchSyncMetadata(task);
@@ -13588,9 +13596,17 @@ function toggleBackgroundSync(enabled) {
 // "Synchronizing…" right away) and again once the pass settles, mirroring
 // batchMergeClick()/batchUploadClick()'s existing pattern.
 function manualSyncClick() {
+  // Phase 22H PART F: startSynchronization('manual') must be called BEFORE
+  // the immediate re-render below, not after — scheduleSync()'s manual
+  // branch sets BackgroundScheduler's _status/_running synchronously (before
+  // any Drive call), so calling it first means the very next
+  // refreshTopSyncIndicator()/renderMastersContent() already reads the
+  // "syncing" state instead of the stale pre-click one, and the user sees
+  // the orange indicator before the first Drive operation even starts.
+  const syncPromise = BackgroundScheduler.startSynchronization('manual');
   if (activeMastersTab === 'sync') renderMastersContent();
   refreshTopSyncIndicator();
-  BackgroundScheduler.startSynchronization('manual').then((result) => {
+  syncPromise.then((result) => {
     if (activeMastersTab === 'sync') renderMastersContent();
     // Phase 19F-B: Manual Sync runs through the exact same runSynchronizationPass()
     // as every automatic trigger, but (unlike the automatic callers) never used to
@@ -13671,28 +13687,35 @@ function computeTopSyncStatus() {
   const debouncing = (typeof AutoSyncEngine !== 'undefined') && !!AutoSyncEngine.getAutoSyncStatus().debouncing;
   const online = (typeof navigator === 'undefined') || navigator.onLine !== false;
 
-  if (schedulerStatus.running || debouncing) {
-    return { dot: 'sync-syncing', title: 'Syncing…' };
+  // Phase 22H PART E/F: 'scheduled' is included alongside running/debouncing
+  // because it is the one transient window where a manual Sync transaction
+  // has already started (BackgroundScheduler.scheduleSync()'s manual branch
+  // sets _status = 'scheduled' synchronously, before an async workspace
+  // initialization can complete) but _running has not flipped true yet — the
+  // Syncing… feedback still must appear immediately for that window, not
+  // just once runSynchronizationPass() itself begins.
+  if (schedulerStatus.running || debouncing || schedulerStatus.status === 'scheduled') {
+    return { dot: 'sync-syncing', title: 'Synchronizing with Google Drive…', label: 'Syncing…' };
   }
   if (authStatus.state === 'connecting') {
-    return { dot: 'sync-neutral', title: 'Connecting…' };
+    return { dot: 'sync-neutral', title: 'Connecting…', label: 'Connecting…' };
   }
   if (!authStatus.authenticated) {
-    return { dot: 'sync-neutral', title: 'Authentication required — tap to sign in' };
+    return { dot: 'sync-neutral', title: 'Authentication required — tap to sign in', label: 'Connect' };
   }
   if (!online) {
-    return { dot: 'sync-neutral', title: 'Waiting for network' };
+    return { dot: 'sync-neutral', title: 'Waiting for network', label: 'Offline' };
   }
   if (schedulerStatus.blockReason === 'workspace-unavailable') {
-    return { dot: 'sync-neutral', title: 'Waiting for Drive workspace to be ready' };
+    return { dot: 'sync-neutral', title: 'Waiting for Drive workspace to be ready', label: 'Sync' };
   }
   if (schedulerStatus.lastResult && schedulerStatus.lastResult.ok === false) {
-    return { dot: 'sync-failed', title: 'Sync failed — tap to retry' };
+    return { dot: 'sync-failed', title: 'Sync failed — tap to retry', label: 'Sync failed' };
   }
   if (!schedulerStatus.lastSyncAt) {
-    return { dot: 'sync-neutral', title: 'Not yet synced — tap Sync' };
+    return { dot: 'sync-neutral', title: 'Not yet synced — tap Sync', label: 'Sync' };
   }
-  return { dot: 'sync-synced', title: 'Synced' };
+  return { dot: 'sync-synced', title: 'Synced', label: 'Synced' };
 }
 
 // refreshTopSyncIndicator(): the ONLY place that writes to the top-level dot's
@@ -13706,6 +13729,14 @@ function refreshTopSyncIndicator() {
   const status = computeTopSyncStatus();
   dot.className = 'sync-dot ' + status.dot;
   btn.title = status.title;
+  // Phase 22H PART E/G: the dot alone was not "unmistakable" feedback — the
+  // button's own visible text now tracks the same state, and the button is
+  // disabled for the duration of an in-flight pass so a second click can't
+  // slip through (topSyncClick()'s own isSynchronizationRunning() guard
+  // already blocks it logically; this is the matching visual state).
+  const label = document.getElementById('top-sync-label');
+  if (label) label.textContent = status.label;
+  btn.disabled = (status.dot === 'sync-syncing');
 }
 
 function toggleMoreMenu(evt) {
@@ -15908,6 +15939,10 @@ function ensureActiveTimer(task) {
     const el = document.getElementById('timer-' + task.id);
     if (el) { el.textContent = fmt(liveElapsedSecs(task)); el.className = 'timer-display running'; }
     updateLogTable();
+    // Phase 22H PART A: keep Total Working Hours ticking live from this
+    // same one-second callback — no second timer, per the existing
+    // intervals[]/liveElapsedSecs() architecture.
+    renderWorkWidget();
   }, 1000);
 }
 
