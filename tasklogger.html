@@ -4153,7 +4153,7 @@ const STATE_SYNC_META_STORAGE_KEY    = 'ttl_sync_state_meta';
 
 const GoogleDriveWorkspace = (function () {
   // ── In-memory workspace state ───────────────────────────────────────────────
-  let _status        = 'not_initialized'; // not_initialized | initializing | ready | error
+  let _status        = 'not_initialized'; // not_initialized | initializing | ready | recovering | error
   let _lastError      = null;
   let _rootFolderId   = null;
   let _subfolderIds   = {}; // { Tasks: id, Settings: id, Attachments: id, Backups: id }
@@ -4179,6 +4179,12 @@ const GoogleDriveWorkspace = (function () {
   let _pullStatus        = 'idle'; // idle | pulling | error
   let _lastPushResult    = null;   // last pushStateToStateFile() result, for UI display only
   let _lastPullResult    = null;   // last pullStateFromStateFile() result, for UI display only
+
+  // ── Phase 22G: Lazy Workspace Resource 404 Recovery ─────────────────────────
+  // Last workspace-resource recovery attempt (root/Tasks/Settings/
+  // Attachments/Backups id gone stale on Drive), for UI display only — never
+  // read by any decision logic. See recoverStaleWorkspaceResourceAndRetry().
+  let _lastWorkspaceRecoveryEvent = null;
 
   // ── Minimal persisted workspace metadata (never a token, never app data) ───
   function loadPersisted() {
@@ -4616,6 +4622,162 @@ const GoogleDriveWorkspace = (function () {
       .catch(err => ({ valid: false, reason: 'lookup-failed', error: (err && err.message) || String(err) }));
   }
 
+  // ── Phase 22G: Lazy Workspace Resource 404 Recovery ─────────────────────────
+  // Fixes ONLY stale cached Drive WORKSPACE resource ids (TTL/root folder,
+  // Tasks/Settings/Attachments/Backups subfolder ids — whatever this module
+  // already caches above). Recovers lazily, ONLY when an actual manual Sync
+  // operation's Drive request 404s because the cached id it used no longer
+  // resolves on Drive — never as routine validation on every Sync/refresh.
+  // See PHASE_22G_WORKSPACE_404_RECOVERY.md for the full design.
+  //
+  // Deliberately separate from Phase 22F's state-file 404 recovery inside
+  // pushStateToStateFile() below: that layer recovers a stale
+  // Tasks/state.json FILE id after the Tasks FOLDER lookup has already
+  // succeeded. This layer recovers a stale FOLDER id — i.e. the failure that
+  // happens before a state-file lookup can even be attempted. The two are
+  // never mixed: a request that 404s because of a stale folder id is always
+  // routed here, never into the state-file layer, and vice versa.
+
+  // Maps a cached workspace-resource id (the parentId a failing Drive
+  // request actually used) back to which resource it is, so a 404 is never
+  // blindly treated as "recreate the entire workspace" (per-resource
+  // identification is required before any recovery action is taken).
+  function describeWorkspaceResource(idInUse) {
+    if (idInUse && idInUse === _rootFolderId) {
+      return { key: 'root', label: 'TTL workspace/root' };
+    }
+    for (let i = 0; i < GOOGLE_WORKSPACE_SUBFOLDERS.length; i++) {
+      const name = GOOGLE_WORKSPACE_SUBFOLDERS[i];
+      if (idInUse && _subfolderIds[name] === idInUse) {
+        return { key: name, label: name + ' folder' };
+      }
+    }
+    return { key: 'unknown', label: 'workspace resource' };
+  }
+
+  // Invalidates ONLY the cached workspace-resource ids (root + subfolders).
+  // Never touches state-file bookkeeping (Phase 22F's separate layer, its
+  // own _stateFileId/_stateFileRevision) and never touches
+  // tasks/logEntries/masters/configuration/theme/timer/attachments.
+  function invalidateCachedWorkspaceIds() {
+    _rootFolderId = null;
+    _subfolderIds = {};
+  }
+
+  // Re-discovers the existing TTL root/workspace using the SAME idempotent
+  // "find or create" primitives initializeWorkspace() already uses
+  // (createRootFolder()/createFolder(), both of which check findFolder()
+  // first) — never a second workspace system, never a duplicate folder.
+  // Refreshes and persists the cached ids on success.
+  function rediscoverWorkspace(purpose) {
+    return createRootFolder(purpose || 'workspace resource recovery: re-locate/create TTL root folder')
+      .then(root => {
+        _rootFolderId = root.id;
+        return Promise.all(
+          GOOGLE_WORKSPACE_SUBFOLDERS.map(name =>
+            createFolder(name, _rootFolderId, (purpose || 'workspace resource recovery') + ': re-locate/create "' + name + '" subfolder')
+              .then(folder => { _subfolderIds[name] = folder.id; })
+          )
+        );
+      })
+      .then(() => {
+        savePersisted();
+        return { rootFolderId: _rootFolderId, subfolderIds: Object.assign({}, _subfolderIds) };
+      });
+  }
+
+  // recoverStaleWorkspaceResourceAndRetry(): the ONE-recovery/ONE-retry rule.
+  // `idInUse` is the cached id the failing request actually used (so the
+  // affected resource is identified, never guessed). `retryFn` re-runs,
+  // using whatever is now cached, the exact SAME lookup that just 404'd —
+  // never a different operation, never a second recovery, never scheduled.
+  //
+  // Account isolation (mandatory): the authenticated account identity is
+  // captured before recovery starts and re-checked immediately after
+  // re-discovery, before anything recovered is trusted, persisted, or
+  // retried — a mid-recovery account switch aborts safely rather than
+  // letting Account A's recovered ids be persisted or used as Account B's.
+  function recoverStaleWorkspaceResourceAndRetry(idInUse, retryFn, purpose) {
+    const resource = describeWorkspaceResource(idInUse);
+    const recoveryAccountIdentity = getCurrentAccountKey();
+    _status = 'recovering';
+    invalidateCachedWorkspaceIds();
+
+    return rediscoverWorkspace(purpose)
+      .then(() => {
+        if (recoveryAccountIdentity !== getCurrentAccountKey()) {
+          _status = 'error';
+          _lastError = 'Authenticated account changed during workspace recovery.';
+          _lastWorkspaceRecoveryEvent = { resource: resource.label, resourceKey: resource.key, succeeded: false, accountChanged: true, at: new Date().toISOString() };
+          const abortErr = new Error('Workspace recovery aborted: authenticated account changed.');
+          abortErr.workspaceResourceNotFound = true;
+          abortErr.workspaceResourceKey = resource.key;
+          abortErr.workspaceResourceLabel = resource.label;
+          abortErr.httpStatus = 404;
+          abortErr.accountChanged = true;
+          abortErr.workspaceResourceRecoverySucceeded = false;
+          throw abortErr;
+        }
+        // Recovery itself succeeded — now retry the ONE failed operation,
+        // exactly once, using the freshly-cached ids retryFn reads.
+        return retryFn().then(
+          result => {
+            _status = 'ready';
+            _lastError = null;
+            _lastWorkspaceRecoveryEvent = { resource: resource.label, resourceKey: resource.key, succeeded: true, at: new Date().toISOString() };
+            return result;
+          },
+          retryErr => {
+            // Retry also failed (including a second 404) — STOP here. No
+            // second recovery, no second retry, nothing scheduled.
+            _status = 'error';
+            _lastError = 'Workspace resource still unavailable after one recovery attempt: ' + resource.label;
+            _lastWorkspaceRecoveryEvent = { resource: resource.label, resourceKey: resource.key, succeeded: false, at: new Date().toISOString() };
+            retryErr.workspaceResourceNotFound = true;
+            retryErr.workspaceResourceKey = resource.key;
+            retryErr.workspaceResourceLabel = resource.label;
+            retryErr.httpStatus = (retryErr && retryErr.httpStatus) || 404;
+            retryErr.workspaceResourceRecoverySucceeded = true; // re-discovery worked; only the retry failed
+            throw retryErr;
+          }
+        );
+      })
+      .catch(err => {
+        if (!err.workspaceResourceNotFound) {
+          // rediscoverWorkspace() itself failed (offline, permission, etc.)
+          // — never claim Ready with a workspace that was never confirmed.
+          _status = 'error';
+          _lastError = (err && err.message) || String(err);
+          _lastWorkspaceRecoveryEvent = { resource: resource.label, resourceKey: resource.key, succeeded: false, at: new Date().toISOString() };
+          err.workspaceResourceNotFound = true;
+          err.workspaceResourceKey = resource.key;
+          err.workspaceResourceLabel = resource.label;
+          err.workspaceResourceRecoverySucceeded = false;
+        }
+        throw err;
+      });
+  }
+
+  // Shared classifier so any caller outside this module (e.g.
+  // IncrementalSyncEngine.buildSyncPlan()'s own .catch()) can turn one of
+  // the enriched errors above into the same {reason: 'workspace-resource-
+  // not-found', ...} shape pushStateToStateFile()/pullStateFromStateFile()
+  // build for it below — never a second, differently-shaped classification.
+  function classifyWorkspaceRecoveryError(err) {
+    if (!err || !err.workspaceResourceNotFound) return null;
+    return {
+      ok: false,
+      reason: 'workspace-resource-not-found',
+      error: err.message || String(err),
+      httpStatus: err.httpStatus || 404,
+      resource: err.workspaceResourceLabel || 'workspace resource',
+      resourceKey: err.workspaceResourceKey || 'unknown',
+      workspaceRecoverySucceeded: !!err.workspaceResourceRecoverySucceeded,
+      accountChanged: !!err.accountChanged
+    };
+  }
+  // ── End Phase 22G helpers ────────────────────────────────────────────────────
+
   // ── Phase 7: Tasks/state.json file operations ───────────────────────────────
   // Everything below this point implements Find File / Read File / Write File /
   // Get Metadata for `Tasks/state.json` ONLY (GOOGLE_DRIVE_API.md §1, §7;
@@ -4628,11 +4790,29 @@ const GoogleDriveWorkspace = (function () {
   // Locates `state.json` within `Tasks/`. Rejects if the Tasks folder id isn't
   // known yet (workspace not initialized) rather than silently treating that
   // as "file not found."
+  //
+  // Phase 22G: this is the confirmed choke point for a stale cached
+  // WORKSPACE resource id — every findStateFile() call (from both the
+  // push and pull paths) queries Drive using `_subfolderIds.Tasks`, so a
+  // 404 HERE means the cached Tasks folder id itself no longer resolves on
+  // Drive, not that state.json is missing. Recovered with exactly one
+  // workspace re-discovery + one retry of this SAME lookup (never a stale
+  // state-file id — that is Phase 22F's separate layer, only ever entered
+  // once a state.json lookup has already succeeded).
   function findStateFile(purpose) {
     if (!_subfolderIds.Tasks) {
       return Promise.reject(new Error('Workspace not initialized: Tasks folder unknown.'));
     }
-    return findFileByName(GOOGLE_DRIVE_STATE_FILE_NAME, _subfolderIds.Tasks, purpose || 'locate state.json');
+    const tasksFolderIdInUse = _subfolderIds.Tasks;
+    return findFileByName(GOOGLE_DRIVE_STATE_FILE_NAME, tasksFolderIdInUse, purpose || 'locate state.json')
+      .catch(err => {
+        if (!err || err.httpStatus !== 404) throw err;
+        return recoverStaleWorkspaceResourceAndRetry(
+          tasksFolderIdInUse,
+          () => findFileByName(GOOGLE_DRIVE_STATE_FILE_NAME, _subfolderIds.Tasks, (purpose || 'locate state.json') + ' (post-recovery retry)'),
+          'workspace resource recovery: 404 while locating state.json'
+        );
+      });
   }
 
   // Metadata-only equivalent of findStateFile(), named separately to match
@@ -4914,11 +5094,16 @@ const GoogleDriveWorkspace = (function () {
       // untouched either way, since this function only ever sends data
       // outward and never writes anything back to `tasks`/`logEntries`.
       _pushStatus = 'error';
+      // Phase 22G: a stale-workspace-resource 404 (findStateFile()'s own
+      // catch, above) reaches here as an enriched rejection once its one
+      // recovery+retry attempt is exhausted — classified distinctly from a
+      // generic failure so the UI can show which resource, not just "error".
+      const workspaceFailure = classifyWorkspaceRecoveryError(err);
       // Phase 20: carry authFailure/httpStatus through (when present) so the
       // Retry Engine can classify this failure (transient/auth/permanent)
       // without re-parsing the error message. Additive fields only — every
       // existing reader of {ok, reason, error} is unaffected.
-      const result = {
+      const result = workspaceFailure || {
         ok: false, reason: 'error', error: (err && err.message) || String(err),
         authFailure: !!(err && err.authFailure),
         httpStatus: (err && err.httpStatus) || null
@@ -5019,7 +5204,10 @@ const GoogleDriveWorkspace = (function () {
       .then(result => { _pullStatus = result.ok ? 'idle' : 'error'; _lastPullResult = result; return result; })
       .catch(err => {
         _pullStatus = 'error';
-        const result = {
+        // Phase 22G: same stale-workspace-resource classification as
+        // pushStateToStateFile()'s outer catch above.
+        const workspaceFailure = classifyWorkspaceRecoveryError(err);
+        const result = workspaceFailure || {
           ok: false, reason: 'error', error: (err && err.message) || String(err),
           authFailure: !!(err && err.authFailure),
           httpStatus: (err && err.httpStatus) || null
@@ -5080,19 +5268,13 @@ const GoogleDriveWorkspace = (function () {
     _status = 'initializing';
     _lastError = null;
 
-    _initPromise = createRootFolder('workspace init: create/find TTL root folder')
-      .then(root => {
-        _rootFolderId = root.id;
-        return Promise.all(
-          GOOGLE_WORKSPACE_SUBFOLDERS.map(name =>
-            createFolder(name, _rootFolderId, 'workspace init: create/find "' + name + '" subfolder').then(folder => { _subfolderIds[name] = folder.id; })
-          )
-        );
-      })
+    // Phase 22G: reuses the exact same find-or-create discovery primitive
+    // the lazy 404 recovery path below uses (rediscoverWorkspace()) — one
+    // workspace-discovery implementation, not two.
+    _initPromise = rediscoverWorkspace('workspace init: create/find TTL root folder and subfolders')
       .then(() => {
         _status = 'ready';
         _lastError = null;
-        savePersisted();
         return getWorkspaceStatus();
       })
       .catch(err => {
@@ -5113,13 +5295,19 @@ const GoogleDriveWorkspace = (function () {
   // never a live reference.
   function getWorkspaceStatus() {
     return {
-      status: _status, // not_initialized | initializing | ready | error
+      status: _status, // not_initialized | initializing | ready | recovering | error
+      // Phase 22G: 'ready' means ONLY 'status === ready' — a 404-confirmed
+      // stale cached id moves status to 'recovering' (mid-attempt) or
+      // 'error' (recovery/retry failed) before this can be true again, so
+      // the UI never claims Ready while a cached workspace resource id is
+      // known-stale (see recoverStaleWorkspaceResourceAndRetry()).
       ready: _status === 'ready',
       error: _lastError,
       provider: 'google',
       version: GOOGLE_WORKSPACE_VERSION,
       rootFolderId: _rootFolderId,
-      subfolderIds: Object.assign({}, _subfolderIds)
+      subfolderIds: Object.assign({}, _subfolderIds),
+      lastRecoveryEvent: _lastWorkspaceRecoveryEvent ? Object.assign({}, _lastWorkspaceRecoveryEvent) : null
     };
   }
 
@@ -5154,6 +5342,9 @@ const GoogleDriveWorkspace = (function () {
     _pullStatus = 'idle';
     _lastPushResult = null;
     _lastPullResult = null;
+    // Phase 22G: a previous account's recovery event is meaningless for the
+    // newly authenticated account — never carried across an account switch.
+    _lastWorkspaceRecoveryEvent = null;
   }
 
   return {
@@ -5171,7 +5362,12 @@ const GoogleDriveWorkspace = (function () {
     pullStateFromStateFile,
     getFileSyncStatus,
     // Phase 10: full-payload download+validate, for Single Task Merge
-    downloadCurrentState
+    downloadCurrentState,
+    // Phase 22G: shared classifier so callers outside this module (e.g.
+    // IncrementalSyncEngine.buildSyncPlan()'s own .catch()) can recognize a
+    // stale-workspace-resource failure the same way pushStateToStateFile()/
+    // pullStateFromStateFile() do below, without a second classification.
+    classifyWorkspaceRecoveryError
   };
 })();
 // ── End Google Drive Workspace Initialization (Phase 6) / Core Read-Write (Phase 7) ──
@@ -5852,7 +6048,15 @@ const SingleTaskMerge = (function () {
       return result;
     }).catch(err => {
       _status = 'failed';
-      const result = { ok: false, taskId: taskId, syncId: syncId, reason: 'error', error: (err && err.message) || String(err) };
+      // Phase 22G: same stale-workspace-resource classification used by
+      // pushStateToStateFile()/pullStateFromStateFile()/buildSyncPlan().
+      const workspaceFailure = (typeof GoogleDriveWorkspace !== 'undefined')
+        ? GoogleDriveWorkspace.classifyWorkspaceRecoveryError(err)
+        : null;
+      const result = Object.assign(
+        { taskId: taskId, syncId: syncId },
+        workspaceFailure || { ok: false, reason: 'error', error: (err && err.message) || String(err) }
+      );
       _lastResult = result;
       return result;
     });
@@ -6177,11 +6381,17 @@ const BatchCloudMerge = (function () {
       return result;
     }).catch(err => {
       _status = 'failed';
-      const result = {
-        ok: false, reason: 'error', error: (err && err.message) || String(err),
-        authFailure: !!(err && err.authFailure), httpStatus: (err && err.httpStatus) || null,
-        tasksDownloaded: 0, tasksCreated: 0, tasksUpdated: 0, tasksSkipped: 0, tasksFailed: 0, results: []
-      };
+      // Phase 22G: same stale-workspace-resource classification used
+      // elsewhere (pushStateToStateFile()/pullStateFromStateFile()/
+      // buildSyncPlan()/mergeSingleTask()).
+      const workspaceFailure = GoogleDriveWorkspace.classifyWorkspaceRecoveryError(err);
+      const result = Object.assign(
+        { tasksDownloaded: 0, tasksCreated: 0, tasksUpdated: 0, tasksSkipped: 0, tasksFailed: 0, results: [] },
+        workspaceFailure || {
+          ok: false, reason: 'error', error: (err && err.message) || String(err),
+          authFailure: !!(err && err.authFailure), httpStatus: (err && err.httpStatus) || null
+        }
+      );
       _lastRun = result;
       return result;
     });
@@ -6514,11 +6724,23 @@ const IncrementalSyncEngine = (function () {
       return result;
     }).catch(err => {
       _status = 'failed';
-      const result = {
-        ok: false, reason: 'error', error: (err && err.message) || String(err),
-        authFailure: !!(err && err.authFailure), httpStatus: (err && err.httpStatus) || null,
-        plan: [], statistics: emptyStatistics()
-      };
+      // Phase 22G: a stale-workspace-resource 404 from findStateFile() (via
+      // downloadCurrentState() -> ... -> GoogleDriveWorkspace.findStateFile())
+      // can reach here as a rejection once its one recovery+retry attempt is
+      // exhausted — classified through GoogleDriveWorkspace's own shared
+      // classifier, the same shape pushStateToStateFile()/
+      // pullStateFromStateFile() already use for it, rather than a second
+      // ad-hoc classification.
+      const workspaceFailure = (typeof GoogleDriveWorkspace !== 'undefined')
+        ? GoogleDriveWorkspace.classifyWorkspaceRecoveryError(err)
+        : null;
+      const result = Object.assign(
+        { plan: [], statistics: emptyStatistics() },
+        workspaceFailure || {
+          ok: false, reason: 'error', error: (err && err.message) || String(err),
+          authFailure: !!(err && err.authFailure), httpStatus: (err && err.httpStatus) || null
+        }
+      );
       _lastPlan = result;
       return result;
     });
@@ -7491,6 +7713,11 @@ function stageForPlanReason(reason) {
   if (reason === 'corrupt-json' || reason === 'invalid-shape' || reason === 'checksum-mismatch') return 'STATE VALIDATION';
   if (reason === 'no-remote-file') return 'STATE DISCOVERY';
   if (reason === 'not-authenticated' || reason === 'workspace-not-ready' || reason === 'merge-unavailable') return 'PRE-FLIGHT';
+  // Phase 22G: a stale cached workspace-resource id (root/Tasks/Settings/
+  // Attachments/Backups) 404ing is a Bootstrap-stage condition — the
+  // failure happens before a state.json lookup can even be attempted,
+  // exactly like a first-sync bootstrap push failure already is.
+  if (reason === 'workspace-resource-not-found') return 'BOOTSTRAP';
   return 'STATE DISCOVERY';
 }
 function driveFailureFields(sub, fallbackReason) {
@@ -7499,7 +7726,10 @@ function driveFailureFields(sub, fallbackReason) {
     message: (sub && sub.error) || null,
     httpStatus: (sub && sub.httpStatus) || null,
     authFailure: !!(sub && sub.authFailure),
-    permissionDenied: !!(sub && sub.permissionDenied)
+    permissionDenied: !!(sub && sub.permissionDenied),
+    // Phase 22G: which cached workspace resource (Tasks folder, root, etc.)
+    // was actually affected — null for every failure kind that isn't one.
+    resource: (sub && sub.resource) || null
   };
 }
 // locateSyncFailureStage(): identifies the ONE stage that actually failed
@@ -7522,8 +7752,12 @@ function locateSyncFailureStage(result) {
   // object a LATER stage's result nests it as (see the check below).
   if (Array.isArray(result.plan)) {
     const stage = stageForPlanReason(result.reason);
+    // Phase 22G: BOOTSTRAP here means the workspace-resource lookup itself
+    // 404'd before state.json could ever be reached — stateFilePresent is
+    // false for the same reason it is for STATE DISCOVERY.
+    const stateFilePresent = (stage === 'STATE DISCOVERY' || stage === 'BOOTSTRAP') ? false : (stage === 'STATE VALIDATION' ? true : null);
     return Object.assign(
-      { stage: stage, stateFilePresent: stage === 'STATE DISCOVERY' ? false : (stage === 'STATE VALIDATION' ? true : null) },
+      { stage: stage, stateFilePresent: stateFilePresent },
       driveFailureFields(result, result.reason || 'unknown-error')
     );
   }
@@ -12520,6 +12754,10 @@ function renderMastersContent() {
       not_initialized: 'Not Initialized',
       initializing:    'Initializing…',
       ready:            'Ready',
+      // Phase 22G: shown while a stale cached workspace-resource id (root/
+      // Tasks/Settings/Attachments/Backups) is being lazily recovered —
+      // never "Ready" during this window (see getWorkspaceStatus()).
+      recovering:       'Recovering…',
       error:            'Error'
     };
     const workspaceStatusLabel = WORKSPACE_STATUS_LABELS[workspaceStatus.status] || 'Not Initialized';
@@ -12787,7 +13025,9 @@ function renderMastersContent() {
         <div>Stage: ${esc(formatDiagnosticStage(failureDiagnostic.stage))}</div>
         <div>Reason: ${esc(failureDiagnostic.reason || 'unknown')}</div>
         <div>HTTP: ${esc(failureDiagnostic.httpStatus != null ? String(failureDiagnostic.httpStatus) : '—')}</div>
+        ${failureDiagnostic.resource ? `<div>Resource: ${esc(failureDiagnostic.resource)}</div>` : ''}
         <div>Error: ${esc(failureDiagnostic.message || '—')}</div>
+        ${failureDiagnostic.reason === 'workspace-resource-not-found' ? `<div>Recovery: Workspace reinitialized once, but the resource is still unavailable. Tap "Synchronize Now" to retry.</div>` : ''}
         ${(failureDiagnostic.errorCategory || failureDiagnostic.manualAttemptNumber != null) ? `<div>${esc((failureDiagnostic.manualAttemptNumber != null ? ('Manual attempt ' + failureDiagnostic.manualAttemptNumber) : '') + (failureDiagnostic.manualAttemptNumber != null && failureDiagnostic.errorCategory ? ' — ' : '') + (failureDiagnostic.errorCategory ? ('classified ' + failureDiagnostic.errorCategory) : ''))}</div>` : ''}
       </div>` : '';
     // Phase 21A: no longer gated on workspaceStatus.ready — the manual Sync
