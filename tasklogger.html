@@ -6182,6 +6182,28 @@ const BatchCloudMerge = (function () {
     return newTask;
   }
 
+  // recurringOccurrenceRemoteWins(): Phase 22I PART I/J — decides, for two
+  // task records that represent the SAME logical recurring occurrence
+  // (same getRecurringOccurrenceKey()) but different Sync IDs, whether the
+  // just-downloaded remote copy should become the canonical record in
+  // place of the existing local one. Reuses the exact same deterministic
+  // rule dedupeRecurringOccurrences() already established (real work
+  // outranks an untouched idle placeholder; a tie falls back to the
+  // existing Version/Modified-At newer-wins comparison) — no second,
+  // competing business rule is introduced. Both independently started
+  // (both non-idle) is left genuinely ambiguous, same as
+  // dedupeRecurringOccurrences(): the existing local occurrence is kept as
+  // canonical for this pass rather than guessing, so at most one running
+  // timer for this occurrence ever exists locally (PART J "do not create
+  // two running timers").
+  function recurringOccurrenceRemoteWins(localTask, remoteTask) {
+    const localStarted = localTask.status !== 'idle';
+    const remoteStarted = remoteTask.status !== 'idle';
+    if (localStarted && remoteStarted) return false;
+    if (localStarted !== remoteStarted) return !localStarted;
+    return SingleTaskMerge.isRemoteNewer(localTask, remoteTask);
+  }
+
   // mergeOneRemoteTask(): Requirement 2/3/4/5/6/10 — resolves ONE remote
   // task against local data. Never throws: any unexpected failure is caught
   // and reported as a failed outcome for this task alone (requirement 10),
@@ -6200,6 +6222,67 @@ const BatchCloudMerge = (function () {
 
       const localTask = findLocalTaskBySyncId(syncId);
       if (!localTask) {
+        // Phase 22I PART I: before creating a brand-new local task for an
+        // unmatched Sync ID, check whether this remote task is a recurring
+        // occurrence that already has an INDEPENDENTLY-created local
+        // counterpart — same recurringPlanId + occurrenceDate, different
+        // Sync ID (task brief Problem 3: Device A's occurrence and Device
+        // B's own independently-generated occurrence for the same
+        // plan/date). Reconciling here, before creation, means the
+        // duplicate card is never even created — cheaper and less
+        // UI-visible than the previous create-then-dedupe-on-a-later-pass
+        // behavior dedupeRecurringOccurrences() still exists to clean up
+        // (PART K/S: legacy duplicates from before this fix, or any other
+        // path that still creates one, are still caught there).
+        const remoteKey = (remoteTask.recurringPlanId && typeof getRecurringOccurrenceKey === 'function')
+          ? getRecurringOccurrenceKey(remoteTask) : null;
+        const localOccurrence = remoteKey
+          ? tasks.find(t => t && !isTaskDeleted(t) && t.recurringPlanId === remoteTask.recurringPlanId &&
+              getRecurringOccurrenceKey(t) === remoteKey)
+          : null;
+        if (localOccurrence) {
+          if (!recurringOccurrenceRemoteWins(localOccurrence, remoteTask)) {
+            // Local occurrence (idle beaten by nothing, or already the
+            // running/newer copy) stays canonical — do not create a
+            // second task for the same occurrence at all.
+            console.log('[SYNC-DEDUPE]', { occurrenceKey: remoteKey, decision: 'kept-local',
+              localTaskId: localOccurrence.id, remoteSyncId: syncId });
+            return { syncId: syncId, outcome: 'skipped', reason: 'recurring-local-canonical',
+              taskId: localOccurrence.id, effectiveChange: false };
+          }
+          // Remote occurrence becomes canonical — reconciled IN PLACE onto
+          // the EXISTING local task object (same local `id`, so any
+          // already-attached Log Entries/UI state stay correctly linked;
+          // see mergeRemoteTask()'s own "local id never touched" rule
+          // just below), adopting the remote's full business fields AND
+          // synchronization identity. This is the "reconcile the existing
+          // local occurrence with the remote occurrence" the brief asks
+          // for, reusing mergeRemoteTask()'s own field-copy logic rather
+          // than a second, parallel copy routine.
+          const checksumBefore = localOccurrence._sync && localOccurrence._sync.checksum;
+          const deletedBefore = !!(localOccurrence._sync && localOccurrence._sync.deleted);
+          // Capture the LOCAL occurrence's own (about-to-be-replaced) Sync ID
+          // first — mergeRemoteTask() below overwrites it with the remote's,
+          // so any pending Upload Queue entry filed under the OLD local Sync
+          // ID must be cleared using that old value, not the new one, or it
+          // is orphaned in the queue forever (never found again, since the
+          // task it described no longer carries that Sync ID).
+          const oldLocalSyncId = localOccurrence._sync && localOccurrence._sync.syncId;
+          SingleTaskMerge.mergeRemoteTask(localOccurrence, remoteTask);
+          const s = localOccurrence._sync;
+          s.lastSync = Date.now();
+          s.syncStatus = 'synced';
+          s.dirty = false;
+          if (oldLocalSyncId) removeQueueEntry(oldLocalSyncId, 'upload');
+          removeQueueEntry(s.syncId, 'upload');
+          saveState();
+          const checksumAfter = localOccurrence._sync && localOccurrence._sync.checksum;
+          const deletedAfter = !!(localOccurrence._sync && localOccurrence._sync.deleted);
+          console.log('[SYNC-DEDUPE]', { occurrenceKey: remoteKey, decision: 'adopted-remote',
+            localTaskId: localOccurrence.id, remoteSyncId: syncId });
+          return { syncId: syncId, outcome: 'updated', taskId: localOccurrence.id,
+            effectiveChange: (checksumAfter !== checksumBefore) || (deletedAfter !== deletedBefore) || true };
+        }
         // Requirement 4.
         const created = createLocalTaskFromRemote(remoteTask);
         // Phase 19F: a brand-new local task is always UI-relevant — there is
@@ -6239,6 +6322,12 @@ const BatchCloudMerge = (function () {
       const checksumAfter = localTask._sync && localTask._sync.checksum;
       const deletedAfter = !!(localTask._sync && localTask._sync.deleted);
       const effectiveChange = (checksumAfter !== checksumBefore) || (deletedAfter !== deletedBefore);
+      if (deletedAfter !== deletedBefore) {
+        // Phase 22I PART V diagnostic — deletion propagation is otherwise
+        // silent; this is the one place a remote tombstone actually lands
+        // on a local task.
+        console.log('[SYNC-DELETE]', { syncId: syncId, remoteDeleted: !!(remoteTask._sync && remoteTask._sync.deleted), localDeleted: deletedAfter });
+      }
       return { syncId: syncId, outcome: 'updated', taskId: localTask.id, effectiveChange: effectiveChange };
     } catch (err) {
       return {
@@ -8355,6 +8444,15 @@ const BackgroundScheduler = (function () {
       ? BatchCloudMerge.getChangedTaskIdsFromResults(mergeResult.results)
       : [];
     if (changedIds.length > 0 && typeof renderList === 'function') renderList(changedIds);
+    // Phase 22I PART D/K/P: catch any card whose task was tombstoned by a
+    // reconciliation step OUTSIDE mergeOneRemoteTask() itself (recurring
+    // occurrence dedup — dedupeRecurringOccurrences(), called from
+    // BatchCloudMerge.completeBatchMerge() after the per-task merge loop
+    // above already ran) — see sweepStaleRenderedRows()'s own header
+    // comment. Only bothers walking the rendered list at all when this
+    // pass actually merged something; a true no-op pass (mergeResult null)
+    // still does zero DOM work here, preserving Test 10's requirement.
+    if (mergeResult && typeof sweepStaleRenderedRows === 'function') sweepStaleRenderedRows();
     // Phase 19F-B: modal preservation check — only acts if the complete/edit
     // popup is open AND represents one of THIS pass's own changedIds (see
     // checkCompleteModalForRemoteDeletion()'s own header comment).
@@ -11465,6 +11563,34 @@ document.addEventListener('click', function(e) {
   }
 });
 
+// sweepStaleRenderedRows(): Phase 22I PART D/K/P — a defense-in-depth pass
+// that removes any currently-rendered task card whose backing task is now
+// deleted or no longer exists, REGARDLESS of whether that card's id was
+// included in whatever changedIds list a sync pass computed. This exists
+// because changedIds (BatchCloudMerge.getChangedTaskIdsFromResults()) is
+// derived ONLY from mergeOneRemoteTask()'s own per-remote-task outcomes —
+// it has no way to know about a task that was tombstoned by a LATER,
+// separate reconciliation step in the same pass (dedupeRecurringOccurrences()
+// retiring a duplicate recurring occurrence, PART K). Without this sweep, a
+// duplicate or deleted task can become correctly tombstoned in the DATA
+// model (isTaskDeleted() would already hide it from every fresh render) —
+// PROBLEM 2 (deleted task never disappears) and PROBLEM 3 (duplicate
+// recurring card lingers) — while its stale DOM row is simply never told
+// to go away, because the changedIds-scoped renderList() path only ever
+// touches ids it was explicitly given (see that function's own comment).
+// O(currently-rendered cards) — no Drive calls, and untouched cards are
+// never touched (no innerHTML replace, no blink), matching PART P/Q.
+function sweepStaleRenderedRows() {
+  const list = document.getElementById('task-list');
+  if (!list) return;
+  Array.from(list.children).forEach(container => {
+    if (!container.id || container.id.indexOf('row-') !== 0) return;
+    const id = Number(container.id.slice(4));
+    const task = tasks.find(t => t.id === id);
+    if (!task || isTaskDeleted(task)) container.remove();
+  });
+}
+
 function renderRow(id) {
   const task = tasks.find(t => t.id === id);
   let container = document.getElementById('row-'+id);
@@ -13493,8 +13619,13 @@ function mergeSelectedTaskClick() {
   const taskId = sel ? parseInt(sel.value, 10) : NaN;
   const task = tasks.find(t => t.id === taskId) || null;
   if (activeMastersTab === 'sync') renderMastersContent();
-  SingleTaskMerge.mergeSingleTask(task).then(() => {
+  SingleTaskMerge.mergeSingleTask(task).then((result) => {
     if (activeMastersTab === 'sync') renderMastersContent();
+    if (task && typeof renderRow === 'function') renderRow(task.id);
+    // Phase 22I PART D/K/P: this path doesn't run recurring dedup itself,
+    // but a merged task can still turn out to be deleted remotely — sweep
+    // for consistency with the other two sync entry points.
+    if (result && result.ok && typeof sweepStaleRenderedRows === 'function') sweepStaleRenderedRows();
     // Phase 16B, requirement 6/7: a single-task merge can change the running
     // task's fields — reconcile the timer against whatever the merge already
     // settled on, never a new comparison here.
@@ -13522,6 +13653,13 @@ function batchMergeClick() {
         typeof BatchCloudMerge.getChangedTaskIdsFromResults === 'function')
       ? BatchCloudMerge.getChangedTaskIdsFromResults(result.results) : [];
     if (changedIds.length > 0 && typeof renderList === 'function') renderList(changedIds);
+    // Phase 22I PART D/K/P: same stale-card sweep as
+    // BackgroundScheduler.refreshSyncTabIfOpen() — this standalone "Batch
+    // Cloud Merge" button runs the exact same completeBatchMerge() →
+    // dedupeRecurringOccurrences() pipeline, so it needs the exact same
+    // catch-all for a duplicate/deleted task whose tombstoning happened
+    // outside this function's own changedIds.
+    if (result && typeof sweepStaleRenderedRows === 'function') sweepStaleRenderedRows();
     if (changedIds.length > 0 && typeof checkCompleteModalForRemoteDeletion === 'function') checkCompleteModalForRemoteDeletion(changedIds);
     // Phase 16B, requirement 6/7: a batch merge can change the running
     // task's fields — reconcile the timer against whatever the merge already
@@ -15393,6 +15531,22 @@ function findExistingRecurringOccurrenceTask(planId, dateStr) {
     dateToStr(new Date(t.createdAt)) === dateStr);
 }
 
+// getRecurringOccurrenceKey(): Phase 22I PART H — the single canonical
+// identity for a recurring occurrence, used consistently everywhere this
+// file needs to recognize "these two task records are the SAME logical
+// occurrence" even when their Sync IDs differ (independently generated on
+// two devices before either had seen the other's copy). Deliberately
+// mirrors the (planId, dateStr) pair findExistingRecurringOccurrenceTask()
+// and dedupeRecurringOccurrences() already used inline — this just gives it
+// one name so every call site (generation, cross-device merge, dedup)
+// derives it identically. Only recurring tasks have this key; a
+// non-recurring task's identity remains its Sync ID only (PART T — this
+// never replaces that).
+function getRecurringOccurrenceKey(task) {
+  if (!task || !task.recurringPlanId || !task.createdAt) return null;
+  return task.recurringPlanId + '|' + dateToStr(new Date(task.createdAt));
+}
+
 // Generate any missing task instances for all active plans, from each plan's
 // start date (or today, whichever is later — we never backfill past days) up
 // through `throughDateStr` inclusive. Safe to call repeatedly; it skips dates
@@ -15526,20 +15680,37 @@ function disableRecurringPlanFrom(planId, fromDateStr) {
 // surfacing a genuine ambiguity to the user over a silent automatic merge, and the
 // existing app has no UI for that yet (documented as a known limitation in
 // PHASE_19D_RESULT.md, matching the brief's item 17 guidance for other ambiguous cases).
+// Phase 22I PART H/K: grouping key and return shape both upgraded, behavior
+// otherwise unchanged. Grouping now goes through getRecurringOccurrenceKey()
+// instead of re-deriving the same (planId, date) pair inline, so generation
+// (materializeRecurringTasksUpTo()), cross-device merge
+// (BatchCloudMerge.mergeOneRemoteTask(), PART I below), and this cleanup
+// pass can never quietly drift out of sync with each other. The return
+// value now also reports which task ids were touched (survivor + every
+// retired duplicate) — PART V diagnostics, and so a caller that needs to
+// know which rows to repaint (PART P) doesn't have to re-derive it.
 function dedupeRecurringOccurrences() {
   const groups = {};
   tasks.forEach(t => {
     if (!t.recurringPlanId) return;
     if (isTaskDeleted(t)) return;
-    const key = t.recurringPlanId + '@' + dateToStr(new Date(t.createdAt));
+    const key = getRecurringOccurrenceKey(t);
+    if (!key) return;
     (groups[key] || (groups[key] = [])).push(t);
   });
   let removedAny = false;
+  const affectedIds = [];
   Object.keys(groups).forEach(key => {
     const group = groups[key];
     if (group.length < 2) return;
     const startedCount = group.filter(t => t.status !== 'idle').length;
-    if (startedCount > 1) return; // genuinely ambiguous — leave for the user, don't guess
+    if (startedCount > 1) {
+      // Genuinely ambiguous (PART J "both running") — leave for the user,
+      // don't guess. Still worth a diagnostic line so this isn't silent.
+      console.log('[SYNC-DEDUPE]', { occurrenceKey: key, ambiguous: true,
+        taskIds: group.map(t => t.id) });
+      return;
+    }
     // Deterministic survivor selection so every device reconciling the SAME group
     // independently converges on the SAME winner without coordinating first: prefer
     // whichever instance was actually started/paused/done over a still-idle duplicate
@@ -15555,10 +15726,14 @@ function dedupeRecurringOccurrences() {
       return aId < bId ? -1 : (aId > bId ? 1 : 0);
     })[0];
     group.forEach(t => {
+      affectedIds.push(t.id);
       if (t !== survivor) { markSyncMetadataDeleted(t); removedAny = true; }
     });
+    console.log('[SYNC-DEDUPE]', { occurrenceKey: key,
+      survivorTaskId: survivor.id,
+      retiredTaskIds: group.filter(t => t !== survivor).map(t => t.id) });
   });
-  return removedAny;
+  return { removedAny: removedAny, affectedIds: affectedIds };
 }
 
 
@@ -15646,19 +15821,55 @@ function updateTaskVisibility() {
 // ── Work hours widget ─────────────────────────────────────────────────────────
 // "Working time" = sum of all tracked task effort for the selected date,
 // including any currently running task's live elapsed.
+//
+// Phase 22I PART A/C: previously this only ever added a running task's live
+// elapsed time by finding an OPEN log entry (durationSecs === null) whose
+// taskId matched. That's a fine shortcut on a device where the task was
+// actually started locally (startTask() always creates a matching open
+// entry in the same breath) — but after a cross-device sync, the running
+// TASK can arrive (via the task merge pipeline) on a pass where the
+// logEntries DOMAIN doesn't merge in the same instant (e.g. it's guarded by
+// isDomainDirty('logEntries') because this device has its own unsynced log
+// edit pending) — leaving a synchronized running task with no local open
+// log entry to find. The old code silently contributed zero live seconds
+// for that task, which is exactly PROBLEM 1's "Total Working Hours does not
+// tick live" symptom. Fixed by deriving the running task's own live elapsed
+// time directly from findRunningTask()/liveElapsedSecs() — the same
+// authoritative timestamp model renderWorkWidget()'s ticking interval
+// already trusts — instead of only through logEntries. Fixed-duration
+// entries are still summed exactly as before; any OTHER still-open entry
+// (a rare, non-running leftover) still contributes its own snapshot, but
+// the running task's own entry is never double-counted.
 function workTotalSecsForDate(dateStr) {
   const isToday = dateStr === todayStr();
   let total = 0;
+
+  // 1. Fixed/completed effort — unchanged.
   logEntries.forEach(e => {
     if (!entryMatchesDate(e, dateStr)) return;
-    if (e.durationSecs !== null) {
-      total += e.durationSecs;
-    } else if (isToday) {
-      // live running entry
-      const task = tasks.find(t => t.id === e.taskId);
-      if (task) total += liveElapsedSecs(task);
-    }
+    if (e.durationSecs !== null) total += e.durationSecs;
   });
+
+  if (!isToday) return total;
+
+  // 2. Live running effort — added exactly once, straight from the running
+  //    task itself (source of truth: liveElapsedMs()/segmentStart), never
+  //    from whether a matching open log entry happens to exist locally.
+  const runningTask = (typeof findRunningTask === 'function') ? findRunningTask() : null;
+  if (runningTask) total += liveElapsedSecs(runningTask);
+
+  // 3. Any OTHER open log entry that is NOT the running task's own entry
+  //    (e.g. a stale open entry left over from an interrupted session) —
+  //    same safety-net behavior this function already had, just guarded so
+  //    the running task's own live time is never summed twice.
+  logEntries.forEach(e => {
+    if (!entryMatchesDate(e, dateStr)) return;
+    if (e.durationSecs !== null) return; // already summed above
+    if (runningTask && e.taskId === runningTask.id) return; // counted in step 2
+    const task = tasks.find(t => t.id === e.taskId);
+    if (task) total += liveElapsedSecs(task);
+  });
+
   return total;
 }
 
@@ -15972,6 +16183,58 @@ function getRunningTaskState() {
   };
 }
 
+// ensureOpenLogEntryForRunningTask(): Phase 22I PART C — a running task
+// received from another device via sync can arrive with no matching open
+// (endTs === null) log entry locally, because logEntries is its own
+// whole-array sync domain (applyRemoteLogEntriesIfNewer()) and can be
+// skipped on a given pass (isDomainDirty('logEntries') guarding a local
+// unsynced log edit, or simply not having merged down yet on this exact
+// pass) independently of whether the task merge already brought the
+// running TASK across. Repairs that gap locally — without ever creating a
+// duplicate — reusing the exact same log-entry shape startTask() already
+// writes, and the exact same canonical task/log identity rule the rest of
+// this file already uses (taskId + startTs; a task has at most one entry
+// with endTs === null at a time). Never invents a second identity system.
+function ensureOpenLogEntryForRunningTask(task) {
+  if (!task || task.status !== 'running') return;
+  const openEntries = logEntries.filter(e => e.taskId === task.id && e.endTs === null);
+  if (openEntries.length === 1) return; // already correct — nothing to repair
+
+  if (openEntries.length > 1) {
+    // Defensive: never let the same running task carry two open entries.
+    // Keep whichever entry's startTs is closest to the task's own
+    // segmentStart (the authoritative "when this running segment began"
+    // value) and drop the rest — they can only be leftover duplicates,
+    // never legitimate distinct running segments, since a task can only
+    // be running once at a time.
+    const authoritativeStart = task.segmentStart || task.startedAt || Date.now();
+    openEntries.sort((a, b) => Math.abs(a.startTs - authoritativeStart) - Math.abs(b.startTs - authoritativeStart));
+    const keep = openEntries[0];
+    logEntries = logEntries.filter(e => e === keep || e.taskId !== task.id || e.endTs !== null);
+    console.log('[SYNC-RUNNING] repaired duplicate open log entries', { taskId: task.id, kept: keep.startTs, removed: openEntries.slice(1).map(e => e.startTs) });
+    if (typeof recordSyncChange === 'function') recordSyncChange('logEntries', task.id + '@' + keep.startTs, 'update');
+    return;
+  }
+
+  // No open entry at all — synthesize one from the task's own already-
+  // authoritative running state, exactly mirroring the shape startTask()
+  // itself writes (same fields, same defaults), so the log table and every
+  // other logEntries consumer treat it identically to a locally-started run.
+  const startTs = task.segmentStart || task.startedAt || Date.now();
+  logEntries.push({
+    taskId: task.id, heading: (task.heading || '').trim(),
+    project: task.project, module: task.module,
+    nature: task.nature, ticket: task.ticket || '',
+    description: (task.customFields && task.customFields.description) || '',
+    remark: (task.customFields && task.customFields.remark) || '',
+    employee: userName,
+    startTs: startTs, endTs: null, durationSecs: null,
+    customFields: { ...(task.customFields || {}) }
+  });
+  console.log('[SYNC-RUNNING]', { taskId: task.id, status: task.status, segmentStart: task.segmentStart, accumulatedMs: task.accumulatedMs, timerActive: !!intervals[task.id], repairedOpenLogEntry: true });
+  if (typeof recordSyncChange === 'function') recordSyncChange('logEntries', task.id + '@' + startTs, 'create');
+}
+
 // resumeRecoveredTask(): Requirement 2/4/10/11/13 — restores the task as the
 // active/running task without requiring the user to press Start again. The
 // task's own status/accumulatedMs/segmentStart are left exactly as already
@@ -15981,6 +16244,16 @@ function resumeRecoveredTask(task) {
   if (!validateRunningTask(task)) return;
   stopDuplicateTimers(task.id);
   ensureActiveTimer(task);
+  // Phase 22I PART C — repair a missing/duplicated open log entry, if any,
+  // BEFORE the widget below reads it.
+  ensureOpenLogEntryForRunningTask(task);
+  // Phase 22I PART B/O — paint Total Working Hours (and any log-table
+  // views) immediately, rather than waiting up to 1000ms for
+  // ensureActiveTimer()'s own interval to tick for the first time. The
+  // interval it just (re)started still owns every subsequent tick; this is
+  // only the very first paint.
+  if (typeof renderWorkWidget === 'function') renderWorkWidget();
+  if (typeof updateLogTable === 'function') updateLogTable();
 }
 
 // restoreRunningTask(): Requirement 1/2/8/9 — the single recovery entry
