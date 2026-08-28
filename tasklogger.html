@@ -203,6 +203,11 @@ body {
 .sync-dot.sync-syncing { background: var(--amber-mid); animation: syncDotBlink 1s ease-in-out infinite; }
 .sync-dot.sync-synced { background: var(--green-mid); }
 .sync-dot.sync-failed { background: var(--red-mid); animation: syncDotBlink 1s ease-in-out infinite; }
+/* Phase 22K: "Sync required" — orange/amber and STABLE (no animation). Blinking is
+   reserved for an active operation (sync-syncing) or a failure (sync-failed) per the
+   existing design; this state means "there are significant local changes waiting to
+   be synced", not "something is happening right now", so it must never blink. */
+.sync-dot.sync-required { background: var(--amber-mid); }
 .sync-dot.sync-neutral { background: var(--text-tertiary); }
 @keyframes syncDotBlink { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
 
@@ -8160,9 +8165,27 @@ const BackgroundScheduler = (function () {
       // the cloud automatically — hasPendingDomainWork() is the domain-level
       // counterpart of the task-level uploadsRequired/createRemote stats already
       // checked here.
-      const needsUpload   = (stats.uploadsRequired > 0)   || (stats.createRemote > 0)
+      //
+      // Phase 22K (PROBLEM 1 ROOT CAUSE): determineSyncAction() classifies a
+      // pending deletion (local tombstone not yet pushed, OR a remote tombstone
+      // not yet pulled) as DELETE_REMOTE / DELETE_LOCAL, which summarizeSyncPlan()
+      // rolls up into stats.pendingDeletes — but neither needsUpload nor
+      // needsDownload ever consulted that counter. A pass whose ONLY outstanding
+      // work was a deletion (no other dirty task, no dirty domain) therefore saw
+      // needsUpload === needsDownload === false and skipped BOTH the upload step
+      // (BatchTaskUpload.processUploadQueue(), which is what actually pushes the
+      // tombstone in buildStatePayload()'s full-state write) and the download step
+      // (BatchCloudMerge, which is what actually applies an incoming remote
+      // tombstone via mergeRemoteTask()'s `s.deleted = !!rs.deleted`). The
+      // tombstone data itself was always correct (markSyncMetadataDeleted(),
+      // buildStatePayload(), mergeOneRemoteTask() all handle it properly) — it
+      // simply never got a chance to run. Including pendingDeletes here is the
+      // fix: a pending deletion now triggers both the push (to propagate this
+      // device's own delete) and the pull+merge (to receive another device's
+      // delete), exactly like any other pending change already does.
+      const needsUpload   = (stats.uploadsRequired > 0)   || (stats.createRemote > 0) || (stats.pendingDeletes > 0)
         || (typeof hasPendingDomainWork === 'function' && hasPendingDomainWork());
-      const needsDownload = (stats.downloadsRequired > 0) || (stats.createLocal > 0);
+      const needsDownload = (stats.downloadsRequired > 0) || (stats.createLocal > 0) || (stats.pendingDeletes > 0);
 
       if (!needsUpload && !needsDownload) {
         // Phase 22B PART 12: re-check before this early no-op commit too —
@@ -9306,6 +9329,15 @@ function saveState() {
   // generalized tracker every other domain uses — see trackNonTaskDomainChangesOnSave()'s
   // own header comment for why this, not per-call-site instrumentation.
   if (typeof trackNonTaskDomainChangesOnSave === 'function') trackNonTaskDomainChangesOnSave();
+  // Phase 22K (PROBLEM 3): same "one funnel, not ~30 scattered call sites" reasoning
+  // as trackNonTaskDomainChangesOnSave() just above — virtually every task/log/master
+  // mutation in this file already calls saveState() immediately after changing
+  // task._sync.dirty or a domain's dirty flag, so refreshing the Sync Required dot
+  // here (cheap: pure DOM + in-memory reads, zero Google API calls) is what makes it
+  // appear "immediately" (task brief Test 8/9/14) without instrumenting every
+  // individual mutation function. Safe before the DOM/UI is ready — the function
+  // itself no-ops if #top-sync-dot/#top-sync-btn aren't in the document yet.
+  if (typeof refreshTopSyncIndicator === 'function') refreshTopSyncIndicator();
 }
 
 function renderAll() {
@@ -13832,9 +13864,47 @@ function computeTopSyncStatus() {
   // initialization can complete) but _running has not flipped true yet — the
   // Syncing… feedback still must appear immediately for that window, not
   // just once runSynchronizationPass() itself begins.
+  // Phase 22K (PROBLEM 3 — Sync Required indicator): the single, authoritative,
+  // local-only check for "are there significant local changes that have not yet
+  // been included in a completed synchronization transaction." Reuses the exact
+  // same dirty state every other part of this file already maintains
+  // (task._sync.dirty via getDirtyTasks(), domainSyncState via
+  // hasPendingDomainWork()) — no new tracking is introduced here, and calling
+  // this performs zero Google API calls (both are pure reads of in-memory/
+  // localStorage-backed state). Priority order below (SYNCING > SYNC FAILED >
+  // SYNC REQUIRED > SYNCED > DISCONNECTED/CONNECT) is deterministic and matches
+  // the task brief's required state-priority list exactly: a pending local
+  // change is surfaced ("Sync required") even while offline/disconnected/not-
+  // yet-authenticated, because that pending state is true regardless of
+  // connectivity, and the button remains the single place the user goes to
+  // both reconnect and sync.
+  function hasUnsyncedLocalChanges() {
+    if (typeof getDirtyTasks === 'function' && getDirtyTasks().length > 0) return true;
+    if (typeof hasPendingDomainWork === 'function' && hasPendingDomainWork()) return true;
+    return false;
+  }
+
+  // 1. SYNCING — an active operation in progress.
   if (schedulerStatus.running || debouncing || schedulerStatus.status === 'scheduled') {
     return { dot: 'sync-syncing', title: 'Synchronizing with Google Drive…', label: 'Syncing…' };
   }
+  // 2. SYNC FAILED — the most recent transaction did not complete successfully.
+  // (Local changes remain pending after a failure — see finalizeRetryState()/
+  // BatchTaskUpload's own untouched-on-failure contract — but that is still
+  // reported as "Sync failed", not "Sync required": a failure is more actionable
+  // information than the generic dirty state it implies.)
+  if (schedulerStatus.lastResult && schedulerStatus.lastResult.ok === false) {
+    return { dot: 'sync-failed', title: 'Sync failed — tap to retry', label: 'Sync failed' };
+  }
+  // 3. SYNC REQUIRED — significant local changes are pending. Local UI state
+  // only; never mind whether Drive is currently reachable. Must never blink
+  // (blinking is reserved for sync-syncing/sync-failed above).
+  if (hasUnsyncedLocalChanges()) {
+    return { dot: 'sync-required', title: 'Sync required — you have local changes that haven\'t been synced yet', label: 'Sync required' };
+  }
+  // 4. SYNCED (and the connectivity/auth states that gate reaching it) — only
+  // evaluated once it's confirmed there is nothing local left pending, so
+  // "Synced" is never shown while unsynchronized local changes exist.
   if (authStatus.state === 'connecting') {
     return { dot: 'sync-neutral', title: 'Connecting…', label: 'Connecting…' };
   }
@@ -13846,9 +13916,6 @@ function computeTopSyncStatus() {
   }
   if (schedulerStatus.blockReason === 'workspace-unavailable') {
     return { dot: 'sync-neutral', title: 'Waiting for Drive workspace to be ready', label: 'Sync' };
-  }
-  if (schedulerStatus.lastResult && schedulerStatus.lastResult.ok === false) {
-    return { dot: 'sync-failed', title: 'Sync failed — tap to retry', label: 'Sync failed' };
   }
   if (!schedulerStatus.lastSyncAt) {
     return { dot: 'sync-neutral', title: 'Not yet synced — tap Sync', label: 'Sync' };
