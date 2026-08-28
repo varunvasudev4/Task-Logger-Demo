@@ -8480,6 +8480,23 @@ const BackgroundScheduler = (function () {
     // popup is open AND represents one of THIS pass's own changedIds (see
     // checkCompleteModalForRemoteDeletion()'s own header comment).
     if (changedIds.length > 0 && typeof checkCompleteModalForRemoteDeletion === 'function') checkCompleteModalForRemoteDeletion(changedIds);
+    // Phase 22L (BUG 1 ROOT CAUSE): repair any log entry whose `taskId` has
+    // drifted from its task's LOCAL id (see reconcileLogEntryTaskLinkage()'s
+    // own header comment) BEFORE reconcileRunningTaskAfterSync() below runs
+    // ensureOpenLogEntryForRunningTask() — that function's own open-entry
+    // filter is keyed on local task.id, so a not-yet-relinked entry would
+    // otherwise read as "no open entry" and get a duplicate synthesized
+    // alongside it. Gated on this pass having actually merged something
+    // (a task or a domain) — a true no-op pass has nothing to reconcile.
+    // Local-only, zero Google API calls.
+    if ((mergeResult || (passResult && passResult.domainsMerged)) && typeof reconcileLogEntryTaskLinkage === 'function') {
+      const relinked = reconcileLogEntryTaskLinkage();
+      if (relinked) {
+        if (typeof saveState === 'function') saveState();
+        if (typeof updateLogTable === 'function') updateLogTable();
+        if (typeof updateLogPanel === 'function') updateLogPanel();
+      }
+    }
     // Phase 16B, requirement 6: every automatic trigger funnels through
     // scheduleSync().then(refreshSyncTabIfOpen) — this is therefore the one
     // place to reconcile the running-task timer after ANY automatic pass
@@ -10009,7 +10026,17 @@ function startTask(id) {
     remark: (task.customFields && task.customFields.remark) || '',
     employee: userName,
     startTs: newEntryStartTs, endTs: null, durationSecs: null,
-    customFields: { ...(task.customFields || {}) }
+    customFields: { ...(task.customFields || {}) },
+    // Phase 22L (BUG 1 ROOT CAUSE): `taskId` above is this DEVICE's own local
+    // numeric task id — never itself synchronized as a stable identity (see
+    // createLocalTaskFromRemote(), which assigns a fresh local id when a task
+    // is first received from another device). `taskSyncId` is the STABLE
+    // cross-device identity (task._sync.syncId, same one BatchCloudMerge
+    // already keys every task merge on) — carried alongside taskId so
+    // reconcileLogEntryTaskLinkage() can repair taskId on a receiving device
+    // after a whole-array logEntries sync, instead of the entry silently
+    // pointing at a task id that only ever existed on the sending device.
+    taskSyncId: (task._sync && task._sync.syncId) || null
   });
   // Phase 19C (Logs/Deletion/Clear Logs/Time Transfer sync integration): a new log
   // entry is a real synchronized mutation — mark the 'logEntries' domain dirty via the
@@ -10987,6 +11014,11 @@ function reopenTask(taskId) {
   // Sync accumulatedMs from the log entry's saved durationSecs (respects any manual adjustment)
   // so the timer resumes from the edited/adjusted time, not the raw tracked time.
   const entry = [...logEntries].reverse().find(e => e.taskId === taskId && e.endTs !== null);
+  // Phase 22L (BUG 2): capture the entity key BEFORE any mutation below could change
+  // startTs, same "capture first" idiom finalizeMarkComplete()/editLogEntry() already
+  // use for their own recordSyncChange() calls — taskId + startTs is the closest
+  // available stand-in identity a log entry has (see SYNC_STATE_INVENTORY.md).
+  const entryKey = entry ? (entry.taskId + '@' + entry.startTs) : null;
   if (entry && entry.durationSecs !== null) {
     task.accumulatedMs = entry.durationSecs * 1000;
     // Pull the entry's canonical (top-level) description/remark back onto the task so the
@@ -10998,6 +11030,13 @@ function reopenTask(taskId) {
     // Re-open the log entry so live elapsed contributes to working hours
     entry.endTs = null;
     entry.durationSecs = null;
+    // Phase 22L (BUG 2 ROOT CAUSE): reopening a completed task mutates this log
+    // entry (endTs/durationSecs) exactly as finalizeMarkComplete() does in reverse —
+    // but unlike that function, this call was previously missing entirely, so the
+    // 'logEntries' domain was never marked dirty and a Reopen never reached another
+    // device on the next Sync. Same generalized tracker every other logEntries
+    // mutation in this file already uses (Phase 19C/20).
+    if (typeof recordSyncChange === 'function' && entryKey) recordSyncChange('logEntries', entryKey, 'update');
   } else {
     // No saved entry — keep existing accumulatedMs
   }
@@ -11005,6 +11044,13 @@ function reopenTask(taskId) {
   // Restore to paused state — timer will tick from accumulatedMs (edited duration)
   task.status = 'paused';
   task.segmentStart = null;
+
+  // Phase 22L (BUG 2 ROOT CAUSE): reopening is a real business-data edit to the
+  // task itself (status/accumulatedMs/customFields) — same as every other task
+  // state transition (startTask/pauseTask/finalizeMarkComplete) already calling
+  // touchSyncMetadata(). This was the other missing half: without it task._sync.dirty
+  // never became true, so Sync had nothing telling it this task needed to be pushed.
+  touchSyncMetadata(task);
 
   saveState();
 
@@ -16250,6 +16296,54 @@ function getRunningTaskState() {
   };
 }
 
+// reconcileLogEntryTaskLinkage(): Phase 22L (BUG 1 ROOT CAUSE) — a log
+// entry's `taskId` is a device-local numeric id, never itself a synchronized
+// identity (SYNC_STATE_INVENTORY.md). logEntries is its own whole-array sync
+// domain (applyRemoteLogEntriesIfNewer(), replace-not-merge) that can be
+// downloaded on a different device than the one that created the entry.
+// When a task reaches THIS device for the first time via sync,
+// createLocalTaskFromRemote() assigns it a FRESH local numeric id — not the
+// id it had on the sending device — while preserving only its stable
+// `_sync.syncId`. A downloaded log entry still carries the SENDING device's
+// taskId verbatim, so after that whole-array replace it can point at no
+// local task at all: tasks.find(t => t.id === entry.taskId) (used by
+// reopenTask(), the Reopen button's own onclick, openCompleteModal(), etc.)
+// silently finds nothing, while the entry still renders as its own row in
+// the Log Table (which reads directly from entry fields, never requiring a
+// live task match) — this is what looks like a stray/duplicate row after a
+// cross-device sync, and is compounded by ensureOpenLogEntryForRunningTask()
+// just below: filtering by the (now-wrong) local task.id sees zero open
+// entries for a still-running task and synthesizes a brand-new one,
+// stranding the orphaned original — an actual duplicate. Fix: every entry
+// created locally now also stamps `taskSyncId` (the STABLE identity)
+// alongside `taskId` (see startTask()/ensureOpenLogEntryForRunningTask()).
+// This function remaps `taskId` back to whichever LOCAL task currently owns
+// that syncId whenever the two have drifted apart — local-only, idempotent,
+// zero Google API calls, same "self-heal after a merge settles" pattern
+// Phase 22I PART C already established for the running-task case
+// specifically; this generalizes it to every log entry, not only the
+// currently-running one. An entry with no `taskSyncId` (created before this
+// phase) has nothing to reconcile against and is left exactly as-is — this
+// never invents a match, and never touches `taskId` values that already
+// point at their correct local task. Does not mark the 'logEntries' domain
+// dirty: this only corrects a device-LOCAL numeric convenience value, and
+// every other device reconciles its own local copy the same way from the
+// same `taskSyncId`, so there is nothing here that needs re-uploading.
+function reconcileLogEntryTaskLinkage() {
+  if (!Array.isArray(logEntries) || logEntries.length === 0) return false;
+  let changed = false;
+  logEntries.forEach(e => {
+    if (!e || !e.taskSyncId) return; // legacy entry — no stable identity to reconcile against
+    const owner = tasks.find(t => t && t._sync && t._sync.syncId === e.taskSyncId && !isTaskDeleted(t));
+    if (owner && owner.id !== e.taskId) {
+      console.log('[SYNC-LOG-LINK]', { taskSyncId: e.taskSyncId, oldTaskId: e.taskId, newTaskId: owner.id, entryStartTs: e.startTs });
+      e.taskId = owner.id;
+      changed = true;
+    }
+  });
+  return changed;
+}
+
 // ensureOpenLogEntryForRunningTask(): Phase 22I PART C — a running task
 // received from another device via sync can arrive with no matching open
 // (endTs === null) log entry locally, because logEntries is its own
@@ -16262,6 +16356,10 @@ function getRunningTaskState() {
 // writes, and the exact same canonical task/log identity rule the rest of
 // this file already uses (taskId + startTs; a task has at most one entry
 // with endTs === null at a time). Never invents a second identity system.
+// Phase 22L: run AFTER reconcileLogEntryTaskLinkage() on any given pass (see
+// refreshSyncTabIfOpen()) so a merely-mislinked entry is repaired in place
+// first, rather than this function mistaking it for "no open entry" and
+// synthesizing an actual duplicate.
 function ensureOpenLogEntryForRunningTask(task) {
   if (!task || task.status !== 'running') return;
   const openEntries = logEntries.filter(e => e.taskId === task.id && e.endTs === null);
@@ -16296,7 +16394,9 @@ function ensureOpenLogEntryForRunningTask(task) {
     remark: (task.customFields && task.customFields.remark) || '',
     employee: userName,
     startTs: startTs, endTs: null, durationSecs: null,
-    customFields: { ...(task.customFields || {}) }
+    customFields: { ...(task.customFields || {}) },
+    // Phase 22L — see startTask()'s own comment for why this field exists.
+    taskSyncId: (task._sync && task._sync.syncId) || null
   });
   console.log('[SYNC-RUNNING]', { taskId: task.id, status: task.status, segmentStart: task.segmentStart, accumulatedMs: task.accumulatedMs, timerActive: !!intervals[task.id], repairedOpenLogEntry: true });
   if (typeof recordSyncChange === 'function') recordSyncChange('logEntries', task.id + '@' + startTs, 'create');
