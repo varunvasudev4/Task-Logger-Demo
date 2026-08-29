@@ -1169,6 +1169,11 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
   .header-row { display: grid; gap: 6px; width: 100%; min-width: 0; }
   .header-row-1 { grid-template-columns: 23fr 54fr 23fr; }
   .header-row-2 { grid-template-columns: 3fr 1fr 1fr 1fr; }
+  /* Phase 25B: past dates hide Add task (see updateTaskVisibility()) —
+     when it's hidden, Date takes the freed 23% too (23fr 77fr) instead of
+     leaving an empty third column where Add task used to sit. The class
+     is toggled in JS alongside the existing display:none logic. */
+  .header-row-1.header-row-1--no-add-task { grid-template-columns: 23fr 77fr; }
 
   /* Row-scoped order overrides the desktop/tablet order set above the
      media queries — within each row's own grid the controls must sort
@@ -16089,7 +16094,14 @@ function updateTaskVisibility() {
   // or future dates — disabled on past dates (read-only history).
   document.getElementById('task-list').style.display = '';
   const addBtn = document.querySelector('.btn-primary[onclick="addTask()"]');
-  if (addBtn) addBtn.style.display = (getSelectedDate() >= todayStr()) ? '' : 'none';
+  const showAddBtn = getSelectedDate() >= todayStr();
+  if (addBtn) addBtn.style.display = showAddBtn ? '' : 'none';
+  // Phase 25B: on the mobile 2-row grid header, Date's column should
+  // expand to fill the space Add task leaves behind when it's hidden
+  // (past dates), instead of leaving an empty gap where it used to sit.
+  // No-op on desktop/tablet, where .header-row-1 is `display:contents`.
+  const row1 = document.querySelector('.header-row-1');
+  if (row1) row1.classList.toggle('header-row-1--no-add-task', !showAddBtn);
 }
 
 
