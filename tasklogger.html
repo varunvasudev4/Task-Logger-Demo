@@ -225,6 +225,13 @@ body {
 .btn-done { border-color: var(--blue-mid); color: var(--blue-dark); }
 .btn-done:hover { background: var(--blue-bg) !important; }
 
+.btn-attach { position: relative; }
+.btn-attach:hover { border-color: var(--blue-mid); color: var(--blue-mid); background: var(--blue-bg) !important; }
+.attach-badge {
+  position: absolute; top: -6px; right: -6px; min-width: 14px; height: 14px; padding: 0 3px;
+  border-radius: 7px; background: var(--blue-mid); color: #1a1108; font-size: 9px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center; line-height: 1;
+}
 .btn-edit:hover { border-color: var(--purple-mid); color: var(--purple-mid); background: var(--purple-bg) !important; }
 .btn-delete:hover { border-color: var(--red-mid); color: var(--red-mid); background: var(--red-bg) !important; }
 .btn-danger { background: var(--red-bg); color: var(--red-mid); border-color: var(--red-mid); }
@@ -1983,6 +1990,8 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
         <i class="ti ti-file-upload" style="font-size:24px;display:block;margin-bottom:6px;opacity:.5"></i>
         Click to choose a CSV or Excel file (.csv, .xlsx, .xls) or drag &amp; drop here
         <input type="file" id="csv-file-input" accept=".csv,.xlsx,.xls" style="display:none" onchange="handleCSVFile(this)" />
+        <!-- Phase 29: shared hidden file input for task attachments — native picker only, one shared element reused across every task (see openAttachmentPicker()/handleAttachmentFileSelect()). -->
+        <input type="file" id="attachmentFileInput" multiple style="display:none" onchange="handleAttachmentFileSelect(event)" />
       </div>
       <div class="csv-import-preview" id="csv-import-preview"></div>
     </div>
@@ -2156,6 +2165,23 @@ let recurringPlans = []; // { id, heading, project, nature, module, ticket, cust
                           //   generatedDates: [YYYY-MM-DD, ...] }
 let recurringPlanIdCounter = 0;
 let importIdCounter = 0; // separate negative-only namespace for CSV-imported entries, never overlaps real task IDs
+
+// ── Attachment Metadata Foundation (Phase 28) ───────────────────────────────
+// Establishes ONLY the local metadata model for task attachments — never the
+// binary files themselves. Those will eventually live in Google Drive
+// (TTL/Attachments — see GoogleDriveWorkspace.getAttachmentsFolderId() far
+// below); this array only ever holds lightweight, JSON-serializable records
+// describing them, exactly like `tasks`/`logEntries` already do for their
+// own domains. No IndexedDB, no base64 blobs in here — see
+// PHASE_28_ATTACHMENTS_FOUNDATION.md for the full rationale.
+//
+// Record shape: { attachmentId, taskId, recurringPlanId, fileName, mimeType,
+// size, createdAt, updatedAt, driveFileId, driveFolderId, syncStatus }
+let attachments = [];
+// Same monotonic-counter identity scheme taskIdCounter already uses — never
+// array index, filename, or timestamp alone (Phase 28 §9: attachmentId must
+// be stable).
+let attachmentIdCounter = 0;
 let intervals = {};
 // Which task-card textarea fields (Description, Remark, custom Text Area columns) are
 // currently expanded, keyed by "taskId:columnKey". Not persisted to storage — every
@@ -2773,7 +2799,14 @@ const DOMAIN_WHOLE_KEY = '__domain__';
 // still records a domain outside this list (forward-compatible with a state
 // category not yet anticipated), but every call site added in this session uses one
 // of these.
-const SYNC_DOMAINS = ['logEntries', 'recurringPlans', 'masters', 'breakData', 'theme', 'weekendOverrides', 'counters', 'userName'];
+// Phase 28: 'attachments' added to the domain list so attachment metadata
+// changes can mark Sync Required via the exact same funnel every other
+// domain uses (recordSyncChange() below). Unlike the other domains here,
+// 'attachments' is NOT yet folded into buildStatePayload()'s upload
+// contents or any download/merge path — this phase establishes the dirty-
+// tracking hook only; actually synchronizing attachment metadata is
+// reserved for a later phase, per PHASE_28_ATTACHMENTS_FOUNDATION.md.
+const SYNC_DOMAINS = ['logEntries', 'recurringPlans', 'masters', 'breakData', 'theme', 'weekendOverrides', 'counters', 'userName', 'attachments'];
 
 // In-memory domain change state, shaped as:
 //   { schemaVersion, domains: { [domain]: { dirty, version, lastChangeAt, entities: { [entityId]: { operation, version, timestamp, deviceId } } } } }
@@ -2861,6 +2894,244 @@ function recordSyncChange(domain, entityId, operation) {
   }
   return Object.assign({ domain: domain, entityId: key === DOMAIN_WHOLE_KEY ? null : key }, rec.entities[key]);
 }
+// ── End Generalized Application State Change Tracking (Phase 20) ─────────────────
+
+// ── Attachment Metadata Foundation (Phase 28) ─────────────────────────────────────
+// See the `attachments`/`attachmentIdCounter` declaration near the top of ── State
+// ── for the record shape and rationale. This block is the metadata-only
+// counterpart to task creation (compare createSyncMetadata()/enqueueTask() for
+// tasks) — it never touches Google Drive, never uploads a file, and is not called
+// from any UI in this phase (no file picker exists yet — see Phase 29). It exists
+// so Phase 29's upload flow has a ready-made, tested place to create the local
+// record before/while it uploads the actual bytes.
+
+// Named error-state vocabulary for future attachment operations (Phase 29+), so
+// those phases share one set of reason strings instead of inventing ad hoc ones
+// per call site — mirrors how sync failures elsewhere in this file use stable
+// `reason` strings. Nothing in THIS phase ever produces these; there is no
+// attachment operation yet that could fail (Phase 28 §21).
+const ATTACHMENT_ERROR_STATES = {
+  WORKSPACE_UNAVAILABLE: 'workspace-unavailable',
+  FOLDER_UNAVAILABLE:    'attachment-folder-unavailable',
+  AUTH_UNAVAILABLE:      'authentication-unavailable',
+  DRIVE_API_FAILURE:     'drive-api-failure',
+  PERMISSION_FAILURE:    'permission-failure',
+  FILE_MISSING:          'drive-file-missing'
+};
+
+// Documented future-synchronization states (Phase 28 §10) an attachment record's
+// `syncStatus` field is expected to hold. Every record created in this phase
+// starts at 'local-only' and stays there — nothing in this phase transitions it.
+const ATTACHMENT_SYNC_STATUSES = ['local-only', 'pending-upload', 'synced', 'pending-delete', 'error'];
+
+// Stable attachment identity (Phase 28 §9) — same monotonic-counter pattern
+// task.id / recurringPlans[].id already use. Never array index, filename, or
+// timestamp alone.
+function generateAttachmentId() {
+  return ++attachmentIdCounter;
+}
+
+// Creates a local-only attachment metadata record for a task and marks the
+// 'attachments' domain dirty via the existing generalized change-tracking
+// funnel — this NEVER makes a Drive API call itself (Phase 28 §18/§19); it only
+// sets Sync Required so a future manual Sync (Phase 29+) can act on it. The
+// actual file upload, and updating driveFileId/driveFolderId/syncStatus once it
+// succeeds, is Phase 29's responsibility — not implemented here.
+//
+// Uses the task's own stable `id` (Phase 28 §11: never array position, card
+// position, log-table row position, or displayed name) and, where the task is a
+// recurring occurrence, its `recurringPlanId` — kept as a SEPARATE field so a
+// future phase can tell "this task occurrence," "this attachment," and "this
+// recurring template" apart without duplicating the file per occurrence
+// (Phase 28 §13).
+function createAttachmentMetadata(taskId, fileMeta) {
+  const task = tasks.find(t => t.id === taskId);
+  const attachmentId = generateAttachmentId();
+  const nowIso = new Date().toISOString();
+  const record = {
+    attachmentId: attachmentId,
+    taskId: taskId,
+    recurringPlanId: (task && task.recurringPlanId) || null,
+    fileName: (fileMeta && fileMeta.fileName) || '',
+    mimeType: (fileMeta && fileMeta.mimeType) || '',
+    size: (fileMeta && fileMeta.size) || 0,
+    createdAt: nowIso,
+    updatedAt: nowIso,
+    // Populated once Phase 29 actually uploads the file to
+    // TTL/Attachments — always null for every record created in this phase.
+    driveFileId: null,
+    driveFolderId: null,
+    syncStatus: 'local-only'
+  };
+  attachments.push(record);
+  if (typeof recordSyncChange === 'function') recordSyncChange('attachments', attachmentId, 'create');
+  saveState();
+  return record;
+}
+
+// Read-only lookup by the task's stable id — works identically whether the
+// task is still active or has moved into the log/history (Phase 28 §12), since
+// both reference the exact same `task.id` this function filters on. Never
+// duplicates metadata when a task moves areas.
+function getAttachmentsForTask(taskId) {
+  return attachments.filter(a => a.taskId === taskId);
+}
+// ── End Attachment Metadata Foundation (Phase 28) ─────────────────────────────────
+
+// ── Attachment Local Blob Store (Phase 29) ──────────────────────────────────────
+// Holds the actual pending attachment FILE CONTENT (a Blob/File) that Phase 28's
+// createAttachmentMetadata() deliberately does not — Phase 28 §2 established
+// metadata-only; storing the bytes themselves is this phase's job. Never
+// localStorage/task JSON (brief §3: "Do NOT store binary file content as base64
+// in localStorage/task JSON") — IndexedDB is the only local storage this app has
+// that can hold a Blob directly, keyed by the same stable attachmentId every
+// other part of this feature already uses (never array index/filename/timestamp,
+// Phase 28 §9).
+//
+// This module makes no Google Drive API call of any kind — it only ever reads or
+// writes this browser profile's own local IndexedDB. Every method resolves
+// (never rejects) even on a "not available"/"not found" condition, so a caller
+// always gets a normal recoverable outcome back, matching this file's own
+// try/catch-and-default-safely posture for localStorage (see loadState()).
+const AttachmentBlobStore = (function () {
+  const DB_NAME = 'ttl_attachment_blobs';
+  const DB_VERSION = 1;
+  const STORE_NAME = 'blobs';
+  let _dbPromise = null;
+
+  function openDb() {
+    if (_dbPromise) return _dbPromise;
+    _dbPromise = new Promise((resolve) => {
+      if (typeof indexedDB === 'undefined') { resolve(null); return; }
+      let req;
+      try { req = indexedDB.open(DB_NAME, DB_VERSION); } catch (e) { resolve(null); return; }
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(STORE_NAME)) db.createObjectStore(STORE_NAME);
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => resolve(null);
+    });
+    return _dbPromise;
+  }
+
+  // Stores a File/Blob under a given stable attachmentId (never array index or
+  // filename — Phase 28 §9/§13: different attachments may share a filename).
+  // Resolves true/false — never rejects — so a local storage failure (e.g.
+  // private-browsing quota) is always a recoverable outcome the caller can react
+  // to, never an uncaught rejection.
+  function putBlob(attachmentId, blob) {
+    return openDb().then(db => {
+      if (!db) return false;
+      return new Promise(resolve => {
+        try {
+          const tx = db.transaction(STORE_NAME, 'readwrite');
+          tx.objectStore(STORE_NAME).put(blob, attachmentId);
+          tx.oncomplete = () => resolve(true);
+          tx.onerror = () => resolve(false);
+          tx.onabort = () => resolve(false);
+        } catch (e) { resolve(false); }
+      });
+    });
+  }
+
+  // Reads back a previously stored blob. Resolves null (never rejects) if
+  // IndexedDB is unavailable, nothing was ever stored for this id, or the read
+  // fails — AttachmentManager.processPendingUploads() treats null exactly like
+  // Phase 29 §14's "file missing" recoverable error state, never a thrown error.
+  function getBlob(attachmentId) {
+    return openDb().then(db => {
+      if (!db) return null;
+      return new Promise(resolve => {
+        try {
+          const tx = db.transaction(STORE_NAME, 'readonly');
+          const req = tx.objectStore(STORE_NAME).get(attachmentId);
+          req.onsuccess = () => resolve(req.result || null);
+          req.onerror = () => resolve(null);
+        } catch (e) { resolve(null); }
+      });
+    });
+  }
+
+  // Removes a stored blob. Not called anywhere in this phase — no delete
+  // feature exists yet (Phase 31 owns that) — provided now as the counterpart a
+  // future phase needs, exactly like clearDomainDirty() (Phase 19E) was
+  // provided ahead of its own eventual caller.
+  function deleteBlob(attachmentId) {
+    return openDb().then(db => {
+      if (!db) return false;
+      return new Promise(resolve => {
+        try {
+          const tx = db.transaction(STORE_NAME, 'readwrite');
+          tx.objectStore(STORE_NAME).delete(attachmentId);
+          tx.oncomplete = () => resolve(true);
+          tx.onerror = () => resolve(false);
+        } catch (e) { resolve(false); }
+      });
+    });
+  }
+
+  return { putBlob, getBlob, deleteBlob };
+})();
+// ── End Attachment Local Blob Store (Phase 29) ───────────────────────────────────
+
+// ── Attachment Add / File Selection UX (Phase 29) ───────────────────────────────
+// User-facing entry point: turns a native file-picker FileList into local
+// attachment metadata records (Phase 28's createAttachmentMetadata(), reused
+// completely unchanged) plus this phase's own local blob storage above — and
+// NOTHING else. Per Phase 29 §2/§7/§23: selecting a file must result in ZERO
+// Google Drive API calls. Nothing below calls GoogleDriveWorkspace or touches
+// any Drive endpoint, directly or indirectly.
+function addAttachmentsToTask(taskId, fileList) {
+  if (!fileList || fileList.length === 0) return; // cancelled picker — Phase 29 §26 Test 2: no-op
+  Array.from(fileList).forEach(file => {
+    const record = createAttachmentMetadata(taskId, {
+      fileName: file.name,
+      mimeType: file.type || 'application/octet-stream',
+      size: file.size
+    });
+    // Store the actual bytes locally. Only once this local write is confirmed
+    // does the record become eligible for the next manual Sync's upload step
+    // (AttachmentManager.processPendingUploads() below) — a record whose blob
+    // failed to store locally is marked 'error' immediately rather than being
+    // silently left as a phantom 'local-only' upload that could never actually
+    // succeed.
+    AttachmentBlobStore.putBlob(record.attachmentId, file).then(stored => {
+      record.syncStatus = stored ? 'pending-upload' : 'error';
+      record.updatedAt = new Date().toISOString();
+      saveState();
+      if (typeof renderRow === 'function') renderRow(taskId);
+    });
+  });
+  // Reflect the newly-created (still local-only) records immediately — count/
+  // badge only (Phase 29 §19: no viewer/preview is implemented in this phase).
+  if (typeof renderRow === 'function') renderRow(taskId);
+}
+
+// Opens the native file picker for a given task (Phase 29 §2/§26: native
+// browser file picker, multi-select where the UI can support it cleanly).
+// Reuses ONE shared hidden <input type="file"> (see #attachmentFileInput near
+// the CSV import input) rather than creating one per task.
+let _attachmentPickerTaskId = null;
+function openAttachmentPicker(taskId) {
+  const input = document.getElementById('attachmentFileInput');
+  if (!input) return;
+  _attachmentPickerTaskId = taskId;
+  input.value = ''; // ensures re-selecting the exact same file still fires 'change'
+  input.click();
+}
+
+// Native file-picker 'change' handler. A cancelled picker fires 'change' with an
+// empty FileList in every current browser — addAttachmentsToTask() already
+// no-ops on that (Phase 29 Test 2: no attachment created, no Sync Required, no
+// Drive call).
+function handleAttachmentFileSelect(event) {
+  const taskId = _attachmentPickerTaskId;
+  _attachmentPickerTaskId = null;
+  if (taskId == null) return;
+  addAttachmentsToTask(taskId, event.target.files);
+}
+// ── End Attachment Add / File Selection UX (Phase 29) ───────────────────────────
 
 // Whether a domain currently has local changes that haven't been confirmed synced —
 // the domain-level counterpart to isTaskDirty() (Phase 2).
@@ -5484,6 +5755,79 @@ const GoogleDriveWorkspace = (function () {
     };
   }
 
+  // ── Attachment Metadata Foundation (Phase 28) ─────────────────────────────
+  // Stable named accessor for the dedicated TTL/Attachments folder id
+  // (Phase 28 §3/§5/§6). Deliberately reuses subfolderIds.Attachments —
+  // already created, persisted, and account-scoped by the exact same
+  // initializeWorkspace()/GOOGLE_WORKSPACE_SUBFOLDERS mechanism that creates
+  // Tasks/Settings/Backups (see the module header above and requirement 1:
+  // "reuse existing abstractions"). No separate "ensure Attachments folder"
+  // Drive-calling function is introduced — initializeWorkspace() already
+  // finds-or-creates all four subfolders together, lazily, ONLY from inside
+  // a manual Sync transaction (see the call site in BackgroundScheduler's
+  // WORKSPACE INITIALIZATION branch), which already satisfies §17's
+  // "callable later from the manual Sync transaction" requirement without
+  // duplicating that discovery/creation/404-recovery logic a second time.
+  //
+  // Returns null until the workspace is 'ready' (i.e. until a manual Sync has
+  // actually run at least once for this account) — never triggers a Drive
+  // call itself, and never returns a folder id belonging to a different
+  // account (subfolderIds is reset on every account switch — see
+  // resetForAccountChange() and restoreFromPersisted()'s accountEmail check).
+  function getAttachmentsFolderId() {
+    return _subfolderIds.Attachments || null;
+  }
+
+  // ── Attachment Upload (Phase 29) ────────────────────────────────────────
+  // Reuses this module's own existing primitives/idiom exactly — no second
+  // Google API client, no second multipart/binary encoder. Unlike
+  // uploadStateFile()/updateStateFileContent() (state.json is always JSON
+  // TEXT), an attachment's content is arbitrary binary, so this uses the
+  // simpler two-call idiom Drive's REST API already supports instead of
+  // hand-building a base64 multipart body: (1) create the file's METADATA
+  // only (files.create, no content — the same JSON POST createFolder()
+  // already uses, just without the folder mimeType), then (2) PATCH the
+  // actual bytes onto that file id via the exact same uploadType=media
+  // endpoint updateStateFileContent() already uses, just with a Blob body
+  // and the attachment's own mimeType instead of a JSON string. fetch()
+  // accepts a Blob/File body directly, so no base64 encoding step is
+  // needed anywhere in this path.
+  function createAttachmentFileMetadata(fileName, mimeType, folderId, purpose) {
+    const url = GOOGLE_DRIVE_FILES_ENDPOINT + '?fields=' + encodeURIComponent('id,name,createdTime');
+    return driveFetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: fileName, mimeType: mimeType || 'application/octet-stream', parents: [folderId] })
+    }, { operation: 'files.create', purpose: purpose || ('create attachment file: ' + fileName) });
+  }
+
+  function uploadAttachmentFileContent(fileId, blob, mimeType, purpose) {
+    const url = GOOGLE_DRIVE_UPLOAD_ENDPOINT + '/' + encodeURIComponent(fileId)
+      + '?uploadType=media&fields=' + encodeURIComponent('id,name,modifiedTime,size');
+    return driveFetch(url, {
+      method: 'PATCH',
+      headers: { 'Content-Type': mimeType || 'application/octet-stream' },
+      body: blob
+    }, { operation: 'files.update', purpose: purpose || 'upload attachment content' });
+  }
+
+  // Public entry point (called ONLY from AttachmentManager.processPendingUploads(),
+  // itself called ONLY from inside an explicit manual Sync transaction — Phase 29
+  // §7/§22/§23). Creates the Drive file, then writes its content, then confirms —
+  // matching the Verification-after-write posture pushStateToStateFile() already
+  // uses. On any failure (metadata create OR content write), the rejection
+  // propagates up so the caller can mark this one attachment's syncStatus
+  // 'error' without touching any other pending attachment (Phase 29 §14/§15).
+  function uploadAttachmentToDrive(fileName, mimeType, blob, folderId, purpose) {
+    return createAttachmentFileMetadata(fileName, mimeType, folderId, purpose).then(created => {
+      if (!created || !created.id) throw new Error('Attachment file metadata create could not be confirmed.');
+      return uploadAttachmentFileContent(created.id, blob, mimeType, purpose).then(confirmed => {
+        if (!confirmed || !confirmed.id) throw new Error('Attachment content upload could not be confirmed.');
+        return { ok: true, fileId: confirmed.id, folderId: folderId };
+      });
+    });
+  }
+
   // ── Phase 22B PART 3/4 (Account Switch Fix): Google Drive Workspace Reset
   // Clears every in-memory, account-scoped Drive workspace + state.json
   // runtime field back to its startup default, so a newly authenticated
@@ -5529,6 +5873,11 @@ const GoogleDriveWorkspace = (function () {
     validateWorkspace,
     getWorkspaceStatus,
     resetForAccountChange,
+    // Phase 28: attachment folder foundation (see function above)
+    getAttachmentsFolderId,
+    // Phase 29: attachment binary upload (see functions above) — called only
+    // from AttachmentManager.processPendingUploads() inside a manual Sync.
+    uploadAttachmentToDrive,
     // Phase 7: Tasks/state.json core read/write (manual trigger only)
     findStateFile,
     pushStateToStateFile,
@@ -5893,7 +6242,17 @@ const BatchTaskUpload = (function () {
     // pushStateToStateFile() when the TASK queue was empty, so a domain-only change
     // could never sync no matter how many passes ran. Snapshot which domains are
     // dirty right now (before the push) so we know exactly what this push covers.
-    const domainsDirtyAtStart = (typeof getDirtyDomains === 'function') ? getDirtyDomains() : [];
+    // Phase 29: 'attachments' is deliberately EXCLUDED from this snapshot/clear.
+    // buildStatePayload() never includes the `attachments` array (Phase 28 §15 —
+    // attachment metadata isn't part of state.json at all), so a state.json push
+    // confirms nothing about whether any attachment's BINARY actually reached
+    // Drive. Blindly clearing 'attachments' dirty here (like every other domain)
+    // would falsely clear Sync Required before AttachmentManager.processPendingUploads()
+    // has even run, violating Phase 29 §6/§14 ("Sync Required must stay true until
+    // the attachment upload is confirmed"). AttachmentManager owns clearing this
+    // domain itself, only once every pending attachment in a pass is confirmed
+    // uploaded — see runSynchronizationPass()'s own call to it.
+    const domainsDirtyAtStart = (typeof getDirtyDomains === 'function') ? getDirtyDomains().filter(d => d !== 'attachments') : [];
 
     if (entries.length === 0 && domainsDirtyAtStart.length === 0) {
       _status = 'idle';
@@ -6032,6 +6391,151 @@ const BatchTaskUpload = (function () {
 // business fields — so this device's own Log Entry references are never
 // silently orphaned by pulling in another device's copy of the same task.
 //
+// ── Attachment Manager (Phase 29) ────────────────────────────────────────
+// Populates the Extensions.AttachmentManager slot reserved back in Phase 4
+// (see initializeSyncInfrastructure()) — this is the ONLY module that ever
+// calls GoogleDriveWorkspace.uploadAttachmentToDrive(), and it is itself
+// ONLY ever called from BackgroundScheduler.runSynchronizationPass(), i.e.
+// only from inside an explicit manual Sync transaction (Phase 29 §7: "Manual
+// Sync is the only upload trigger"). No timer, no debounce, no event
+// listener anywhere in this module — it has no independent trigger of its
+// own at all, unlike AutoSyncEngine/RetryEngine, by design (Phase 29 §22:
+// "This phase must NOT reintroduce ... automatic retry").
+//
+// Reuses the existing architecture throughout: the same stable attachmentId
+// (Phase 28 §9), the same ATTACHMENT_SYNC_STATUSES vocabulary (Phase 28 §6),
+// the same domain-dirty funnel (isDomainDirty/clearDomainDirty, Phase 19E)
+// every other synced domain already uses for its own "Sync Required" state,
+// and GoogleDriveWorkspace's own upload primitives (added just above) rather
+// than a second Drive client or a second sync engine.
+const AttachmentManager = (function () {
+  // An attachment needs upload work when it hasn't been confirmed synced yet.
+  // 'local-only' (record created, blob not yet confirmed stored) and
+  // 'pending-upload' (blob confirmed stored locally, ready for the next
+  // manual Sync) both qualify. 'error' also qualifies — NOT as automatic
+  // retry (Phase 29 §14/§22 forbid that outright) but because the user
+  // pressing the existing Sync button again is itself a brand-new explicit
+  // manual action, and Phase 29 §14 only requires that a failed attachment
+  // "remain in a recoverable pending/error state," which this makes true:
+  // the next manual Sync is exactly the recovery path. 'synced' (already has
+  // a driveFileId) and 'pending-delete' (Phase 31's concern) never re-upload
+  // here — this is also this module's whole duplicate-upload defense
+  // (Phase 29 §12): a record can only be in this candidate set if it does
+  // NOT already carry a confirmed driveFileId.
+  function needsUploadRecord(a) {
+    return !!a && !a.driveFileId
+      && (a.syncStatus === 'local-only' || a.syncStatus === 'pending-upload' || a.syncStatus === 'error');
+  }
+
+  // Cheap, synchronous, called from runSynchronizationPass() BEFORE deciding
+  // whether to even invoke processPendingUploads() below — mirrors how that
+  // same function already checks hasPendingDomainWork()/stats before calling
+  // LocalSyncManager.processUploadQueue().
+  function hasPendingUploadWork() {
+    return Array.isArray(attachments) && attachments.some(needsUploadRecord);
+  }
+
+  function markSynced(record, uploadResult) {
+    record.driveFileId = uploadResult.fileId;
+    record.driveFolderId = uploadResult.folderId;
+    record.syncStatus = 'synced';
+    record.updatedAt = new Date().toISOString();
+    delete record.lastError;
+  }
+
+  function markError(record, reason) {
+    record.syncStatus = 'error';
+    record.updatedAt = new Date().toISOString();
+    // Diagnostic only (surfaced through the existing Sync UI/log, Phase 29
+    // §25) — never read by any duplicate-protection or upload-eligibility
+    // check above, which look only at syncStatus/driveFileId.
+    record.lastError = reason || (ATTACHMENT_ERROR_STATES && ATTACHMENT_ERROR_STATES.DRIVE_API_FAILURE) || 'upload-failed';
+  }
+
+  // Uploads every pending attachment SEQUENTIALLY — never in parallel — so
+  // that a partial failure (Phase 29 §15: "Attachment A uploads successfully,
+  // Attachment B fails") leaves an unambiguous, individually-confirmed state
+  // per record. Each attachment is its OWN independent Drive file (unlike
+  // tasks, which all ride inside one shared state.json write in
+  // BatchTaskUpload), so there is no shared transaction to roll back —
+  // A's confirmed driveFileId is committed to local state and saved
+  // immediately, and is never touched again regardless of what happens to B.
+  function processPendingUploads() {
+    if (typeof GoogleDriveWorkspace === 'undefined' || typeof GoogleDriveWorkspace.getWorkspaceStatus !== 'function'
+      || !GoogleDriveWorkspace.getWorkspaceStatus().ready) {
+      return Promise.resolve({ ok: false, reason: 'workspace-unavailable', processed: 0, completed: 0, failed: 0, results: [] });
+    }
+    const folderId = GoogleDriveWorkspace.getAttachmentsFolderId();
+    if (!folderId) {
+      return Promise.resolve({ ok: false, reason: 'attachment-folder-unavailable', processed: 0, completed: 0, failed: 0, results: [] });
+    }
+    const pending = (Array.isArray(attachments) ? attachments : []).filter(needsUploadRecord);
+    if (pending.length === 0) {
+      return Promise.resolve({ ok: true, processed: 0, completed: 0, failed: 0, results: [] });
+    }
+
+    let completed = 0, failed = 0;
+    const results = [];
+    let chain = Promise.resolve();
+    pending.forEach(record => {
+      chain = chain.then(() => {
+        // Phase 29 §12 duplicate protection, re-checked immediately before
+        // this specific upload (not just at filter time above): if another
+        // in-flight code path already confirmed this record mid-pass
+        // (shouldn't happen in this single-threaded sequential chain, but
+        // costs nothing to guard), never upload it a second time.
+        if (record.driveFileId) return;
+        return AttachmentBlobStore.getBlob(record.attachmentId).then(blob => {
+          if (!blob) {
+            // Deliberately NOT ATTACHMENT_ERROR_STATES.FILE_MISSING — that
+            // constant is reserved for a Drive-side missing file (a future
+            // reconciliation concern); this is the local blob never having
+            // made it into AttachmentBlobStore (e.g. private-browsing
+            // storage quota at selection time).
+            markError(record, 'local-file-missing');
+            failed++;
+            results.push({ ok: false, attachmentId: record.attachmentId, reason: 'blob-missing' });
+            return;
+          }
+          const purpose = 'sync: upload attachment "' + record.fileName + '" for task ' + record.taskId;
+          return GoogleDriveWorkspace.uploadAttachmentToDrive(record.fileName, record.mimeType, blob, folderId, purpose)
+            .then(uploadResult => {
+              markSynced(record, uploadResult);
+              completed++;
+              results.push({ ok: true, attachmentId: record.attachmentId, fileId: uploadResult.fileId });
+            })
+            .catch(err => {
+              const reason = (err && err.httpStatus === 403)
+                ? ((ATTACHMENT_ERROR_STATES && ATTACHMENT_ERROR_STATES.PERMISSION_FAILURE) || 'permission-failure')
+                : ((ATTACHMENT_ERROR_STATES && ATTACHMENT_ERROR_STATES.DRIVE_API_FAILURE) || 'drive-api-failure');
+              markError(record, reason);
+              failed++;
+              results.push({ ok: false, attachmentId: record.attachmentId, reason: (err && err.message) || String(err) });
+            });
+        });
+      });
+    });
+
+    return chain.then(() => {
+      // Persist every record touched above (successful driveFileId/syncStatus
+      // AND any error/lastError) in one write, exactly like every other
+      // confirmed-write path in this file already does via saveState().
+      if (typeof saveState === 'function') saveState();
+      // Only clear the 'attachments' domain dirty flag when EVERY pending
+      // attachment in this pass was confirmed uploaded — a single remaining
+      // failure keeps Sync Required true (Phase 29 §6/§14/§15), exactly as
+      // BatchTaskUpload.processUploadQueue()/bootstrapFirstSyncState() were
+      // deliberately changed (above) to no longer clear this domain
+      // themselves.
+      if (failed === 0 && typeof clearDomainDirty === 'function') clearDomainDirty('attachments');
+      return { ok: failed === 0, processed: pending.length, completed: completed, failed: failed, results: results };
+    });
+  }
+
+  return { hasPendingUploadWork, processPendingUploads };
+})();
+// ── End Attachment Manager (Phase 29) ────────────────────────────────────
+
 // This module never downloads more than one state.json per call, never
 // merges more than one task, never touches any other task, never uploads,
 // never retries on its own initiative, and never resolves a conflict —
@@ -8182,7 +8686,7 @@ const BackgroundScheduler = (function () {
   // state → confirm → persist file metadata" exactly as CASE A requires.
   // Nothing about that Find File / Upload File / Verification pipeline is
   // duplicated here.
-  function bootstrapFirstSyncState(trigger, syncAccountIdentity) {
+  function bootstrapFirstSyncState(trigger, syncAccountIdentity, attachmentResult) {
     return GoogleDriveWorkspace.pushStateToStateFile().then(pushResult => {
       // Phase 22B PART 12: verify the authenticated account hasn't changed
       // since this manual Sync transaction started, before committing this
@@ -8191,13 +8695,13 @@ const BackgroundScheduler = (function () {
       if (syncAccountIdentity !== getAuthenticatedAccountKey()) {
         _running = false;
         _status = 'idle';
-        _lastResult = { ok: false, reason: 'account-changed', trigger };
+        _lastResult = { ok: false, reason: 'account-changed', trigger, attachments: attachmentResult };
         return _lastResult;
       }
       if (!pushResult || !pushResult.ok) {
         _running = false;
         _status = 'failed';
-        _lastResult = { ok: false, reason: (pushResult && pushResult.reason) || 'bootstrap-failed', trigger, bootstrap: pushResult };
+        _lastResult = { ok: false, reason: (pushResult && pushResult.reason) || 'bootstrap-failed', trigger, bootstrap: pushResult, attachments: attachmentResult };
         finalizeRetryState(_lastResult);
         return _lastResult;
       }
@@ -8222,15 +8726,27 @@ const BackgroundScheduler = (function () {
         });
       }
       if (typeof getDirtyDomains === 'function' && typeof clearDomainDirty === 'function') {
-        getDirtyDomains().forEach(clearDomainDirty);
+        // Phase 29: exclude 'attachments' here too — bootstrapFirstSyncState()
+        // only confirms state.json (which never includes attachment metadata,
+        // Phase 28 §15), never any attachment binary. See the identical
+        // exclusion/comment in BatchTaskUpload.processUploadQueue() above for
+        // the full reasoning. AttachmentManager clears this domain itself,
+        // only once its own upload pass confirms every pending attachment.
+        getDirtyDomains().filter(d => d !== 'attachments').forEach(clearDomainDirty);
       }
       if (typeof saveState === 'function') saveState();
       if (typeof saveQueues === 'function') saveQueues();
 
       _running = false;
       _lastSyncAt = new Date().toISOString();
-      _status = 'completed';
-      _lastResult = { ok: true, trigger, bootstrap: true, uploaded: pushResult, merged: null, noop: false };
+      // Phase 29: a failed attachment upload during this SAME transaction
+      // still leaves task/state sync itself successfully confirmed above —
+      // but the pass as a whole is reported failed/incomplete so "Sync
+      // Required"/"Sync failed" (not "Synced") is what the user sees while
+      // any attachment remains unconfirmed (Phase 29 §14).
+      const attachmentsOk = !attachmentResult || attachmentResult.ok !== false;
+      _status = attachmentsOk ? 'completed' : 'failed';
+      _lastResult = { ok: attachmentsOk, trigger, bootstrap: true, uploaded: pushResult, merged: null, noop: false, attachments: attachmentResult };
       finalizeRetryState(_lastResult);
       return _lastResult;
     }).catch(err => {
@@ -8238,7 +8754,8 @@ const BackgroundScheduler = (function () {
       _status = 'failed';
       _lastResult = {
         ok: false, reason: 'error', trigger, error: (err && err.message) || String(err),
-        authFailure: !!(err && err.authFailure), httpStatus: (err && err.httpStatus) || null
+        authFailure: !!(err && err.authFailure), httpStatus: (err && err.httpStatus) || null,
+        attachments: attachmentResult
       };
       finalizeRetryState(_lastResult);
       return _lastResult;
@@ -8291,6 +8808,35 @@ const BackgroundScheduler = (function () {
         _lastResult = { ok: false, reason: 'account-changed', trigger };
         return _lastResult;
       }
+
+      // ── Attachment Upload (Phase 29) ──────────────────────────────────
+      // Runs once per pass, right here — before either downstream branch
+      // (CASE A bootstrap OR the ordinary needsUpload/needsDownload path)
+      // — so an attachment-only local change is uploaded exactly once,
+      // regardless of which branch this particular pass takes, matching
+      // the brief's §8 ordering ("ensure folder → upload pending
+      // attachments → obtain Drive file ids → commit attachment metadata
+      // → continue existing task/state synchronization"). The workspace is
+      // already 'ready' by this point — scheduleSync() only ever calls
+      // runSynchronizationPass() after GoogleDriveWorkspace.initializeWorkspace()
+      // has confirmed it, so no separate "ensure TTL/Attachments" call is
+      // needed here (Phase 28's getAttachmentsFolderId() already reflects it).
+      const attachmentStep = (typeof AttachmentManager !== 'undefined' && AttachmentManager.hasPendingUploadWork())
+        ? AttachmentManager.processPendingUploads()
+        : Promise.resolve(null);
+
+      return attachmentStep.then(attachmentResult => {
+        // Phase 22B PART 12: the attachment step above may have just talked
+        // to Drive under syncAccountIdentity — re-check before proceeding,
+        // same checkpoint posture as every other post-Drive-call point in
+        // this pass.
+        if (syncAccountIdentity !== getAuthenticatedAccountKey()) {
+          _running = false;
+          _status = 'idle';
+          _lastResult = { ok: false, reason: 'account-changed', trigger, attachments: attachmentResult };
+          return _lastResult;
+        }
+
       if (!planResult || !planResult.ok) {
         // Phase 21A: 'no-remote-file' is CASE A — a valid first-sync
         // bootstrap condition, not a failure. Route to the bootstrap helper
@@ -8300,7 +8846,7 @@ const BackgroundScheduler = (function () {
         // still reported exactly as before — CASE C/D (a corrupt or
         // conflicting existing state.json) are never treated as "missing."
         if (planResult && planResult.reason === 'no-remote-file' && typeof GoogleDriveWorkspace !== 'undefined') {
-          return bootstrapFirstSyncState(trigger, syncAccountIdentity);
+          return bootstrapFirstSyncState(trigger, syncAccountIdentity, attachmentResult);
         }
         // Planning itself failed — every reason (not-authenticated /
         // corrupt-json / checksum-mismatch / workspace-not-ready / error) is
@@ -8309,7 +8855,7 @@ const BackgroundScheduler = (function () {
         // (requirement 9).
         _running = false;
         _status = 'failed';
-        _lastResult = Object.assign({ ok: false, trigger }, planResult || { reason: 'unknown-error' });
+        _lastResult = Object.assign({ ok: false, trigger, attachments: attachmentResult }, planResult || { reason: 'unknown-error' });
         finalizeRetryState(_lastResult);
         return _lastResult;
       }
@@ -8372,8 +8918,13 @@ const BackgroundScheduler = (function () {
         // (if anything) has already happened regardless of this early return.
         _running = false;
         _lastSyncAt = new Date().toISOString();
-        _status = 'completed';
-        _lastResult = { ok: true, trigger, plan: planResult, uploaded: null, merged: null, noop: true, domainsMerged: domainMergeResult && domainMergeResult.changed };
+        // Phase 29: an attachment upload can still be the ONLY reason this
+        // pass ran (hasPendingUploadWork() true while stats/hasPendingDomainWork
+        // otherwise show nothing else outstanding) — its own success/failure
+        // still gates whether this pass is reported completed.
+        const attachmentsOkNoop = !attachmentResult || attachmentResult.ok !== false;
+        _status = attachmentsOkNoop ? 'completed' : 'failed';
+        _lastResult = { ok: attachmentsOkNoop, trigger, plan: planResult, uploaded: null, merged: null, noop: true, domainsMerged: domainMergeResult && domainMergeResult.changed, attachments: attachmentResult };
         finalizeRetryState(_lastResult);
         return _lastResult;
       }
@@ -8425,13 +8976,21 @@ const BackgroundScheduler = (function () {
           }
           const uploadOk = !uploadResult || uploadResult.ok !== false;
           const mergeOk = !mergeResult || mergeResult.ok !== false;
+          // Phase 29: fold the attachment step's own outcome into this
+          // pass's overall ok/status — a task/state sync that completed
+          // successfully while an attachment upload failed is still
+          // reported as an incomplete pass (Phase 29 §14/§15: Sync Required
+          // must remain true, and the failure must be visible via the
+          // existing Sync UI, until every pending attachment is confirmed).
+          const attachmentsOk = !attachmentResult || attachmentResult.ok !== false;
           _lastSyncAt = new Date().toISOString();
-          _status = (uploadOk && mergeOk) ? 'completed' : 'failed';
-          _lastResult = { ok: uploadOk && mergeOk, trigger, plan: planResult, uploaded: uploadResult, merged: mergeResult, domainsMerged: domainMergeResult && domainMergeResult.changed };
+          _status = (uploadOk && mergeOk && attachmentsOk) ? 'completed' : 'failed';
+          _lastResult = { ok: uploadOk && mergeOk && attachmentsOk, trigger, plan: planResult, uploaded: uploadResult, merged: mergeResult, domainsMerged: domainMergeResult && domainMergeResult.changed, attachments: attachmentResult };
           finalizeRetryState(_lastResult);
           return _lastResult;
         });
       });
+      }); // end attachmentStep.then
     }).catch(err => {
       // Unexpected exception anywhere in the pass (requirement 9) — fails
       // safely. Nothing here writes to `tasks`/`masters` directly, so no
@@ -9730,6 +10289,10 @@ function saveState() {
     localStorage.setItem('ttl_username', userName);
     localStorage.setItem('ttl_recurring_plans', JSON.stringify(recurringPlans));
     localStorage.setItem('ttl_recurring_counter', String(recurringPlanIdCounter));
+    // Phase 28: attachment metadata only (never binary data) — same
+    // write-through pattern as every other domain above.
+    localStorage.setItem('ttl_attachments', JSON.stringify(attachments));
+    localStorage.setItem('ttl_attachment_counter', String(attachmentIdCounter));
   } catch(e) {}
   // Phase 19E: masters/counters/userName are mutated from ~15+ scattered call sites;
   // this single funnel (virtually every one of them calls saveState() immediately
@@ -9778,6 +10341,14 @@ function loadState() {
     const rpCounter = localStorage.getItem('ttl_recurring_counter');
     if (rp) { try { recurringPlans = JSON.parse(rp) || []; } catch(e) { recurringPlans = []; } }
     if (rpCounter) recurringPlanIdCounter = parseInt(rpCounter) || 0;
+    // Phase 28: attachment metadata — absent entirely on any profile that
+    // predates this phase (no key yet), which safely leaves the default
+    // empty array in place rather than throwing. Purely additive: never
+    // touches tasks/logEntries/masters/counters or any existing key.
+    const at = localStorage.getItem('ttl_attachments');
+    const atCounter = localStorage.getItem('ttl_attachment_counter');
+    if (at) { try { attachments = JSON.parse(at) || []; } catch(e) { attachments = []; } }
+    if (atCounter) attachmentIdCounter = parseInt(atCounter) || 0;
     if (t) tasks = JSON.parse(t);
     // Phase 1 migration: back-fill synchronization metadata on every task loaded from
     // localStorage. Tasks saved before Phase 1 have no `_sync` field at all; tasks saved
@@ -12119,6 +12690,16 @@ function renderRow(id) {
   }
 
   const dis = isDone ? 'disabled' : '';
+  // Phase 29: attach-button count/title only — NOT a viewer (Phase 29 §19:
+  // preview/open/download are explicitly deferred to Phase 30). This only
+  // confirms an attachment is associated with the task, per Test 1.
+  const taskAttachments = (typeof getAttachmentsForTask === 'function') ? getAttachmentsForTask(id) : [];
+  const attachCount = taskAttachments.length;
+  const attachPendingCount = taskAttachments.filter(a => a.syncStatus !== 'synced').length;
+  const attachTitle = attachCount === 0
+    ? 'Attach file'
+    : (attachCount + ' attachment' + (attachCount === 1 ? '' : 's') + (attachPendingCount > 0 ? ' (' + attachPendingCount + ' pending sync)' : ''));
+  const attachBtn = `<button class="btn-icon btn-attach" onclick="openAttachmentPicker(${id})" title="${esc(attachTitle)}"><i class="ti ti-paperclip"></i>${attachCount > 0 ? `<span class="attach-badge">${attachCount}</span>` : ''}</button>`;
   // Phase 19F (task brief §11/§12): a card rebuild below fully replaces its
   // DOM (buttons/timer/status can all change, so a partial patch isn't
   // reliable) — but if the user is actively focused inside THIS SAME card
@@ -12153,6 +12734,7 @@ function renderRow(id) {
       ${task.carriedOver ? `<span class="status-badge" style="background:var(--amber-bg);color:var(--amber-dark);font-size:10px" title="Carried over from previous day's In Progress task"><i class="ti ti-arrow-forward-up" style="font-size:11px;vertical-align:-1px"></i> Carried</span>` : ''}
       <div class="actions">
         ${actionBtns}
+        ${attachBtn}
         <button class="btn-icon btn-delete" onclick="confirmDeleteTask(${id})" title="Remove"><i class="ti ti-trash"></i></button>
       </div>
     </div>
@@ -17228,6 +17810,15 @@ function initializeSyncInfrastructure() {
     isDomainEntityDeleted,
     SYNC_DOMAINS
   };
+
+  // Phase 29: register the Attachment Manager into the Extensions.AttachmentManager
+  // slot reserved since Phase 4 (see the `AttachmentManager: null` placeholder
+  // comment on LocalSyncManager.Extensions). Registration only, mirroring every
+  // other module above — nothing here uploads anything; that only ever happens
+  // from inside BackgroundScheduler.runSynchronizationPass() during an explicit
+  // manual Sync (see that function's own attachmentStep).
+  window.TTLSync.Modules.AttachmentManager = AttachmentManager;
+  LocalSyncManager.Extensions.AttachmentManager = AttachmentManager;
 
   // Phase 5: attempt a silent, non-interactive reconnect if a previous
   // session was connected. Never interactive, never blocking — see
