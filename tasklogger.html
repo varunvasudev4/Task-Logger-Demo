@@ -173,14 +173,25 @@ body {
 .header-actions .date-picker-wrap {
   min-height: 44px;
 }
-/* Phase 25: on desktop/tablet the six controls stay in natural DOM order
-   (Dashboard, Sync, Search[touch-only], More, Date, Masters, Add task) —
-   this preserves the existing visual hierarchy untouched. Only the phone
-   breakpoint below assigns each control an explicit `order` and activates
-   .header-row-break, so wrapping there is an intentional two-row layout
-   (Dashboard/Date/Add task, then Sync/Masters/Search/More) rather than the
-   browser wrapping wherever it runs out of space. */
-.header-row-break { display: none; }
+/* Phase 25A: .header-row groups each control cluster (row 1: Dashboard/
+   Date/Add task, row 2: Sync/Masters/Search/More) so the phone breakpoint
+   can give each row its own CSS Grid column template. On desktop/tablet
+   these wrapper divs are `display:contents` — they contribute no box of
+   their own, so their children act as direct flex items of
+   .header-actions, and the explicit `order` values below restore the
+   original visual sequence (Dashboard, Sync, Search[touch-only], More,
+   Date, Masters, Add task) exactly as it was before the grouping markup
+   was introduced. Only the phone breakpoint overrides these with its own
+   row-scoped order (see the ≤640px query), so desktop/tablet are
+   untouched. */
+.header-row { display: contents; }
+.header-actions .btn-highlight      { order: 1; } /* Dashboard */
+.header-actions .sync-btn           { order: 2; } /* Sync */
+.header-actions .search-btn         { order: 3; } /* Search (touch only) */
+.header-actions .more-menu-wrap     { order: 4; } /* More */
+.header-actions .date-picker-wrap   { order: 5; } /* Date */
+.header-actions .header-masters-btn { order: 6; } /* Masters */
+.header-actions .btn-primary        { order: 7; } /* Add task */
 
 /* Buttons */
 .btn {
@@ -1108,22 +1119,28 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
   body { padding: 0.75rem 0.5rem 8rem; }
 }
 
-/* ── Header (Phase 25) ──
+/* ── Header (Phase 25 / 25A) ──
    Breakpoints, consolidated to one coherent set for the whole header:
      > 1024px            desktop  — natural single row, untouched hierarchy
      641px – 1024px       tablet   — natural single row, wraps only if it
                                       genuinely runs out of room
-     ≤ 640px              phone    — fixed 2-row layout:
-                                        row 1: Dashboard, Date, Add task
-                                        row 2: Sync, Masters, Search, More
+     ≤ 640px              phone    — fixed 2-row CSS Grid layout:
+                                        row 1: Dashboard 23% | Date remaining | Add task 23%
+                                        row 2: Sync 50% | Masters/Search/More equal (~16.67% each)
                                       Order is intentional and does not
-                                      change with width — see the per-
-                                      control `order` values below.
-     ≤ 400px              small phone   — row 2 controls drop to icon-only;
-                                           Dashboard's label and the "Today"
-                                           badge hide, to guarantee both
-                                           rows keep fitting on one line
-     ≤ 360px              very small    — tighter padding only
+                                      change with width — see .header-row-1 /
+                                      .header-row-2 below. Each control's
+                                      width comes from its grid column
+                                      track, not its content, so hiding a
+                                      label never changes its allocated
+                                      width.
+     ≤ 400px              small phone   — tighter title/gap and the date
+                                           "Today" badge hides; no control
+                                           changes width (grid tracks are
+                                           fixed regardless of content)
+     ≤ 360px              very small    — tighter padding only; same two
+                                           rows, same order, no scrolling,
+                                           no control ever disappears
    Tablet (641–1024px): keep the title + actions on one row where there's
    room; only drop to a stacked layout once space actually runs out. */
 @media (min-width: 641px) and (max-width: 1024px) {
@@ -1137,77 +1154,80 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
   #task-search-box { max-height: calc(100vh - 60px); max-height: calc(100dvh - 60px); }
   .header { flex-direction: column; gap: 10px; align-items: stretch; }
   .header-titlebar { max-width: 100%; }
-  .header-actions {
-    display: flex; flex-wrap: wrap; gap: 6px; row-gap: 8px;
-    justify-content: flex-start;
-  }
-  /* Fixed row order — explicit per control, since row 2's requested order
-     (Sync, Masters, Search, More) doesn't match source DOM order and a
-     shared group `order` value can only preserve DOM order among ties.
-     The row-break's flex-basis:100% forces the line to end there
-     regardless of how much room is left, so this is a deterministic
-     2-row split, never ad hoc wrapping. */
-  .header-actions .btn-highlight   { order: 1; } /* Dashboard */
-  .header-actions .date-picker-wrap { order: 2; } /* Date */
-  .header-actions .btn-primary      { order: 3; } /* Add task */
-  .header-row-break {
-    display: block; order: 4; flex-basis: 100%; width: 100%; height: 0;
-  }
-  .header-actions .sync-btn         { order: 5; } /* Sync */
-  .header-actions .header-masters-btn { order: 6; } /* Masters */
-  .header-actions .search-btn       { order: 7; } /* Search (touch only) */
-  .header-actions .more-menu-wrap    { order: 8; } /* More */
 
-  /* Each row's own controls share the row's width evenly and shrink
-     together (flex-basis:0, min-width:0) instead of wrapping onto a third
-     line — label text truncates with an ellipsis as a last-resort safety
-     net so a row can never push content outside the viewport. */
-  .header-actions .btn-highlight,
-  .header-actions .date-picker-wrap,
-  .header-actions .btn-primary,
-  .header-actions .sync-btn,
-  .header-actions .header-masters-btn,
-  .header-actions .search-btn,
-  .header-actions .more-menu-wrap {
-    flex: 1 1 0; min-width: 0; justify-content: center;
+  /* .header-actions becomes a vertical stack of the two rows; each
+     .header-row switches from `display:contents` (desktop/tablet) to its
+     own CSS Grid here, so row 1 and row 2 can use different column
+     proportions without one row's tracks constraining the other. Grid
+     fr-units divide the space left over *after* the gap is subtracted,
+     so 23fr/54fr/23fr and 3fr/1fr/1fr/1fr never overflow 100% the way
+     literal percentage widths plus gaps would. */
+  .header-actions {
+    display: flex; flex-direction: column; gap: 6px;
+    width: 100%; max-width: 100%;
   }
-  .header-actions .btn span,
-  .header-actions .btn-highlight span,
-  .header-actions #more-menu-btn {
+  .header-row { display: grid; gap: 6px; width: 100%; min-width: 0; }
+  .header-row-1 { grid-template-columns: 23fr 54fr 23fr; }
+  .header-row-2 { grid-template-columns: 3fr 1fr 1fr 1fr; }
+
+  /* Row-scoped order overrides the desktop/tablet order set above the
+     media queries — within each row's own grid the controls must sort
+     Dashboard→Date→Add task and Sync→Masters→Search→More, regardless of
+     their desktop order numbers. */
+  .header-row-1 .btn-highlight      { order: 1; } /* Dashboard */
+  .header-row-1 .date-picker-wrap   { order: 2; } /* Date */
+  .header-row-1 .btn-primary        { order: 3; } /* Add task */
+  .header-row-2 .sync-btn           { order: 1; } /* Sync */
+  .header-row-2 .header-masters-btn { order: 2; } /* Masters */
+  .header-row-2 .search-btn         { order: 3; } /* Search (touch only) */
+  .header-row-2 .more-menu-wrap     { order: 4; } /* More */
+
+  /* Every control in both rows shares the same explicit height and
+     vertical centering, per the "identical height, identical vertical
+     alignment" requirement. This never fights with the width rules above
+     — height/centering here, width from the grid track above. */
+  .header-row-1 > *, .header-row-2 > * {
+    height: 48px; min-height: 48px; max-height: 48px;
+    display: flex; align-items: center; justify-content: center;
+    min-width: 0; padding-left: 6px; padding-right: 6px;
+  }
+  .header-row-2 .more-menu-wrap { padding: 0; } /* trigger button inside supplies its own padding */
+  .header-row-2 .more-menu-wrap #more-menu-btn {
+    width: 100%; height: 100%; justify-content: center;
+  }
+
+  /* Labels hidden on phone (icon-only; title/aria-label keep each one
+     accessible) for Dashboard, Add task, Masters, Search, and More — Sync
+     keeps its label where it fits, Date keeps its value visible. Because
+     each button's width is set by its grid track (not its content),
+     hiding a label never narrows the button. */
+  .header-row-1 .btn-highlight span,
+  .header-row-1 .btn-primary span,
+  .header-row-2 .header-masters-btn span,
+  .header-row-2 .search-btn span,
+  #more-menu-btn > span,
+  .more-menu-chevron {
+    display: none;
+  }
+  .header-row-2 .sync-btn #top-sync-label {
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
+
   .date-picker-input { min-width: 0; }
   .title { font-size: 18px; }
 }
-/* Small phones: row 2 has four controls, the tightest row — drop it to
-   icon-only (title/aria-label keep it accessible) so it keeps fitting on
-   one line all the way down to 320px. Dashboard's label and the "Today"
-   badge are the least essential parts of row 1 and free up the same
-   guarantee there; Add task's label is kept since it's the primary CTA. */
+/* Small phones: trim the Date control's "Today" badge so its value stays
+   comfortably inside its (already-fixed) grid track down to 320px. No
+   button changes width here — only content inside the Date track. */
 @media (max-width: 400px) {
   .title { font-size: 16px; }
   .subtitle { font-size: 10.5px; }
   .header-actions { gap: 5px; }
-  .header-actions .btn-highlight span,
-  .header-actions .sync-btn #top-sync-label,
-  .header-actions .header-masters-btn span,
-  .header-actions .search-btn span,
-  #more-menu-btn > span,
-  .more-menu-chevron,
-  .date-today-badge {
-    display: none;
-  }
-  /* Phase 21: the sync status dot is Sync's only indicator once its label
-     is hidden — never let it be caught by a generic hide rule. */
+  .header-row { gap: 5px; }
+  .date-today-badge { display: none; }
+  /* Phase 21: the sync status dot is Sync's indicator alongside its
+     label — never let it be caught by a generic hide rule. */
   .header-actions .btn .sync-dot { display: inline-block !important; }
-  .header-actions .btn-highlight,
-  .header-actions .sync-btn,
-  .header-actions .header-masters-btn,
-  .header-actions .search-btn {
-    min-width: 44px; flex: 0 0 auto; padding-left: 10px; padding-right: 10px;
-  }
-  .header-actions .more-menu-wrap { min-width: 44px; flex: 0 0 auto; }
-  .header-actions .more-menu-wrap #more-menu-btn { padding-left: 10px; padding-right: 10px; }
 }
 
 /* ── Task card ── */
@@ -1217,6 +1237,7 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
   .task-input { font-size: 13px; }
   .timer-display { font-size: 12px; min-width: 52px; }
   .status-badge { font-size: 10px; padding: 2px 6px; }
+
 
   /* Stack meta fields vertically in 2-col grid */
   .task-meta { gap: 6px; }
@@ -1307,13 +1328,13 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
   .meta-field-wide { min-width: 160px; }
 }
 
-/* ── Phase 25: very small phones (≤360px) ──
-   Row 2's icon-only treatment already happens at ≤400px (see above) —
-   row 2 has four controls, the tightest row, so it needs the earliest
-   treatment. This block only tightens padding further so row 1
-   (Dashboard/Date/Add task) keeps comfortable room down to 320px. */
+/* ── Phase 25A: very small phones (≤360px) ──
+   Same two rows, same order, same 23/54/23 and 3/1/1/1 grid proportions —
+   only the per-control padding tightens further, so row 2 (four controls,
+   the tighter row) keeps comfortable room down to 320px. No third row, no
+   horizontal scroll, and no control ever disappears. */
 @media (max-width: 360px) {
-  .header-actions .btn { padding-left: 8px; padding-right: 8px; }
+  .header-row-1 > *, .header-row-2 > * { padding-left: 4px; padding-right: 4px; }
 }
 
 /* ── Wake notice ── */
@@ -1404,43 +1425,46 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
       <div class="subtitle">Track effort · saved in browser · exports to XLSX</div>
     </div>
     <div class="header-actions">
-      <a class="btn btn-highlight" href="index.html" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px;">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
-        <span>Dashboard</span>
-      </a>
-      <button class="btn sync-btn" id="top-sync-btn" onclick="topSyncClick()" title="Synced">
-        <i class="ti ti-refresh"></i> <span id="top-sync-label">Sync</span> <span class="sync-dot sync-neutral" id="top-sync-dot"></span>
-      </button>
-      <!-- Phase 25: touch-only entry point into the existing search overlay/
-           openSearch() — hidden on non-touch devices via html.is-touch (see
-           <head>); desktop keyboard users keep using Ctrl+Shift+F. -->
-      <button class="btn search-btn" id="top-search-btn" onclick="openSearch()" aria-label="Search" title="Search">
-        <i class="ti ti-search"></i> <span>Search</span>
-      </button>
-      <div class="more-menu-wrap" id="more-menu-wrap">
-        <button class="btn" id="more-menu-btn" onclick="toggleMoreMenu(event)" title="More actions"><i class="ti ti-dots"></i> <span>More</span> <i class="ti ti-chevron-down more-menu-chevron" style="font-size:11px"></i></button>
-        <div class="more-menu-dropdown hidden" id="more-menu-dropdown">
-          <button class="btn" onclick="openCSVModal()" title="Import or export the log as CSV or Excel"><i class="ti ti-file-import"></i> Import / Export</button>
-          <button class="btn" onclick="startTour()" id="tour-btn" title="App Tour"><i class="ti ti-route"></i> Tour</button>
-          <button class="btn" onclick="cycleTheme()" id="theme-toggle-btn" title="Switch theme"><i class="ti ti-sun" id="theme-toggle-icon"></i> <span id="theme-toggle-label">Light</span></button>
+      <!-- Phase 25A: .header-row-1 / .header-row-2 group the controls into
+           the two rows the mobile layout requires. On desktop/tablet these
+           wrappers are `display:contents` (see the CSS above the media
+           queries) — they contribute no box, so the buttons act as direct
+           .header-actions flex items and the explicit `order` values there
+           restore the original desktop sequence (Dashboard, Sync, Search,
+           More, Date, Masters, Add task) unchanged. Only the ≤640px query
+           turns each wrapper into its own CSS Grid row. -->
+      <div class="header-row header-row-1">
+        <a class="btn btn-highlight" href="index.html" aria-label="Dashboard" title="Dashboard" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
+          <span>Dashboard</span>
+        </a>
+        <div class="date-picker-wrap" onclick="try{document.getElementById('log-date-input').showPicker()}catch(e){document.getElementById('log-date-input').click()}">
+          <i class="ti ti-calendar"></i>
+          <input type="date" id="log-date-input" class="date-picker-input" onchange="onDateChange()" />
+          <span id="today-badge" class="date-today-badge">Today</span>
+        </div>
+        <button class="btn btn-primary" onclick="addTask()" aria-label="Add task" title="Add task"><i class="ti ti-plus"></i> <span>Add task</span></button>
+      </div>
+      <div class="header-row header-row-2">
+        <button class="btn sync-btn" id="top-sync-btn" onclick="topSyncClick()" title="Synced">
+          <i class="ti ti-refresh"></i> <span id="top-sync-label">Sync</span> <span class="sync-dot sync-neutral" id="top-sync-dot"></span>
+        </button>
+        <button class="btn header-masters-btn" onclick="openMasters()" aria-label="Masters" title="Masters"><i class="ti ti-list-details"></i> <span>Masters</span></button>
+        <!-- Phase 25: touch-only entry point into the existing search overlay/
+             openSearch() — hidden on non-touch devices via html.is-touch (see
+             <head>); desktop keyboard users keep using Ctrl+Shift+F. -->
+        <button class="btn search-btn" id="top-search-btn" onclick="openSearch()" aria-label="Search" title="Search">
+          <i class="ti ti-search"></i> <span>Search</span>
+        </button>
+        <div class="more-menu-wrap" id="more-menu-wrap">
+          <button class="btn" id="more-menu-btn" onclick="toggleMoreMenu(event)" title="More actions"><i class="ti ti-dots"></i> <span>More</span> <i class="ti ti-chevron-down more-menu-chevron" style="font-size:11px"></i></button>
+          <div class="more-menu-dropdown hidden" id="more-menu-dropdown">
+            <button class="btn" onclick="openCSVModal()" title="Import or export the log as CSV or Excel"><i class="ti ti-file-import"></i> Import / Export</button>
+            <button class="btn" onclick="startTour()" id="tour-btn" title="App Tour"><i class="ti ti-route"></i> Tour</button>
+            <button class="btn" onclick="cycleTheme()" id="theme-toggle-btn" title="Switch theme"><i class="ti ti-sun" id="theme-toggle-icon"></i> <span id="theme-toggle-label">Light</span></button>
+          </div>
         </div>
       </div>
-      <!-- Phase 25: intentional row break — see .header-row-break. It's a
-           no-op (display:none) except at the phone breakpoint, where its
-           `order` places it between row 1 (Dashboard, Date, Add task) and
-           row 2 (Sync, Masters, Search, More). Element position here is
-           irrelevant to layout — every control's `order` is set explicitly
-           in the phone media query below, so the DOM order above (Dashboard,
-           Sync, Search, More, ... Masters, Add task) is exactly the
-           original order and desktop/tablet are untouched. -->
-      <div class="header-row-break" aria-hidden="true"></div>
-      <div class="date-picker-wrap" onclick="try{document.getElementById('log-date-input').showPicker()}catch(e){document.getElementById('log-date-input').click()}">
-        <i class="ti ti-calendar"></i>
-        <input type="date" id="log-date-input" class="date-picker-input" onchange="onDateChange()" />
-        <span id="today-badge" class="date-today-badge">Today</span>
-      </div>
-      <button class="btn header-masters-btn" onclick="openMasters()" aria-label="Masters" title="Masters"><i class="ti ti-list-details"></i> <span>Masters</span></button>
-      <button class="btn btn-primary" onclick="addTask()"><i class="ti ti-plus"></i> Add task</button>
     </div>
   </div>
   <div id="task-list" ondragover="taskListDragOver(event)" ondrop="taskListDrop(event)">
