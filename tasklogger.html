@@ -9496,6 +9496,229 @@ const SmartSyncTriggers = (function () {
 })();
 // ── End Smart Sync Triggers (Phase 18) ─────────────────────────────────────────────
 
+// ── Hidden-State Lock Sync Trigger (Phase 27) ─────────────────────────────────────
+// Implements ONLY this phase's brief: one isolated, narrowly-scoped automatic
+// synchronization opportunity keyed to a Page Visibility API "hidden for 2
+// minutes" episode. This is explicitly NOT OS lock/unlock detection — a normal
+// web/PWA app cannot reliably observe a physical device lock/unlock across
+// iPhone, iPad, and Windows (see PHASE_27_LOCK_SYNC.md) — every log line and
+// comment below describes "TTL became hidden/visible" (document.hidden /
+// document.visibilityState), never a device lock/unlock event.
+//
+// SmartSyncTriggers' startup/focus/online/debounce triggers remain exactly as
+// disabled as Phase 21 left them — nothing here re-registers them, and this
+// module never calls SmartSyncTriggers.requestSmartSync() or anything else in
+// that module. This is a second, completely separate trigger source, not a
+// change to the first.
+//
+// Reuses the EXISTING synchronization engine exactly the way the manual Sync
+// button already does: BackgroundScheduler.startSynchronization(trigger), the
+// very function manualSyncClick() calls (see BackgroundScheduler.scheduleSync()
+// above — every trigger that isn't manual:true is hard-rejected there with
+// reason 'automatic-sync-disabled', so startSynchronization() is the only path
+// that can ever actually run a pass). No second sync engine, no second
+// upload/download/plan logic, no second dirty-state system: every check below
+// reads an existing status getter (AutoSyncEngine.getAutoSyncStatus(),
+// BackgroundScheduler.isSynchronizationRunning(), GoogleAuthManager.getStatus(),
+// GoogleDriveWorkspace.getWorkspaceStatus()) and nothing here mutates any of
+// them directly. Auth and workspace readiness are always confirmed by this
+// module itself, synchronously, immediately before calling
+// startSynchronization() — so the manual entry point's own manual-only
+// recovery branches (interactive login, workspace discovery/creation) are
+// never reached by this trigger; those branches only exist for an explicit
+// Sync-button click.
+const LockSyncTrigger = (function () {
+  // Requirement 4 (2-MINUTE COUNTDOWN): exactly 2 minutes, one setTimeout,
+  // never setInterval.
+  const HIDDEN_SYNC_DELAY_MS = 2 * 60 * 1000;
+
+  let _previousVisibilityState = (typeof document !== 'undefined') ? document.visibilityState : 'visible';
+  let _countdownTimerId = null; // non-null only while a countdown is pending for the CURRENT hidden episode
+  let _syncedThisEpisode = false; // requirement 8: at most one automatic sync attempt per hidden episode
+  // Requirement 4 (CHANGE/REVISION NOT ALREADY SYNCED): a lightweight
+  // fingerprint of "what's currently unsynced," built entirely from the
+  // existing dirty-state getters (Phase 3's Upload Queue statistics, Phase
+  // 20's domain dirty flags) — never a new revision/change-tracking system
+  // of its own. Updated only after THIS module's own successful automatic
+  // sync, so a later countdown that finds the exact same unsynced content
+  // (e.g. nothing changed since this trigger already handled it) aborts
+  // instead of re-sending it.
+  let _lastAutoSyncedSignature = null;
+  let _registered = false;
+  let _listener = null;
+
+  function log(event, detail) {
+    try {
+      if (detail !== undefined) console.log('[LOCK-SYNC] ' + event, detail);
+      else console.log('[LOCK-SYNC] ' + event);
+    } catch (e) { /* never let logging break the trigger */ }
+  }
+
+  // ── Countdown lifecycle (requirements 3-5, 12) ────────────────────────────
+  function startHiddenStateSyncCountdown() {
+    log('LOCK_DETECTED');
+    _syncedThisEpisode = false; // a fresh hidden episode starts with a fresh sync slot
+    if (_countdownTimerId !== null) return; // never a second timer for the same episode
+    log('COUNTDOWN_STARTED');
+    _countdownTimerId = setTimeout(onHiddenCountdownElapsed, HIDDEN_SYNC_DELAY_MS);
+  }
+
+  function cancelHiddenStateSyncCountdown() {
+    if (_countdownTimerId === null) return;
+    clearTimeout(_countdownTimerId);
+    _countdownTimerId = null;
+    log('COUNTDOWN_CANCELLED');
+  }
+
+  // ── Fingerprint helper shared by the Sync Required and Revision checks ────
+  function currentPendingWorkSignature() {
+    let pendingUploads = 0;
+    if (typeof getQueueStatistics === 'function') {
+      const stats = getQueueStatistics();
+      pendingUploads = (stats && stats.pendingUploads) || 0;
+    }
+    let dirtyDomains = [];
+    if (typeof getDirtyDomains === 'function') {
+      try { dirtyDomains = getDirtyDomains() || []; } catch (e) { dirtyDomains = []; }
+    }
+    return pendingUploads + '|' + dirtyDomains.slice().sort().join(',');
+  }
+
+  // ── The six eligibility checks (requirement 6) — each reuses an existing
+  // status getter; nothing here re-derives hidden/dirty/auth/workspace state
+  // a second way. ────────────────────────────────────────────────────────────
+
+  // CHECK 1 — STILL HIDDEN
+  function checkStillHidden() {
+    return (typeof document !== 'undefined') && document.hidden === true;
+  }
+
+  // CHECK 2 — SYNC REQUIRED (the application's authoritative dirty state)
+  function checkSyncRequired() {
+    if (typeof AutoSyncEngine !== 'undefined' && typeof AutoSyncEngine.getAutoSyncStatus === 'function') {
+      return !!AutoSyncEngine.getAutoSyncStatus().pendingSyncWork;
+    }
+    // AutoSyncEngine unavailable — fall back to the same underlying getters
+    // it itself reads from, never a second dirty-state system.
+    return currentPendingWorkSignature().split('|')[0] !== '0';
+  }
+
+  // CHECK 3 — NO SYNC ALREADY RUNNING
+  function checkNoSyncRunning() {
+    return typeof BackgroundScheduler !== 'undefined' && !BackgroundScheduler.isSynchronizationRunning();
+  }
+
+  // CHECK 4 — CHANGE/REVISION NOT ALREADY SYNCED
+  function checkRevisionNotSynced() {
+    return currentPendingWorkSignature() !== _lastAutoSyncedSignature;
+  }
+
+  // CHECK 5 — SILENT AUTHENTICATION AVAILABLE (local/cached only — never
+  // opens a login prompt; matches BackgroundScheduler's own isAuthenticatedNow()).
+  function checkSilentAuthAvailable() {
+    return typeof GoogleAuthManager !== 'undefined' && !!GoogleAuthManager.getStatus().authenticated;
+  }
+
+  // CHECK 6 — WORKSPACE READY (local/cached only — never initializes or
+  // validates the workspace; matches BackgroundScheduler's own isWorkspaceReadyNow()).
+  function checkWorkspaceReady() {
+    return typeof GoogleDriveWorkspace !== 'undefined' && !!GoogleDriveWorkspace.getWorkspaceStatus().ready;
+  }
+
+  // ── Eligibility evaluation + the one allowed synchronization attempt
+  // (requirements 6-9) ───────────────────────────────────────────────────────
+  function runEligibilityCheck() {
+    log('ELIGIBILITY_CHECK');
+    if (_syncedThisEpisode)          { log('ELIGIBILITY_REJECTED', { reason: 'already-synced-this-episode' }); return; }
+    if (!checkStillHidden())         { log('ELIGIBILITY_REJECTED', { reason: 'visible' }); return; }
+    if (!checkSyncRequired())        { log('ELIGIBILITY_REJECTED', { reason: 'no-sync-required' }); return; }
+    if (!checkNoSyncRunning())       { log('ELIGIBILITY_REJECTED', { reason: 'sync-in-progress' }); return; }
+    if (!checkRevisionNotSynced())   { log('ELIGIBILITY_REJECTED', { reason: 'revision-already-synced' }); return; }
+    if (!checkSilentAuthAvailable()) { log('ELIGIBILITY_REJECTED', { reason: 'auth-unavailable' }); return; }
+    if (!checkWorkspaceReady())      { log('ELIGIBILITY_REJECTED', { reason: 'workspace-not-ready' }); return; }
+
+    if (typeof BackgroundScheduler === 'undefined' || typeof BackgroundScheduler.startSynchronization !== 'function') return;
+
+    const signatureAtAttempt = currentPendingWorkSignature();
+    _syncedThisEpisode = true; // requirement 8: claim this episode's one sync slot before the async call settles
+    log('SYNC_STARTED');
+    // The exact same funnel manualSyncClick() uses (BackgroundScheduler
+    // .startSynchronization() === scheduleSync(trigger, { manual: true })) —
+    // required because scheduleSync() hard-rejects every non-manual trigger
+    // outright (Phase 21). Auth and workspace were just confirmed above, so
+    // scheduleSync()'s own manual-only auto-recovery branches are not
+    // exercised in practice.
+    BackgroundScheduler.startSynchronization('lock-sync-hidden').then(result => {
+      if (result && result.ok) {
+        _lastAutoSyncedSignature = signatureAtAttempt;
+        log('SYNC_COMPLETED');
+      } else {
+        // requirement 9: keep Sync Required, never retry automatically, never
+        // start a retry timer — this module simply stops here.
+        log('SYNC_FAILED', { reason: result && result.reason });
+      }
+      // UI refresh only, mirroring manualSyncClick()'s own settle handling —
+      // never a second synchronization attempt.
+      if (typeof BackgroundScheduler.refreshSyncTabIfOpen === 'function') BackgroundScheduler.refreshSyncTabIfOpen(result);
+      if (typeof refreshTopSyncIndicator === 'function') refreshTopSyncIndicator();
+      if (typeof activeMastersTab !== 'undefined' && activeMastersTab === 'sync' && typeof renderMastersContent === 'function') renderMastersContent();
+    }).catch(() => {
+      log('SYNC_FAILED', { reason: 'exception' });
+    });
+  }
+
+  function onHiddenCountdownElapsed() {
+    _countdownTimerId = null;
+    runEligibilityCheck();
+  }
+
+  // ── Visibility transition detection (requirement 3) — only an ACTUAL
+  // transition starts/cancels a countdown; repeated visibilitychange events
+  // while remaining hidden never start a second timer (requirement 12/Test 14). ─
+  function handleVisibilityChange() {
+    const current = document.visibilityState;
+    if (_previousVisibilityState === 'visible' && current === 'hidden') {
+      startHiddenStateSyncCountdown();
+    } else if (_previousVisibilityState === 'hidden' && current === 'visible') {
+      cancelHiddenStateSyncCountdown();
+    }
+    _previousVisibilityState = current;
+  }
+
+  // register()/unregister(): idempotent, and this module's sole listener —
+  // never touches the pre-existing sleep-auto-pause visibilitychange listener
+  // or SmartSyncTriggers' (disabled) listeners.
+  function register() {
+    if (_registered) return;
+    if (typeof document === 'undefined' || !document.addEventListener) return;
+    _listener = handleVisibilityChange;
+    document.addEventListener('visibilitychange', _listener);
+    _registered = true;
+  }
+
+  function unregister() {
+    if (!_registered) return;
+    if (_listener) document.removeEventListener('visibilitychange', _listener);
+    _listener = null;
+    _registered = false;
+    cancelHiddenStateSyncCountdown();
+  }
+
+  // getLockSyncStatus(): read-only diagnostics only, matching every other
+  // sync module's status getter in this file.
+  function getLockSyncStatus() {
+    return {
+      countdownPending: _countdownTimerId !== null,
+      syncedThisEpisode: _syncedThisEpisode,
+      previousVisibilityState: _previousVisibilityState
+    };
+  }
+
+  return { register, unregister, getLockSyncStatus };
+})();
+LockSyncTrigger.register();
+// ── End Hidden-State Lock Sync Trigger (Phase 27) ─────────────────────────────────
+
 // ── Persistence ───────────────────────────────────────────────────────────────
 function saveState() {
   try {
