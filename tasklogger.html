@@ -16,6 +16,23 @@
     } catch (e) {}
   })();
 </script>
+<script>
+  // Phase 25: detect touch capability before first paint so the header's
+  // touch-only Search button (see .search-btn / html.is-touch below) never
+  // flashes visible-then-hidden or vice versa. Capability-based, matching
+  // navigator.maxTouchPoints / pointer:coarse — never screen width, since a
+  // touchscreen laptop or tablet can have a desktop-sized viewport and a
+  // desktop monitor can be wide. This class is the single source of truth
+  // for touch-only header controls.
+  (function() {
+    try {
+      var touchCapable = (navigator.maxTouchPoints && navigator.maxTouchPoints > 0) ||
+        (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) ||
+        ('ontouchstart' in window);
+      if (touchCapable) document.documentElement.classList.add('is-touch');
+    } catch (e) {}
+  })();
+</script>
 <link rel="icon" href="./favicon.ico" type="image/x-icon">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css" />
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -132,6 +149,10 @@ body {
 .header {
   display: flex; align-items: flex-start; justify-content: space-between;
   margin-bottom: 1.5rem; gap: 12px; min-width: 0;
+  /* Phase 25: 0 on devices without a notch/rounded corner, so this never
+     adds padding on desktop — only relevant on phones held in landscape. */
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
 }
 .header-titlebar { min-width: 0; flex: 1 1 auto; }
 .title {
@@ -145,12 +166,21 @@ body {
 /* flex-shrink:0 keeps the action cluster from being crushed; min-width:0 on the
    flex item itself (not just children) is what actually lets the row wrap
    instead of forcing horizontal overflow on narrow viewports. */
-.header-actions { display: flex; gap: 8px; flex-shrink: 1; flex-wrap: wrap; justify-content: flex-end; min-width: 0; max-width: 100%; }
-/* Sync and More are the primary controls (Part 2/Final Acceptance Criteria) —
-   pin them to the front of the flex order so wrapping never pushes them
-   behind secondary controls (Dashboard link, date picker, Masters, Add task). */
-.header-actions .sync-btn { order: -2; }
-.header-actions .more-menu-wrap { order: -1; }
+.header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 1; flex-wrap: wrap; justify-content: flex-end; min-width: 0; max-width: 100%; }
+/* Phase 25: every interactive header control gets a real touch target —
+   applied at every breakpoint, not just phone, per the 44px sizing brief. */
+.header-actions .btn,
+.header-actions .date-picker-wrap {
+  min-height: 44px;
+}
+/* Phase 25: on desktop/tablet the six controls stay in natural DOM order
+   (Dashboard, Sync, Search[touch-only], More, Date, Masters, Add task) —
+   this preserves the existing visual hierarchy untouched. Only the phone
+   breakpoint below assigns each control an explicit `order` and activates
+   .header-row-break, so wrapping there is an intentional two-row layout
+   (Dashboard/Date/Add task, then Sync/Masters/Search/More) rather than the
+   browser wrapping wherever it runs out of space. */
+.header-row-break { display: none; }
 
 /* Buttons */
 .btn {
@@ -210,6 +240,12 @@ body {
 .sync-dot.sync-required { background: var(--amber-mid); }
 .sync-dot.sync-neutral { background: var(--text-tertiary); }
 @keyframes syncDotBlink { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+
+/* ── Phase 25: Touch-only Search entry point ──
+   Hidden by default (mouse/keyboard desktop keeps using Ctrl+Shift+F).
+   html.is-touch is set pre-paint by the capability check in <head>. */
+.search-btn { display: none; }
+html.is-touch .search-btn { display: inline-flex; }
 
 /* ── Phase 21: More menu ── */
 .more-menu-wrap { position: relative; }
@@ -722,7 +758,11 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
   position: fixed; inset: 0; z-index: 9999;
   background: rgba(0,0,0,.35);
   display: flex; align-items: flex-start; justify-content: center;
-  padding-top: 80px;
+  /* Phase 25: safe-area-aware — env() resolves to 0 on devices without a
+     notch, so this is identical to the old flat 80px everywhere else. */
+  padding: max(80px, calc(env(safe-area-inset-top, 0px) + 24px)) 12px 12px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 #task-search-overlay.hidden { display: none; }
 .log-row-highlight { animation: logRowHighlightFlash 2.2s ease; }
@@ -738,6 +778,14 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
   box-shadow: 0 12px 40px rgba(0,0,0,.28);
   width: min(680px, 94vw);
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  /* Phase 25: cap total height to the viewport minus the overlay's own
+     top/bottom padding, so on short viewports (e.g. keyboard open) the box
+     shrinks instead of overflowing off-screen. dvh is a progressive
+     enhancement; ignored where unsupported, vh line above still applies. */
+  max-height: calc(100vh - 100px);
+  max-height: calc(100dvh - 100px);
 }
 .search-result-item {
   display: flex; align-items: flex-start; gap: 10px;
@@ -1060,29 +1108,106 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
   body { padding: 0.75rem 0.5rem 8rem; }
 }
 
-/* ── Header ── */
-/* Tablet (600–1024px): keep the title + actions on one row where there's
+/* ── Header (Phase 25) ──
+   Breakpoints, consolidated to one coherent set for the whole header:
+     > 1024px            desktop  — natural single row, untouched hierarchy
+     641px – 1024px       tablet   — natural single row, wraps only if it
+                                      genuinely runs out of room
+     ≤ 640px              phone    — fixed 2-row layout:
+                                        row 1: Dashboard, Date, Add task
+                                        row 2: Sync, Masters, Search, More
+                                      Order is intentional and does not
+                                      change with width — see the per-
+                                      control `order` values below.
+     ≤ 400px              small phone   — row 2 controls drop to icon-only;
+                                           Dashboard's label and the "Today"
+                                           badge hide, to guarantee both
+                                           rows keep fitting on one line
+     ≤ 360px              very small    — tighter padding only
+   Tablet (641–1024px): keep the title + actions on one row where there's
    room; only drop to a stacked layout once space actually runs out. */
 @media (min-width: 641px) and (max-width: 1024px) {
   .header { flex-wrap: wrap; }
-  .header-actions { gap: 6px; }
+  .header-actions { gap: 6px; row-gap: 8px; }
 }
 @media (max-width: 640px) {
+  /* Phase 25: less top offset on phones — more room stays available once
+     the software keyboard is open. */
+  #task-search-overlay { padding: max(48px, calc(env(safe-area-inset-top, 0px) + 12px)) 8px 8px; }
+  #task-search-box { max-height: calc(100vh - 60px); max-height: calc(100dvh - 60px); }
   .header { flex-direction: column; gap: 10px; align-items: stretch; }
   .header-titlebar { max-width: 100%; }
   .header-actions {
-    display: flex; flex-wrap: wrap; gap: 6px;
+    display: flex; flex-wrap: wrap; gap: 6px; row-gap: 8px;
     justify-content: flex-start;
   }
-  .header-actions .date-picker-wrap { flex: 1; min-width: 140px; }
+  /* Fixed row order — explicit per control, since row 2's requested order
+     (Sync, Masters, Search, More) doesn't match source DOM order and a
+     shared group `order` value can only preserve DOM order among ties.
+     The row-break's flex-basis:100% forces the line to end there
+     regardless of how much room is left, so this is a deterministic
+     2-row split, never ad hoc wrapping. */
+  .header-actions .btn-highlight   { order: 1; } /* Dashboard */
+  .header-actions .date-picker-wrap { order: 2; } /* Date */
+  .header-actions .btn-primary      { order: 3; } /* Add task */
+  .header-row-break {
+    display: block; order: 4; flex-basis: 100%; width: 100%; height: 0;
+  }
+  .header-actions .sync-btn         { order: 5; } /* Sync */
+  .header-actions .header-masters-btn { order: 6; } /* Masters */
+  .header-actions .search-btn       { order: 7; } /* Search (touch only) */
+  .header-actions .more-menu-wrap    { order: 8; } /* More */
+
+  /* Each row's own controls share the row's width evenly and shrink
+     together (flex-basis:0, min-width:0) instead of wrapping onto a third
+     line — label text truncates with an ellipsis as a last-resort safety
+     net so a row can never push content outside the viewport. */
+  .header-actions .btn-highlight,
+  .header-actions .date-picker-wrap,
+  .header-actions .btn-primary,
+  .header-actions .sync-btn,
+  .header-actions .header-masters-btn,
+  .header-actions .search-btn,
+  .header-actions .more-menu-wrap {
+    flex: 1 1 0; min-width: 0; justify-content: center;
+  }
+  .header-actions .btn span,
+  .header-actions .btn-highlight span,
+  .header-actions #more-menu-btn {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .date-picker-input { min-width: 0; }
   .title { font-size: 18px; }
 }
-/* Very narrow phones: let the title shrink further and tighten gaps before
-   anything is ever hidden — Sync and More stay full-size and labeled. */
+/* Small phones: row 2 has four controls, the tightest row — drop it to
+   icon-only (title/aria-label keep it accessible) so it keeps fitting on
+   one line all the way down to 320px. Dashboard's label and the "Today"
+   badge are the least essential parts of row 1 and free up the same
+   guarantee there; Add task's label is kept since it's the primary CTA. */
 @media (max-width: 400px) {
   .title { font-size: 16px; }
   .subtitle { font-size: 10.5px; }
   .header-actions { gap: 5px; }
+  .header-actions .btn-highlight span,
+  .header-actions .sync-btn #top-sync-label,
+  .header-actions .header-masters-btn span,
+  .header-actions .search-btn span,
+  #more-menu-btn > span,
+  .more-menu-chevron,
+  .date-today-badge {
+    display: none;
+  }
+  /* Phase 21: the sync status dot is Sync's only indicator once its label
+     is hidden — never let it be caught by a generic hide rule. */
+  .header-actions .btn .sync-dot { display: inline-block !important; }
+  .header-actions .btn-highlight,
+  .header-actions .sync-btn,
+  .header-actions .header-masters-btn,
+  .header-actions .search-btn {
+    min-width: 44px; flex: 0 0 auto; padding-left: 10px; padding-right: 10px;
+  }
+  .header-actions .more-menu-wrap { min-width: 44px; flex: 0 0 auto; }
+  .header-actions .more-menu-wrap #more-menu-btn { padding-left: 10px; padding-right: 10px; }
 }
 
 /* ── Task card ── */
@@ -1168,6 +1293,7 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
 @media (max-height: 500px) and (orientation: landscape) {
   body { padding-top: 0.5rem; padding-bottom: 5rem; }
   .header { margin-bottom: 0.75rem; }
+  .header-actions { gap: 5px; row-gap: 6px; }
   .task-card { padding: 8px 10px; margin-bottom: 6px; }
   .task-meta { flex-wrap: wrap; gap: 5px; }
   .work-widget, .break-widget { bottom: 8px; padding: 6px 10px; }
@@ -1181,15 +1307,13 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
   .meta-field-wide { min-width: 160px; }
 }
 
-/* ── Button text hide on very small ── */
+/* ── Phase 25: very small phones (≤360px) ──
+   Row 2's icon-only treatment already happens at ≤400px (see above) —
+   row 2 has four controls, the tightest row, so it needs the earliest
+   treatment. This block only tightens padding further so row 1
+   (Dashboard/Date/Add task) keeps comfortable room down to 320px. */
 @media (max-width: 360px) {
-  .header-actions .btn span,
-  .header-actions .btn-primary span { display: none; }
-  /* Phase 21: the sync status dot must never be hidden by the generic
-     "hide button label spans" rule above — it's the only visual state
-     indicator the Sync button has at this width. */
-  .header-actions .btn .sync-dot { display: inline-block !important; }
-  .btn { padding: 8px 10px; }
+  .header-actions .btn { padding-left: 8px; padding-right: 8px; }
 }
 
 /* ── Wake notice ── */
@@ -1287,20 +1411,35 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
       <button class="btn sync-btn" id="top-sync-btn" onclick="topSyncClick()" title="Synced">
         <i class="ti ti-refresh"></i> <span id="top-sync-label">Sync</span> <span class="sync-dot sync-neutral" id="top-sync-dot"></span>
       </button>
+      <!-- Phase 25: touch-only entry point into the existing search overlay/
+           openSearch() — hidden on non-touch devices via html.is-touch (see
+           <head>); desktop keyboard users keep using Ctrl+Shift+F. -->
+      <button class="btn search-btn" id="top-search-btn" onclick="openSearch()" aria-label="Search" title="Search">
+        <i class="ti ti-search"></i> <span>Search</span>
+      </button>
       <div class="more-menu-wrap" id="more-menu-wrap">
-        <button class="btn" id="more-menu-btn" onclick="toggleMoreMenu(event)" title="More actions"><i class="ti ti-dots"></i> More <i class="ti ti-chevron-down" style="font-size:11px"></i></button>
+        <button class="btn" id="more-menu-btn" onclick="toggleMoreMenu(event)" title="More actions"><i class="ti ti-dots"></i> <span>More</span> <i class="ti ti-chevron-down more-menu-chevron" style="font-size:11px"></i></button>
         <div class="more-menu-dropdown hidden" id="more-menu-dropdown">
           <button class="btn" onclick="openCSVModal()" title="Import or export the log as CSV or Excel"><i class="ti ti-file-import"></i> Import / Export</button>
           <button class="btn" onclick="startTour()" id="tour-btn" title="App Tour"><i class="ti ti-route"></i> Tour</button>
           <button class="btn" onclick="cycleTheme()" id="theme-toggle-btn" title="Switch theme"><i class="ti ti-sun" id="theme-toggle-icon"></i> <span id="theme-toggle-label">Light</span></button>
         </div>
       </div>
+      <!-- Phase 25: intentional row break — see .header-row-break. It's a
+           no-op (display:none) except at the phone breakpoint, where its
+           `order` places it between row 1 (Dashboard, Date, Add task) and
+           row 2 (Sync, Masters, Search, More). Element position here is
+           irrelevant to layout — every control's `order` is set explicitly
+           in the phone media query below, so the DOM order above (Dashboard,
+           Sync, Search, More, ... Masters, Add task) is exactly the
+           original order and desktop/tablet are untouched. -->
+      <div class="header-row-break" aria-hidden="true"></div>
       <div class="date-picker-wrap" onclick="try{document.getElementById('log-date-input').showPicker()}catch(e){document.getElementById('log-date-input').click()}">
         <i class="ti ti-calendar"></i>
         <input type="date" id="log-date-input" class="date-picker-input" onchange="onDateChange()" />
         <span id="today-badge" class="date-today-badge">Today</span>
       </div>
-      <button class="btn" onclick="openMasters()"><i class="ti ti-list-details"></i> Masters</button>
+      <button class="btn header-masters-btn" onclick="openMasters()" aria-label="Masters" title="Masters"><i class="ti ti-list-details"></i> <span>Masters</span></button>
       <button class="btn btn-primary" onclick="addTask()"><i class="ti ti-plus"></i> Add task</button>
     </div>
   </div>
@@ -1667,7 +1806,7 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
         style="border:none;outline:none;background:transparent;font-size:13px;color:var(--text-primary);font-family:inherit;min-width:160px;flex:1" />
       <span style="font-size:11px;color:var(--text-tertiary);white-space:nowrap">Esc to close</span>
     </div>
-    <div id="task-search-results" style="overflow-y:auto;max-height:400px"></div>
+    <div id="task-search-results" style="overflow-y:auto;max-height:400px;flex:1;min-height:0"></div>
   </div>
 </div>
 
