@@ -9579,10 +9579,16 @@ function loadState() {
     // state, upload queue reconciliation, or any business data.
     loadConflictHistory();
     if (l) {
-      const allEntries = JSON.parse(l);
-      // Keep only last 3 months
-      const cutoff = Date.now() - 90 * 24 * 60 * 60 * 1000;
-      logEntries = allEntries.filter(e => e.startTs >= cutoff);
+      // Phase 26: this used to silently drop any entry older than a
+      // hardcoded 90 days on EVERY load, regardless of the user's configured
+      // History Cleanup retention, with no sync-deletion tracking and no
+      // active-task protection. That made history removal look "unreliable"
+      // from the user's perspective (entries could vanish on a plain reload,
+      // then resurrect via sync from a device that still had them, since the
+      // drop was never recorded as a tracked deletion). History is now only
+      // ever removed by the explicit, tracked runHistoryCleanup() — loading
+      // just loads what was persisted.
+      try { logEntries = JSON.parse(l) || []; } catch (e) { logEntries = []; }
     }
     if (counter) taskIdCounter = parseInt(counter) || 0;
     if (importCounter) importIdCounter = parseInt(importCounter) || 0;
@@ -13071,7 +13077,7 @@ function renderMastersContent() {
           <span style="font-size:12px;color:var(--text-secondary)">Keep last</span>
           <input class="complete-input" id="cleanup-days" type="number" min="1" max="3650" value="90" style="width:70px;text-align:center" />
           <span style="font-size:12px;color:var(--text-secondary)">days</span>
-          <button class="btn" style="color:var(--red-dark);border-color:var(--red-mid)" onclick="runHistoryCleanup()"><i class="ti ti-trash"></i> Clean Up</button>
+          <button class="btn" id="history-cleanup-btn" style="color:var(--red-dark);border-color:var(--red-mid)" onclick="runHistoryCleanup()"><i class="ti ti-trash"></i> Clean Up</button>
         </div>
         <div id="cleanup-status" style="font-size:12px;margin-top:8px;display:none"></div>
       </div>
@@ -14945,38 +14951,150 @@ function importBackup(event) {
   event.target.value = '';
 }
 
-function runHistoryCleanup() {
-  const daysEl = document.getElementById('cleanup-days');
-  const days = parseInt(daysEl?.value || '90', 10);
-  if (isNaN(days) || days < 1) { alert('Please enter a valid number of days.'); return; }
-  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
-  const before = logEntries.length;
-  // Keep entries newer than cutoff OR whose task is currently active
-  const activeTaskIds = new Set(tasks.filter(t => t.running || t.startedAt).map(t => t.id));
-  const entriesToRemove = logEntries.filter(e => !(e.startTs >= cutoff || activeTaskIds.has(e.taskId)));
-  // Phase 19C: History Cleanup is a second, separate bulk log-deletion path alongside
-  // Clear Logs (clearLog() only ever clears one date; this can span many). Per the
-  // brief's item 6 ("identify every log-table deletion path... do not fix only one UI
-  // button"), each removed entry gets its own domain-tracked 'delete', same as the
-  // single-entry and cascade-from-task-delete paths.
-  if (typeof recordSyncChange === 'function') {
-    entriesToRemove.forEach(e => recordSyncChange('logEntries', e.taskId + '@' + e.startTs, 'delete'));
-  }
-  logEntries = logEntries.filter(e => e.startTs >= cutoff || activeTaskIds.has(e.taskId));
-  const removed = before - logEntries.length;
-  saveState();
-  const st = document.getElementById('cleanup-status');
-  if (st) {
-    st.style.display = 'block';
-    if (removed > 0) {
-      st.style.color = 'var(--green-dark)';
-      st.textContent = `✓ Removed ${removed} entr${removed===1?'y':'ies'} older than ${days} days. ${logEntries.length} entries remain.`;
-    } else {
-      st.style.color = 'var(--text-secondary)';
-      st.textContent = `No entries older than ${days} days found. Nothing removed.`;
+// Phase 26: History Cleanup root-cause fixes.
+//
+// Bug 1 (activeTaskIds): the old code used `t.running || t.startedAt`.
+// `startedAt` is set once, the first time a task is ever started, and is
+// never cleared — so ANY task that had been started even once (including
+// tasks now paused or completed long ago) permanently protected its ENTIRE
+// history from cleanup. This is the bug the brief calls out explicitly:
+// "startedAt is historical data... does NOT mean it is currently active."
+// The authoritative current-running state in this app is `task.status ===
+// 'running'` (see e.g. line ~9847, ~16224, ~16401 — every other part of the
+// app already treats status this way).
+//
+// Bug 2 (timestamp assumption): the old code assumed `e.startTs` is always
+// a comparable number. A malformed/foreign value (e.g. hand-edited backup,
+// numeric string, ISO date string) would silently sort as `NaN`, and
+// `NaN >= cutoff` is always false — meaning such an entry would be silently
+// DELETED rather than safely kept. getLogEntryTimestamp() below normalizes
+// this and treats anything unrecognizable as "keep + report as skipped."
+//
+// Timestamp normalization helper. Returns a numeric ms timestamp, or null
+// if the value can't be safely interpreted (in which case the caller must
+// keep the entry rather than risk deleting valid history).
+function getLogEntryTimestamp(entry) {
+  const raw = entry && entry.startTs;
+  if (typeof raw === 'number') return isFinite(raw) ? raw : null;
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (trimmed === '') return null;
+    if (/^-?\d+$/.test(trimmed)) {
+      const n = parseInt(trimmed, 10);
+      return isFinite(n) ? n : null;
     }
+    const parsed = Date.parse(trimmed);
+    return isNaN(parsed) ? null : parsed;
   }
-  renderMastersContent(); // refresh stats
+  return null;
+}
+
+let _historyCleanupInProgress = false; // guards against rapid double-tap (item 15)
+
+function runHistoryCleanup() {
+  if (_historyCleanupInProgress) return; // synchronous op; a second click mid-run is a no-op
+  const btn = document.getElementById('history-cleanup-btn');
+  const daysEl = document.getElementById('cleanup-days');
+  const st = document.getElementById('cleanup-status');
+  const showStatus = (color, text) => { if (st) { st.style.display = 'block'; st.style.color = color; st.textContent = text; } };
+
+  // Input validation (item 14): missing / NaN / zero / negative / non-integer /
+  // above the field's existing supported max. Uses the existing inline status
+  // area rather than alert(), consistent with the rest of this panel's UI.
+  const rawVal = daysEl ? daysEl.value : '';
+  const days = Number(rawVal);
+  const maxDays = daysEl && daysEl.max ? parseInt(daysEl.max, 10) : 3650;
+  if (rawVal === '' || rawVal === null || !isFinite(days) || !Number.isInteger(days) || days < 1 || days > maxDays) {
+    showStatus('var(--red-mid)', `Enter a whole number of days between 1 and ${maxDays}.`);
+    return;
+  }
+
+  _historyCleanupInProgress = true;
+  if (btn) btn.disabled = true;
+  try {
+    // Cutoff: exact elapsed 24-hour periods from "now" (not calendar-day
+    // boundaries) — same semantics the app already used here and elsewhere
+    // (see loadState()'s former 90-day filter, removed in this phase — see
+    // PHASE_26_HISTORY_CLEANUP.md).
+    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+
+    // Only a CURRENTLY RUNNING task's OPEN (endTs === null) log entry is
+    // protected — never its closed history, never a merely-paused or
+    // completed task (items 2, 9, 10).
+    const runningTaskIds = new Set(tasks.filter(t => t.status === 'running').map(t => t.id));
+
+    const toRemove = [];
+    const toKeep = [];
+    let skipped = 0;
+    logEntries.forEach(e => {
+      const ts = getLogEntryTimestamp(e);
+      if (ts === null) { toKeep.push(e); skipped++; return; }
+      const isProtectedOpenEntry = e.endTs === null && runningTaskIds.has(e.taskId);
+      if (ts >= cutoff || isProtectedOpenEntry) toKeep.push(e); else toRemove.push(e);
+    });
+
+    // Nothing to remove: leave logEntries and sync state untouched entirely (item 6).
+    if (toRemove.length === 0) {
+      showStatus('var(--text-secondary)', skipped > 0
+        ? `No entries older than ${days} days found. Nothing removed. (${skipped} entr${skipped===1?'y':'ies'} skipped — timestamp could not be interpreted.)`
+        : `No entries older than ${days} days found. Nothing removed.`);
+      return;
+    }
+
+    // Remove, then persist through the app's normal saveState() mechanism,
+    // then VERIFY the write actually landed before treating this as success
+    // (item 12). saveState() swallows its own storage errors internally, so
+    // a failed write (e.g. quota exceeded) would otherwise look identical to
+    // a successful one; reading back what was actually persisted is the only
+    // way to tell. localStorage.setItem is atomic, so if the write failed the
+    // previously-stored value (pre-cleanup) is still intact underneath.
+    const previousLogEntries = logEntries;
+    logEntries = toKeep;
+    saveState();
+
+    let persisted = false;
+    try {
+      const raw = localStorage.getItem('ttl_log');
+      const parsed = raw ? JSON.parse(raw) : null;
+      persisted = Array.isArray(parsed) && parsed.length === toKeep.length;
+    } catch (e) { persisted = false; }
+
+    if (!persisted) {
+      logEntries = previousLogEntries; // restore consistent in-memory state
+      showStatus('var(--red-mid)', 'Cleanup failed: could not save changes. Nothing was removed.');
+      return;
+    }
+
+    // Refresh log table / counts / completed count / total minutes / dashboard.
+    if (typeof updateLogPanel === 'function') updateLogPanel();
+    if (typeof renderMastersContent === 'function') renderMastersContent(); // refreshes this panel's own Log Entries/Oldest/Storage stats
+
+    // Mark each removed entry as a synchronization deletion, using the SAME
+    // identity (`taskId + '@' + startTs`) already used by every other log
+    // mutation path in this file (item 8) — only after persistence is
+    // confirmed, so a failed save never leaves a phantom dirty/deletion record.
+    if (typeof recordSyncChange === 'function') {
+      toRemove.forEach(e => recordSyncChange('logEntries', e.taskId + '@' + e.startTs, 'delete'));
+    }
+    // recordSyncChange() only refreshes the Sync Required dot via saveState()'s
+    // own internal call to refreshTopSyncIndicator(); since these calls happen
+    // after that saveState(), refresh it once more so the dot reflects reality.
+    if (typeof refreshTopSyncIndicator === 'function') refreshTopSyncIndicator();
+
+    // renderMastersContent() just rebuilt this tab's DOM from scratch (it has
+    // its own static, empty #cleanup-status markup) — re-fetch the element and
+    // set the message AFTER that refresh, or it would be immediately wiped.
+    const stAfter = document.getElementById('cleanup-status');
+    if (stAfter) {
+      stAfter.style.display = 'block';
+      stAfter.style.color = 'var(--green-dark)';
+      stAfter.textContent = `✓ Removed ${toRemove.length} entr${toRemove.length===1?'y':'ies'} older than ${days} days. ${logEntries.length} entries remain.`
+        + (skipped > 0 ? ` ${skipped} entr${skipped===1?'y':'ies'} skipped because ${skipped===1?'its timestamp':'their timestamps'} could not be interpreted.` : '');
+    }
+  } finally {
+    _historyCleanupInProgress = false;
+    if (btn) btn.disabled = false;
+  }
 }
 let _searchActiveIdx = -1;
 let _searchKeywords = [];
