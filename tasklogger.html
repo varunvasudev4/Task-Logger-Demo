@@ -1990,8 +1990,8 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
         <i class="ti ti-file-upload" style="font-size:24px;display:block;margin-bottom:6px;opacity:.5"></i>
         Click to choose a CSV or Excel file (.csv, .xlsx, .xls) or drag &amp; drop here
         <input type="file" id="csv-file-input" accept=".csv,.xlsx,.xls" style="display:none" onchange="handleCSVFile(this)" />
-        <!-- Phase 29: shared hidden file input for task attachments — native picker only, one shared element reused across every task (see openAttachmentPicker()/handleAttachmentFileSelect()). -->
-        <input type="file" id="attachmentFileInput" multiple style="display:none" onchange="handleAttachmentFileSelect(event)" />
+        <!-- Phase 29: shared hidden file input for task attachments — native picker only, one shared element reused across every task (see openAttachmentPicker()/handleAttachmentFileSelect()). `multiple` already enables one-operation multi-select (Phase 29A §2); `accept` is a native-picker hint only — the authoritative check is ALLOWED_ATTACHMENT_EXTENSIONS in isAllowedAttachmentFile() (Phase 29A §4), since accept can't reliably gate .msg/.eml/.xml/.xls by MIME type. -->
+        <input type="file" id="attachmentFileInput" multiple accept=".png,.jpg,.jpeg,.svg,.pdf,.xls,.xlsx,.xml,.msg,.eml" style="display:none" onchange="handleAttachmentFileSelect(event)" />
       </div>
       <div class="csv-import-preview" id="csv-import-preview"></div>
     </div>
@@ -3075,16 +3075,71 @@ const AttachmentBlobStore = (function () {
 })();
 // ── End Attachment Local Blob Store (Phase 29) ───────────────────────────────────
 
-// ── Attachment Add / File Selection UX (Phase 29) ───────────────────────────────
+// ── Attachment Format Validation (Phase 29A) ─────────────────────────────────────
+// Required-format allowlist (Phase 29A §4). Checked by file EXTENSION, never by
+// MIME type alone — browsers report missing/inconsistent MIME types for several
+// of these (.msg, .eml, .xml, .xls in particular), so extension is the only
+// reliable signal (Phase 29A §4/§5). Extensions are stored lowercase here and
+// compared case-insensitively (Phase 29A §5), so "PHOTO.JPG"/"photo.jpg"/
+// "Photo.JpG" are all accepted identically.
+const ALLOWED_ATTACHMENT_EXTENSIONS = [
+  '.png', '.jpg', '.jpeg', '.svg',   // image
+  '.pdf',                            // document
+  '.xls', '.xlsx', '.xml',           // office/data
+  '.msg', '.eml'                     // email
+];
+
+// Extracts a file's extension (including the leading dot, lowercased) from its
+// name — e.g. "Invoice.PDF" -> ".pdf". Returns '' for a name with no dot, which
+// isAllowedAttachmentFile() below then correctly rejects (an unlisted/empty
+// extension is never accepted).
+function getFileExtension(fileName) {
+  const name = String(fileName || '');
+  const dot = name.lastIndexOf('.');
+  if (dot < 0 || dot === name.length - 1) return '';
+  return name.slice(dot).toLowerCase();
+}
+
+// Case-insensitive extension check against ALLOWED_ATTACHMENT_EXTENSIONS
+// (Phase 29A §4/§5). This is the single authoritative gate every attachment
+// file passes through — addAttachmentsToTask() below never creates a record
+// for a file this rejects.
+function isAllowedAttachmentFile(file) {
+  return ALLOWED_ATTACHMENT_EXTENSIONS.indexOf(getFileExtension(file && file.name)) !== -1;
+}
+// ── End Attachment Format Validation (Phase 29A) ─────────────────────────────────
+
+// ── Attachment Add / File Selection UX (Phase 29, extended Phase 29A) ───────────
 // User-facing entry point: turns a native file-picker FileList into local
 // attachment metadata records (Phase 28's createAttachmentMetadata(), reused
 // completely unchanged) plus this phase's own local blob storage above — and
 // NOTHING else. Per Phase 29 §2/§7/§23: selecting a file must result in ZERO
 // Google Drive API calls. Nothing below calls GoogleDriveWorkspace or touches
 // any Drive endpoint, directly or indirectly.
+//
+// Phase 29A §6: every selected file is validated INDEPENDENTLY — one rejected
+// file never blocks the other valid files in the same selection, and a
+// same-filename duplicate (Phase 29A §8) is never treated as a rejection since
+// nothing here does filename-based dedup (identity is always the generated
+// attachmentId, per Phase 28 §9 / Phase 29A §7).
 function addAttachmentsToTask(taskId, fileList) {
   if (!fileList || fileList.length === 0) return; // cancelled picker — Phase 29 §26 Test 2: no-op
-  Array.from(fileList).forEach(file => {
+  const allFiles = Array.from(fileList);
+  const validFiles = allFiles.filter(isAllowedAttachmentFile);
+  const rejectedFiles = allFiles.filter(file => !isAllowedAttachmentFile(file));
+  if (rejectedFiles.length > 0) {
+    // Clear feedback identifying exactly which files were rejected (Phase 29A
+    // §6), using this file's existing alert()-based feedback convention rather
+    // than introducing a new notification mechanism.
+    alert(
+      'The following file' + (rejectedFiles.length > 1 ? 's are' : ' is') +
+      ' not a supported attachment format and ' +
+      (rejectedFiles.length > 1 ? 'were' : 'was') + ' not added:\n\n' +
+      rejectedFiles.map(f => f.name).join('\n') +
+      '\n\nSupported formats: ' + ALLOWED_ATTACHMENT_EXTENSIONS.join(', ')
+    );
+  }
+  validFiles.forEach(file => {
     const record = createAttachmentMetadata(taskId, {
       fileName: file.name,
       mimeType: file.type || 'application/octet-stream',
