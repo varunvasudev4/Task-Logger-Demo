@@ -1955,6 +1955,49 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
      check is ALLOWED_ATTACHMENT_EXTENSIONS in isAllowedAttachmentFile() (Phase 29A §4),
      since accept can't reliably gate .msg/.eml/.xml/.xls by MIME type. -->
 <input type="file" id="attachmentFileInput" multiple accept=".png,.jpg,.jpeg,.svg,.pdf,.xls,.xlsx,.xml,.msg,.eml" style="display:none" onchange="handleAttachmentFileSelect(event)" />
+<!-- Phase 30: Attachment List modal — the shared "which attachment do you mean"
+     step reached from BOTH the Task Card attach button (when it already has
+     attachments) and the Log Table's attachment indicator (openAttachmentList()).
+     Lists every attachment for one taskId via the existing getAttachmentsForTask()
+     (Phase 28) — never a second attachment array/store. Selecting a row opens
+     the Attachment Viewer modal below. "Add files" (only shown when opened from
+     the Task Card — see openAttachmentList()'s allowAdd param) reuses the
+     existing, unmodified openAttachmentPicker()/#attachmentFileInput flow from
+     Phase 29/29A; this modal never uploads, deletes, or duplicates anything
+     itself. -->
+<div class="modal-overlay hidden" id="attachment-list-modal" onclick="if(event.target===this)closeAttachmentListModal()">
+  <div class="modal" style="max-width:460px">
+    <div class="modal-header">
+      <div class="modal-title"><i class="ti ti-paperclip" style="vertical-align:-2px;margin-right:6px;color:var(--blue-mid)"></i>Attachments</div>
+      <button class="btn-icon" onclick="closeAttachmentListModal()"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="modal-body" id="attachment-list-body"></div>
+    <div class="modal-footer" id="attachment-list-footer"></div>
+  </div>
+</div>
+<!-- Phase 30: Attachment Viewer modal — opened for exactly one attachment at a
+     time (openAttachmentViewer()). Never auto-opens on its own; only a row
+     click in the list above reaches it (brief §5: no automatic first-attachment
+     open). Content area is populated per-format by renderAttachmentPreview()/
+     renderAttachmentUnavailable() — images and SVG use a plain <img> (an <img>
+     never executes embedded SVG script, so this is a safe preview per brief
+     §6/§23), PDF uses an <iframe>, XML is read as text and escaped into a
+     <pre> (never innerHTML'd raw), and every other allowed format (xls/xlsx/
+     eml/msg) gets Open/Download only. A blob URL is created fresh per open and
+     revoked on close/replace (see revokeAttachmentViewerUrl()) — never left to
+     leak across repeated opens. -->
+<div class="modal-overlay hidden" id="attachment-viewer-modal" onclick="if(event.target===this)closeAttachmentViewerModal()">
+  <div class="modal" style="max-width:720px">
+    <div class="modal-header">
+      <div class="modal-title" style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+        <i class="ti ti-file" style="vertical-align:-2px;margin-right:6px;color:var(--blue-mid)"></i><span id="attachment-viewer-filename"></span>
+      </div>
+      <button class="btn-icon" onclick="closeAttachmentViewerModal()"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="modal-body" id="attachment-viewer-body" style="display:flex;align-items:center;justify-content:center;min-height:160px"></div>
+    <div class="modal-footer" id="attachment-viewer-footer"></div>
+  </div>
+</div>
 <!-- CSV Export/Import modal -->
 <div class="modal-overlay hidden" id="csv-modal">
   <div class="modal" style="max-width:520px">
@@ -3201,6 +3244,225 @@ function handleAttachmentFileSelect(event) {
   addAttachmentsToTask(taskId, event.target.files);
 }
 // ── End Attachment Add / File Selection UX (Phase 29) ───────────────────────────
+
+// ── Attachment View / Open (Phase 30) ────────────────────────────────────────────
+// Adds VIEW/OPEN access to the attachment records Phase 28/29/29A already
+// created — never a second attachment architecture. Both the Task Card and
+// the Log Table resolve the exact same `attachments` array by stable
+// taskId + attachmentId (never array index/filename/row position, per this
+// phase's brief §4/§25). Nothing here uploads, deletes, duplicates, or
+// triggers synchronization — see resolveAttachmentBlobForView() (§14/§15/§16
+// below) for why viewing never calls GoogleDriveWorkspace.uploadAttachmentToDrive()
+// or AttachmentManager, and never surfaces a login prompt of its own.
+
+// Human-readable kind label for the attachment list — never a raw MIME type
+// or internal id (brief §2: "do not display unnecessary technical IDs").
+function getAttachmentKindLabel(ext) {
+  const KIND_LABELS = {
+    '.png': 'PNG image', '.jpg': 'JPG image', '.jpeg': 'JPEG image', '.svg': 'SVG image',
+    '.pdf': 'PDF document', '.xls': 'Excel file (.xls)', '.xlsx': 'Excel file (.xlsx)',
+    '.xml': 'XML file', '.msg': 'Outlook message', '.eml': 'Email message'
+  };
+  return KIND_LABELS[ext] || 'File';
+}
+
+// Plain B/KB/MB display — only shown "where already available" (brief §2),
+// i.e. record.size as captured at upload time (Phase 29); never re-derived
+// from a Drive metadata call (that would violate §15's API-minimization rule).
+function formatAttachmentSize(bytes) {
+  const n = Number(bytes) || 0;
+  if (n <= 0) return '';
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+  return (n / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+// Resolves the actual bytes for one attachment record, local-first:
+//   1) AttachmentBlobStore (IndexedDB) — Phase 29 never deletes this blob
+//      after a successful upload (deleteBlob() exists but is only ever
+//      called by the not-yet-built Phase 31 deletion flow), so a 'synced'
+//      attachment opened on the SAME browser profile that uploaded it is
+//      still served from here with 0 Drive calls (brief §15).
+//   2) Only when no local blob exists AND the record has a confirmed
+//      driveFileId does this fall back to a single Drive files.get?alt=media
+//      request for THIS ONE attachment (brief §13/§15) — never the whole
+//      task's attachment set.
+// Never calls GoogleAuthManager's interactive sign-in — if there is no
+// existing silent session, this simply rejects with 'auth-required' rather
+// than prompting (brief §16: no new login flow merely because a view was
+// requested).
+function resolveAttachmentBlobForView(record) {
+  return AttachmentBlobStore.getBlob(record.attachmentId).then(blob => {
+    if (blob) return { blob: blob, source: 'local' };
+    if (!record.driveFileId) {
+      return Promise.reject(Object.assign(new Error('not-available'), { code: 'not-available' }));
+    }
+    if (typeof GoogleAuthManager === 'undefined' || !GoogleAuthManager.isAuthenticated()) {
+      return Promise.reject(Object.assign(new Error('auth-required'), { code: 'auth-required' }));
+    }
+    if (typeof GoogleDriveWorkspace === 'undefined' || typeof GoogleDriveWorkspace.downloadAttachmentFromDrive !== 'function') {
+      return Promise.reject(Object.assign(new Error('drive-unavailable'), { code: 'drive-unavailable' }));
+    }
+    return GoogleDriveWorkspace.downloadAttachmentFromDrive(record.driveFileId, 'view attachment: ' + record.fileName)
+      .then(blob => ({ blob: blob, source: 'drive' }));
+  });
+}
+
+// ── Attachment List modal ──────────────────────────────────────────────────
+// allowAdd: true only from the Task Card (where "Add files" reusing the
+// existing, unmodified openAttachmentPicker() makes sense); false from the
+// Log Table, which is view-only per this phase's scope (brief §2 is the Task
+// Card's concern; the Log Table only needs §3's access, not upload).
+function openAttachmentList(taskId, allowAdd) {
+  const records = getAttachmentsForTask(taskId);
+  const body = document.getElementById('attachment-list-body');
+  const footer = document.getElementById('attachment-list-footer');
+  if (!body || !footer) return;
+
+  body.innerHTML = records.length === 0
+    ? '<div style="color:var(--text-tertiary);font-size:13px;padding:6px 0">No attachments yet.</div>'
+    : records.map(r => {
+        const ext = getFileExtension(r.fileName);
+        const kind = getAttachmentKindLabel(ext);
+        const sizeStr = formatAttachmentSize(r.size);
+        const metaLine = kind + (sizeStr ? ' · ' + sizeStr : '') + (r.syncStatus !== 'synced' ? ' · pending sync' : '');
+        return '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 2px;border-bottom:1px solid var(--border)">'
+          + '<div style="min-width:0;flex:1">'
+          + '<div style="font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(r.fileName) + '">' + esc(r.fileName) + '</div>'
+          + '<div style="font-size:11px;color:var(--text-tertiary);margin-top:2px">' + esc(metaLine) + '</div>'
+          + '</div>'
+          + '<button class="btn-icon" onclick="openAttachmentViewer(' + taskId + ',' + r.attachmentId + ')" title="View / Open"><i class="ti ti-eye"></i></button>'
+          + '</div>';
+      }).join('');
+
+  footer.innerHTML = allowAdd
+    ? '<button class="btn" onclick="closeAttachmentListModal();openAttachmentPicker(' + taskId + ')"><i class="ti ti-plus"></i> Add files</button>'
+      + '<button class="btn" onclick="closeAttachmentListModal()">Close</button>'
+    : '<button class="btn" onclick="closeAttachmentListModal()">Close</button>';
+
+  document.getElementById('attachment-list-modal').classList.remove('hidden');
+}
+
+function closeAttachmentListModal() {
+  const overlay = document.getElementById('attachment-list-modal');
+  if (overlay) overlay.classList.add('hidden');
+}
+
+// ── Attachment Viewer modal ────────────────────────────────────────────────
+// Tracks the single currently-active object URL so it can always be revoked
+// (brief §17/TEST 14) — never accumulates across repeated opens, and is
+// revoked before a new one is created as well as on close.
+let _attachmentViewerBlobUrl = null;
+function revokeAttachmentViewerUrl() {
+  if (_attachmentViewerBlobUrl) {
+    URL.revokeObjectURL(_attachmentViewerBlobUrl);
+    _attachmentViewerBlobUrl = null;
+  }
+}
+
+// Opens exactly the one attachment the user selected — never the first one
+// automatically (brief §5). Resolved by taskId+attachmentId together, never
+// array index (brief §4/§25), so this behaves identically whether reached
+// from the Task Card or the Log Table.
+function openAttachmentViewer(taskId, attachmentId) {
+  const record = attachments.find(a => a.taskId === taskId && a.attachmentId === attachmentId);
+  const filenameEl = document.getElementById('attachment-viewer-filename');
+  const body = document.getElementById('attachment-viewer-body');
+  const footer = document.getElementById('attachment-viewer-footer');
+  const overlay = document.getElementById('attachment-viewer-modal');
+  if (!record || !body || !footer || !overlay) return;
+
+  filenameEl.textContent = record.fileName;
+  body.innerHTML = '<div style="color:var(--text-tertiary);font-size:13px">Loading…</div>';
+  footer.innerHTML = '';
+  overlay.classList.remove('hidden');
+
+  resolveAttachmentBlobForView(record).then(result => {
+    renderAttachmentPreview(record, result.blob);
+  }).catch(err => {
+    renderAttachmentUnavailable(err);
+  });
+}
+
+function closeAttachmentViewerModal() {
+  revokeAttachmentViewerUrl();
+  const overlay = document.getElementById('attachment-viewer-modal');
+  if (overlay) overlay.classList.add('hidden');
+  const body = document.getElementById('attachment-viewer-body');
+  const footer = document.getElementById('attachment-viewer-footer');
+  if (body) body.innerHTML = '';
+  if (footer) footer.innerHTML = '';
+}
+
+// Format-specific rendering (brief §6–§12). Every branch that cannot show an
+// inline preview still ends with a working Open/Download fallback (brief
+// §12/§22: "never a broken View action with no fallback"). Images AND SVG
+// both use a plain <img> — a browser never executes script embedded in an
+// <img>-rendered SVG, which is what makes this a safe preview rather than an
+// HTML/script injection risk (brief §6/§23) without needing a sanitizer
+// library this app doesn't otherwise depend on.
+function renderAttachmentPreview(record, blob) {
+  revokeAttachmentViewerUrl();
+  const ext = getFileExtension(record.fileName);
+  const body = document.getElementById('attachment-viewer-body');
+  const footer = document.getElementById('attachment-viewer-footer');
+  const typedBlob = (blob && blob.type) ? blob : new Blob([blob], { type: record.mimeType || 'application/octet-stream' });
+  const url = URL.createObjectURL(typedBlob);
+  _attachmentViewerBlobUrl = url;
+
+  const downloadBtn = '<a class="btn" href="' + url + '" download="' + esc(record.fileName) + '"><i class="ti ti-download"></i> Download</a>';
+  const openBtn = '<a class="btn" href="' + url + '" target="_blank" rel="noopener"><i class="ti ti-external-link"></i> Open</a>';
+
+  if (ext === '.png' || ext === '.jpg' || ext === '.jpeg' || ext === '.svg') {
+    body.innerHTML = '<img src="' + url + '" alt="' + esc(record.fileName) + '" style="max-width:100%;max-height:65vh;object-fit:contain;border-radius:var(--radius-md)" />';
+    footer.innerHTML = downloadBtn + openBtn;
+  } else if (ext === '.pdf') {
+    // Browser/native PDF viewer via <iframe> (brief §7) — Download/Open
+    // fallback always shown alongside it, since not every browser/device
+    // renders a PDF inline the same way.
+    body.innerHTML = '<iframe src="' + url + '" style="width:100%;height:65vh;border:1px solid var(--border);border-radius:var(--radius-md);background:#fff" title="' + esc(record.fileName) + '"></iframe>';
+    footer.innerHTML = downloadBtn + openBtn;
+  } else if (ext === '.xml') {
+    // Safe text view (brief §9): read as text and escape into a <pre> — never
+    // innerHTML'd raw, so embedded markup can't execute (brief §23).
+    body.innerHTML = '<div style="color:var(--text-tertiary);font-size:13px">Loading…</div>';
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = String(reader.result || '').slice(0, 200000);
+      body.innerHTML = '<pre style="white-space:pre-wrap;word-break:break-word;font-size:12px;max-height:60vh;overflow:auto;margin:0;text-align:left;width:100%">' + esc(text) + '</pre>';
+    };
+    reader.onerror = () => {
+      body.innerHTML = '<div style="color:var(--text-tertiary);font-size:13px">Preview unavailable — use Open or Download.</div>';
+    };
+    reader.readAsText(typedBlob);
+    footer.innerHTML = downloadBtn + openBtn;
+  } else {
+    // .xls/.xlsx/.msg/.eml (brief §8/§10/§11): Open/Download only — no custom
+    // renderer built for any of these in this phase.
+    body.innerHTML = '<div style="text-align:center;color:var(--text-tertiary);font-size:13px;padding:16px 0">'
+      + '<i class="ti ti-file" style="font-size:32px;display:block;margin-bottom:8px"></i>'
+      + 'Inline preview isn\'t available for this file type.<br>Use Open or Download below.'
+      + '</div>';
+    footer.innerHTML = downloadBtn + openBtn;
+  }
+}
+
+function renderAttachmentUnavailable(err) {
+  const body = document.getElementById('attachment-viewer-body');
+  const footer = document.getElementById('attachment-viewer-footer');
+  if (!body || !footer) return;
+  const code = err && err.code;
+  const msg = code === 'auth-required'
+    ? 'Sign in to Google Drive (via the app\'s existing Sync sign-in) to view this synced attachment.'
+    : code === 'not-available'
+      ? 'This attachment isn\'t available locally and hasn\'t finished syncing yet.'
+      : 'This attachment could not be retrieved right now.';
+  body.innerHTML = '<div style="text-align:center;color:var(--text-tertiary);font-size:13px;padding:16px 0">'
+    + '<i class="ti ti-alert-circle" style="font-size:32px;display:block;margin-bottom:8px"></i>' + esc(msg)
+    + '</div>';
+  footer.innerHTML = '';
+}
+// ── End Attachment View / Open (Phase 30) ────────────────────────────────────────
 
 // Whether a domain currently has local changes that haven't been confirmed synced —
 // the domain-level counterpart to isTaskDirty() (Phase 2).
@@ -4993,6 +5255,75 @@ const GoogleDriveWorkspace = (function () {
     );
   }
 
+  // Phase 30: identical auth/error handling to driveFetch()/driveFetchText(),
+  // but resolves the response as a Blob — needed for Download File (`alt=media`)
+  // on an attachment, whose content is arbitrary binary (image/PDF/xlsx/etc.),
+  // never JSON or text (driveFetchText's text() would corrupt binary content).
+  // Used ONLY by downloadAttachmentFromDrive() below, itself called only from
+  // resolveAttachmentBlobForView() when viewing an attachment that has no
+  // local blob — never from any automatic/background/Sync code path.
+  function driveFetchBlob(url, options, meta) {
+    const token = (typeof GoogleAuthManager !== 'undefined' && GoogleAuthManager.getAccessTokenForClient)
+      ? GoogleAuthManager.getAccessTokenForClient()
+      : null;
+    if (!token) {
+      const err = new Error('Not authenticated.');
+      err.authFailure = true;
+      return Promise.reject(err);
+    }
+    options = options || {};
+    options.headers = Object.assign({ Authorization: 'Bearer ' + token }, options.headers || {});
+    const _diagStart = _diagNow();
+    let _diagStatus = null;
+    let _diagBytes = null;
+    return fetch(url, options).then(res => {
+      _diagStatus = res.status;
+      const _hdrLen = parseInt(res.headers.get('content-length'), 10);
+      if (!isNaN(_hdrLen)) _diagBytes = _hdrLen;
+      if (res.status === 401) {
+        const err = new Error('Google Drive authentication failed (401).');
+        err.authFailure = true;
+        err.httpStatus = 401;
+        throw err;
+      }
+      if (res.status === 403) {
+        return res.text().then(text => {
+          const cls = classifyDriveErrorBody(403, text);
+          const err = new Error('Google Drive request failed (403): ' + (text || res.statusText));
+          err.httpStatus = 403;
+          if (cls.authFailure) err.authFailure = true;
+          else err.permissionDenied = true;
+          throw err;
+        });
+      }
+      if (!res.ok) {
+        return res.text().then(text => {
+          const err = new Error('Google Drive request failed (' + res.status + '): ' + (text || res.statusText));
+          err.httpStatus = res.status;
+          throw err;
+        });
+      }
+      return res.blob();
+    }).then(
+      blob => {
+        if (_diagBytes == null) _diagBytes = (blob && blob.size) || 0;
+        _diagRecord(meta, options, true, _diagStatus, _diagBytes, _diagStart);
+        return blob;
+      },
+      err => { _diagRecord(meta, options, false, _diagStatus || (err && err.httpStatus) || null, _diagBytes, _diagStart); throw err; }
+    );
+  }
+
+  // Phase 30: retrieves ONLY the one requested attachment's binary content —
+  // never a listing, never every attachment on the task (brief §13/§15).
+  // Called exclusively from resolveAttachmentBlobForView(), itself only
+  // reached by openAttachmentViewer() — a user explicitly opening a single
+  // attachment. Never invoked by any Sync/background path.
+  function downloadAttachmentFromDrive(fileId, purpose) {
+    const url = GOOGLE_DRIVE_FILES_ENDPOINT + '/' + encodeURIComponent(fileId) + '?alt=media';
+    return driveFetchBlob(url, null, { operation: 'files.get', purpose: purpose || 'download attachment content' });
+  }
+
   function escapeForQuery(name) {
     return String(name).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
   }
@@ -5947,6 +6278,10 @@ const GoogleDriveWorkspace = (function () {
     // Phase 29: attachment binary upload (see functions above) — called only
     // from AttachmentManager.processPendingUploads() inside a manual Sync.
     uploadAttachmentToDrive,
+    // Phase 30: single-attachment binary download for viewing (see function
+    // above) — called only from resolveAttachmentBlobForView(), never from
+    // any Sync/background path.
+    downloadAttachmentFromDrive,
     // Phase 7: Tasks/state.json core read/write (manual trigger only)
     findStateFile,
     pushStateToStateFile,
@@ -12768,7 +13103,14 @@ function renderRow(id) {
   const attachTitle = attachCount === 0
     ? 'Attach file'
     : (attachCount + ' attachment' + (attachCount === 1 ? '' : 's') + (attachPendingCount > 0 ? ' (' + attachPendingCount + ' pending sync)' : ''));
-  const attachBtn = `<button class="btn-icon btn-attach" onclick="openAttachmentPicker(${id})" title="${esc(attachTitle)}"><i class="ti ti-paperclip"></i>${attachCount > 0 ? `<span class="attach-badge">${attachCount}</span>` : ''}</button>`;
+  // Phase 30: with existing attachments, clicking now opens the Attachment
+  // List (view/open) instead of jumping straight to the file picker — adding
+  // more still happens from inside that list's "Add files" button, which
+  // reuses this exact openAttachmentPicker() unchanged. With zero attachments
+  // there is nothing to view yet, so behavior is unchanged from Phase 29:
+  // clicking opens the picker directly.
+  const attachClick = attachCount > 0 ? `openAttachmentList(${id}, true)` : `openAttachmentPicker(${id})`;
+  const attachBtn = `<button class="btn-icon btn-attach" onclick="${attachClick}" title="${esc(attachTitle)}"><i class="ti ti-paperclip"></i>${attachCount > 0 ? `<span class="attach-badge">${attachCount}</span>` : ''}</button>`;
   // Phase 19F (task brief §11/§12): a card rebuild below fully replaces its
   // DOM (buttons/timer/status can all change, so a partial patch isn't
   // reliable) — but if the user is actively focused inside THIS SAME card
@@ -13467,11 +13809,20 @@ function updateLogTable() {
     const rowTask = tasks.find(t => t.id === e.taskId);
     const linkedPlan = (rowTask && rowTask.recurringPlanId) ? recurringPlans.find(p => p.id === rowTask.recurringPlanId && p.active) : null;
     const rowIdx = logEntries.indexOf(e);
+    // Phase 30 §3: Log Table gets the same attachment access as the Task
+    // Card, resolving the identical `attachments` records via the same
+    // getAttachmentsForTask(taskId) (Phase 28) — never a copy. View-only here
+    // (allowAdd=false); no "Add files" affordance in the Log Table.
+    const rowAttachments = (typeof getAttachmentsForTask === 'function') ? getAttachmentsForTask(e.taskId) : [];
+    const attachBtnLog = rowAttachments.length > 0
+      ? '<button class="btn-icon" onclick="openAttachmentList('+e.taskId+',false)" title="'+esc(rowAttachments.length+' attachment'+(rowAttachments.length===1?'':'s'))+'" style="border-color:var(--blue-mid);color:var(--blue-dark)"><i class="ti ti-paperclip"></i></button>'
+      : '';
 
     // Same action buttons regardless of collapsed/expanded state — collapsed mode just
     // tucks them behind a single "more actions" toggle instead of showing them inline.
     const actionButtonsHtml =
-        ((!isFutureDay) ? '<button class="btn-icon btn-edit" onclick="editLogEntry('+rowIdx+')" title="Edit entry"><i class="ti ti-pencil"></i></button>' : '')
+        attachBtnLog
+      + ((!isFutureDay) ? '<button class="btn-icon btn-edit" onclick="editLogEntry('+rowIdx+')" title="Edit entry"><i class="ti ti-pencil"></i></button>' : '')
       + (isPresentDay
             ? '<button class="btn-icon" onclick="openTransferMinutesModal('+rowIdx+')" title="Transfer minutes to another task" style="border-color:var(--purple-mid);color:var(--purple-dark)"><i class="ti ti-transfer"></i></button>'
             : '')
@@ -16162,6 +16513,12 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     const overlay = document.getElementById('task-search-overlay');
     if (!overlay.classList.contains('hidden')) closeSearch();
+    // Phase 30: Escape closes whichever attachment modal is topmost —
+    // viewer first (it can be opened from on top of the list).
+    const viewerOverlay = document.getElementById('attachment-viewer-modal');
+    const listOverlay = document.getElementById('attachment-list-modal');
+    if (viewerOverlay && !viewerOverlay.classList.contains('hidden')) closeAttachmentViewerModal();
+    else if (listOverlay && !listOverlay.classList.contains('hidden')) closeAttachmentListModal();
   }
 });
 
