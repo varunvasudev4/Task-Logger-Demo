@@ -1940,6 +1940,21 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
     </div>
   </div>
 </div>
+<!-- Phase 29A CORRECTION: shared hidden file input for task attachments — native picker
+     only, one shared element reused across every task (see openAttachmentPicker()/
+     handleAttachmentFileSelect()). Deliberately placed here as a TOP-LEVEL body sibling,
+     not nested inside #csv-modal/#csv-drop-zone. It previously lived inside #csv-drop-zone,
+     which has its own onclick="...csv-file-input...click()" handler — calling .click() on
+     the nested attachment input dispatched a synthetic click that BUBBLED UP into that
+     handler, also firing the CSV picker. It was also nested inside #csv-modal, a
+     class="hidden" (display:none) overlay by default, which is an unnecessary and
+     unreliable place to fire a programmatic file dialog from (especially on iOS/iPadOS
+     Safari). Neither issue is possible now: this input has no onclick ancestor of any
+     kind, and it is never inside a hidden container. `multiple` enables one-operation
+     multi-select (Phase 29A §2); `accept` is a native-picker hint only — the authoritative
+     check is ALLOWED_ATTACHMENT_EXTENSIONS in isAllowedAttachmentFile() (Phase 29A §4),
+     since accept can't reliably gate .msg/.eml/.xml/.xls by MIME type. -->
+<input type="file" id="attachmentFileInput" multiple accept=".png,.jpg,.jpeg,.svg,.pdf,.xls,.xlsx,.xml,.msg,.eml" style="display:none" onchange="handleAttachmentFileSelect(event)" />
 <!-- CSV Export/Import modal -->
 <div class="modal-overlay hidden" id="csv-modal">
   <div class="modal" style="max-width:520px">
@@ -1990,8 +2005,6 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
         <i class="ti ti-file-upload" style="font-size:24px;display:block;margin-bottom:6px;opacity:.5"></i>
         Click to choose a CSV or Excel file (.csv, .xlsx, .xls) or drag &amp; drop here
         <input type="file" id="csv-file-input" accept=".csv,.xlsx,.xls" style="display:none" onchange="handleCSVFile(this)" />
-        <!-- Phase 29: shared hidden file input for task attachments — native picker only, one shared element reused across every task (see openAttachmentPicker()/handleAttachmentFileSelect()). `multiple` already enables one-operation multi-select (Phase 29A §2); `accept` is a native-picker hint only — the authoritative check is ALLOWED_ATTACHMENT_EXTENSIONS in isAllowedAttachmentFile() (Phase 29A §4), since accept can't reliably gate .msg/.eml/.xml/.xls by MIME type. -->
-        <input type="file" id="attachmentFileInput" multiple accept=".png,.jpg,.jpeg,.svg,.pdf,.xls,.xlsx,.xml,.msg,.eml" style="display:none" onchange="handleAttachmentFileSelect(event)" />
       </div>
       <div class="csv-import-preview" id="csv-import-preview"></div>
     </div>
@@ -3165,8 +3178,9 @@ function addAttachmentsToTask(taskId, fileList) {
 
 // Opens the native file picker for a given task (Phase 29 §2/§26: native
 // browser file picker, multi-select where the UI can support it cleanly).
-// Reuses ONE shared hidden <input type="file"> (see #attachmentFileInput near
-// the CSV import input) rather than creating one per task.
+// Reuses ONE shared hidden <input type="file"> (see #attachmentFileInput,
+// a top-level body sibling — Phase 29A correction — not nested in any modal
+// or click-handled container) rather than creating one per task.
 let _attachmentPickerTaskId = null;
 function openAttachmentPicker(taskId) {
   const input = document.getElementById('attachmentFileInput');
