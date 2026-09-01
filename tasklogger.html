@@ -2857,11 +2857,11 @@ const DOMAIN_WHOLE_KEY = '__domain__';
 // of these.
 // Phase 28: 'attachments' added to the domain list so attachment metadata
 // changes can mark Sync Required via the exact same funnel every other
-// domain uses (recordSyncChange() below). Unlike the other domains here,
-// 'attachments' is NOT yet folded into buildStatePayload()'s upload
-// contents or any download/merge path — this phase establishes the dirty-
-// tracking hook only; actually synchronizing attachment metadata is
-// reserved for a later phase, per PHASE_28_ATTACHMENTS_FOUNDATION.md.
+// domain uses (recordSyncChange() below). 'attachments' metadata now rides
+// in buildStatePayload()'s upload contents and has its own download/merge
+// path (applyRemoteAttachments(), Phase 32) — see PHASE_32_CROSS_DEVICE_ATTACHMENT_SYNC.md.
+// Attachment BINARIES are never part of this domain's synchronized payload;
+// only the metadata record (Phase 28 §15/Phase 32 §7) is.
 const SYNC_DOMAINS = ['logEntries', 'recurringPlans', 'masters', 'breakData', 'theme', 'weekendOverrides', 'counters', 'userName', 'attachments'];
 
 // In-memory domain change state, shaped as:
@@ -3029,8 +3029,17 @@ function createAttachmentMetadata(taskId, fileMeta) {
 // task is still active or has moved into the log/history (Phase 28 §12), since
 // both reference the exact same `task.id` this function filters on. Never
 // duplicates metadata when a task moves areas.
+//
+// Phase 31: excludes 'pending-delete' records. Local deletion is meant to be
+// immediate from the user's point of view (brief §13/§14/§16) even though the
+// matching Drive file isn't removed until the next manual Sync — so every one
+// of this function's three existing callers (Task Card badge, Log Table
+// button, Attachment List modal) needs no change at all to correctly stop
+// showing a deleted attachment right away. The record itself is NOT removed
+// from `attachments` here — AttachmentManager.processPendingDeletes() still
+// needs it (and its driveFileId) to finish the remote deletion on Sync.
 function getAttachmentsForTask(taskId) {
-  return attachments.filter(a => a.taskId === taskId);
+  return attachments.filter(a => a.taskId === taskId && a.syncStatus !== 'pending-delete');
 }
 // ── End Attachment Metadata Foundation (Phase 28) ─────────────────────────────────
 
@@ -3313,7 +3322,14 @@ function resolveAttachmentBlobForView(record) {
 // existing, unmodified openAttachmentPicker() makes sense); false from the
 // Log Table, which is view-only per this phase's scope (brief §2 is the Task
 // Card's concern; the Log Table only needs §3's access, not upload).
+// Phase 31: remembers which taskId/allowAdd this modal is currently showing
+// so deleteAttachmentLocal() can re-render it in place after a deletion
+// (brief §13/§14/§16 — "no page reload required") without every row's
+// delete button needing to carry allowAdd through its onclick as well.
+let _attachmentListContext = null;
+
 function openAttachmentList(taskId, allowAdd) {
+  _attachmentListContext = { taskId: taskId, allowAdd: allowAdd };
   const records = getAttachmentsForTask(taskId);
   const body = document.getElementById('attachment-list-body');
   const footer = document.getElementById('attachment-list-footer');
@@ -3332,6 +3348,12 @@ function openAttachmentList(taskId, allowAdd) {
           + '<div style="font-size:11px;color:var(--text-tertiary);margin-top:2px">' + esc(metaLine) + '</div>'
           + '</div>'
           + '<button class="btn-icon" onclick="openAttachmentViewer(' + taskId + ',' + r.attachmentId + ')" title="View / Open"><i class="ti ti-eye"></i></button>'
+          // Phase 31: delete action, available identically from the Task
+          // Card's list (allowAdd=true) and the Log Table's (allowAdd=false)
+          // — deletion is not gated by allowAdd, only "Add files" is
+          // (brief §2 vs. §13/§14 both call for deletion access from
+          // either surface).
+          + '<button class="btn-icon" onclick="confirmDeleteAttachment(' + taskId + ',' + r.attachmentId + ')" title="Delete attachment" style="border-color:var(--red-mid,#e05353);color:var(--red-dark,#c0392b)"><i class="ti ti-trash"></i></button>'
           + '</div>';
       }).join('');
 
@@ -3344,6 +3366,7 @@ function openAttachmentList(taskId, allowAdd) {
 }
 
 function closeAttachmentListModal() {
+  _attachmentListContext = null;
   const overlay = document.getElementById('attachment-list-modal');
   if (overlay) overlay.classList.add('hidden');
 }
@@ -3360,6 +3383,13 @@ function revokeAttachmentViewerUrl() {
   }
 }
 
+// Phase 31: which attachment (taskId+attachmentId) the viewer is currently
+// showing, if any — lets deleteAttachmentLocal() recognize "the user just
+// deleted the attachment that's open right now" and close the viewer safely
+// (brief §15) instead of leaving it pointed at a record that no longer
+// resolves to anything.
+let _attachmentViewerRecord = null;
+
 // Opens exactly the one attachment the user selected — never the first one
 // automatically (brief §5). Resolved by taskId+attachmentId together, never
 // array index (brief §4/§25), so this behaves identically whether reached
@@ -3372,6 +3402,7 @@ function openAttachmentViewer(taskId, attachmentId) {
   const overlay = document.getElementById('attachment-viewer-modal');
   if (!record || !body || !footer || !overlay) return;
 
+  _attachmentViewerRecord = { taskId: taskId, attachmentId: attachmentId };
   filenameEl.textContent = record.fileName;
   body.innerHTML = '<div style="color:var(--text-tertiary);font-size:13px">Loading…</div>';
   footer.innerHTML = '';
@@ -3385,6 +3416,7 @@ function openAttachmentViewer(taskId, attachmentId) {
 }
 
 function closeAttachmentViewerModal() {
+  _attachmentViewerRecord = null;
   revokeAttachmentViewerUrl();
   const overlay = document.getElementById('attachment-viewer-modal');
   if (overlay) overlay.classList.add('hidden');
@@ -3463,6 +3495,100 @@ function renderAttachmentUnavailable(err) {
   footer.innerHTML = '';
 }
 // ── End Attachment View / Open (Phase 30) ────────────────────────────────────────
+
+// ── Attachment Deletion (Phase 31) ────────────────────────────────────────────────
+// Reuses the exact same attachment identity (taskId+attachmentId — never array
+// index/filename, Phase 28 §9), the exact same local blob store
+// (AttachmentBlobStore.deleteBlob(), provided unused since Phase 29 — see that
+// module's own comment), and the exact same Sync Required funnel
+// (recordSyncChange('attachments', ...), Phase 20) every other attachment
+// mutation in this file already uses. No second attachment system, no second
+// confirmation UI: this reuses showConfirm(), the same modal deleteTask()/
+// deleteLogEntry() already use, whose title/message are set via
+// element.textContent (see showConfirm() itself) — never innerHTML — so a
+// crafted filename can never inject HTML/script into the confirmation UI
+// (brief §22).
+//
+// Local deletion (this function's caller, deleteAttachmentLocal()) NEVER
+// calls Google Drive itself — 0 Drive calls, matching brief §6/§11/§19.
+// Only the existing manual Sync transaction (via AttachmentManager, below)
+// may ever delete the Drive file, using the record's own stored
+// driveFileId — never a filename lookup (brief §7/§8/§22).
+function confirmDeleteAttachment(taskId, attachmentId) {
+  const record = attachments.find(a => a.taskId === taskId && a.attachmentId === attachmentId);
+  if (!record) return;
+  const msg = record.driveFileId
+    ? '"' + record.fileName + '" will be removed from this task. It will be deleted from Google Drive on your next Sync.'
+    : '"' + record.fileName + '" will be removed from this task.';
+  showConfirm('Delete attachment?', msg, () => deleteAttachmentLocal(taskId, attachmentId));
+}
+
+// The actual local deletion, run only after the user confirms via
+// confirmDeleteAttachment() above.
+function deleteAttachmentLocal(taskId, attachmentId) {
+  const idx = attachments.findIndex(a => a.taskId === taskId && a.attachmentId === attachmentId);
+  if (idx === -1) return; // already gone (double-click, stale modal, etc.) — safe no-op
+  const record = attachments[idx];
+
+  // brief §15: if this exact attachment is open in the viewer right now,
+  // close it safely rather than leaving it pointed at a deleted record.
+  if (_attachmentViewerRecord && _attachmentViewerRecord.taskId === taskId && _attachmentViewerRecord.attachmentId === attachmentId) {
+    closeAttachmentViewerModal();
+  }
+
+  // brief §3/§17: local binary content is never needed again once the
+  // attachment is deleted — removed immediately regardless of whether a
+  // remote deletion is still pending, since the Drive deletion below only
+  // ever needs the record's stored driveFileId, never the blob itself. This
+  // is AttachmentBlobStore.deleteBlob()'s first caller (it existed, unused,
+  // since Phase 29 — see that module's own comment).
+  if (typeof AttachmentBlobStore !== 'undefined' && typeof AttachmentBlobStore.deleteBlob === 'function') {
+    AttachmentBlobStore.deleteBlob(attachmentId);
+  }
+
+  if (record.driveFileId) {
+    // brief §4: a synced attachment. Local deletion must NOT immediately
+    // delete the Drive file — mark it for the existing manual Sync to
+    // finish, using the exact 'pending-delete' status Phase 28 §10 already
+    // reserved for this. The record stays in `attachments` (still needed —
+    // AttachmentManager.processPendingDeletes() reads its driveFileId on
+    // the next Sync) but getAttachmentsForTask() already filters
+    // 'pending-delete' out, so it disappears from the Task Card/Log
+    // Table/Attachment List immediately regardless (brief §13/§14/§16).
+    record.syncStatus = 'pending-delete';
+    record.updatedAt = new Date().toISOString();
+    delete record.lastError;
+    if (typeof recordSyncChange === 'function') recordSyncChange('attachments', attachmentId, 'delete');
+  } else {
+    // brief §5: never uploaded — there is nothing on Drive to clean up, so
+    // the record is removed outright, right now. 0 Drive calls are ever
+    // caused by this branch (brief §5/§19): AttachmentManager only ever
+    // iterates the live `attachments` array, and this record is no longer
+    // in it. Still recorded as a domain change (brief §18's "use the
+    // existing change-tracking architecture") — Phase 20's upsert-by-entity
+    // contract means this simply overwrites this attachmentId's earlier
+    // 'create' entry with 'delete', rather than adding a second one.
+    attachments.splice(idx, 1);
+    if (typeof recordSyncChange === 'function') recordSyncChange('attachments', attachmentId, 'delete');
+  }
+
+  saveState();
+
+  // brief §13/§14: update the Task Card and Log Table immediately, no page
+  // reload — reuses the exact same per-task/whole-table refresh every other
+  // attachment mutation in this file already triggers (see
+  // addAttachmentsToTask()'s own renderRow() call).
+  if (typeof renderRow === 'function') renderRow(taskId);
+  if (typeof updateLogTable === 'function') updateLogTable();
+
+  // brief §16: re-render the Attachment List in place if it's the one
+  // currently open, so the remaining attachments (A, C after deleting B)
+  // show immediately without closing/reopening the modal.
+  if (_attachmentListContext && _attachmentListContext.taskId === taskId) {
+    openAttachmentList(taskId, _attachmentListContext.allowAdd);
+  }
+}
+// ── End Attachment Deletion (Phase 31) ─────────────────────────────────────────────
 
 // Whether a domain currently has local changes that haven't been confirmed synced —
 // the domain-level counterpart to isTaskDirty() (Phase 2).
@@ -3561,6 +3687,11 @@ let _lastMastersHash = null;
 let _lastCountersHash = null;
 let _lastUserNameHash = null;
 
+// Phase 32: taskIds touched by the most recent applyRemoteAttachments() call,
+// read once by mergeNonTaskDomains()'s own UI-dispatch tail immediately after
+// calling it — never a general-purpose store, never read anywhere else.
+let _lastAttachmentsTouchedTaskIds = [];
+
 // Collects the per-date weekend "working day?" overrides into one object, keyed by
 // date string. Single source of truth for this shape — both exportBackup() and
 // buildStatePayload() use it, so the payload's `weekendOverrides` field always means
@@ -3609,6 +3740,29 @@ function buildWeekendOverridesMeta(weekendOverrides) {
     Object.keys(weekendOverrides).forEach(dateStr => {
       const e = rec.entities[dateStr];
       if (e) out[dateStr] = { modifiedAt: e.timestamp, deviceId: e.deviceId };
+    });
+  }
+  return out;
+}
+
+// Phase 32: per-attachmentId metadata, reusing the exact same
+// domainSyncState.domains.attachments.entities records recordSyncChange()
+// already leaves behind for every create/update/delete (Phase 20/28/31) — no
+// second tombstone store. Unlike buildWeekendOverridesMeta() (a scalar per
+// date), this also carries `operation` — a receiving device needs to tell
+// "this attachment changed" from "this attachment was deleted" (Phase 32
+// §14/§15), which a bare modifiedAt/deviceId pair can't express. A deleted
+// attachment's tombstone entity is included here even though the record
+// itself is long gone from `attachments` (Phase 20's "entity key never
+// removed" contract is exactly what makes deletion propagation possible).
+function buildAttachmentsMeta() {
+  const out = {};
+  const rec = domainSyncState.domains['attachments'];
+  if (rec && rec.entities) {
+    Object.keys(rec.entities).forEach(key => {
+      if (key === DOMAIN_WHOLE_KEY) return;
+      const e = rec.entities[key];
+      if (e) out[key] = { operation: e.operation, version: e.version, modifiedAt: e.timestamp, deviceId: e.deviceId };
     });
   }
   return out;
@@ -3804,6 +3958,138 @@ function applyRemoteWeekendOverrides(remoteParsed) {
   return changed;
 }
 
+// ── Cross-Device Attachment Synchronization (Phase 32) ────────────────────────
+// Per-attachmentId merge — each attachment is its own entity, same posture as
+// applyRemoteWeekendOverrides() immediately above, but carrying a full
+// metadata record (never a scalar) and needing real create/update/delete
+// semantics rather than a plain value replace. Reuses the EXACT SAME pieces
+// every other domain here already reuses: domainSyncState (Phase 20) for
+// per-entity newer-wins comparison and delete tombstones, `attachments`
+// (Phase 28) for the records themselves, AttachmentBlobStore (Phase 29) only
+// to clean up a stale local blob when a remote delete is adopted. No parallel
+// synchronization system, no Drive call of any kind — this only ever touches
+// the metadata state.json already carries (Phase 32 §7/§21: never downloads a
+// binary here; resolveAttachmentBlobForView() already does that lazily, once,
+// the first time a merged-in remote attachment is actually opened).
+//
+// Identity is always the stable attachmentId key from attachmentsMeta — never
+// filename, array index, or task position (Phase 28 §9, reaffirmed by this
+// phase's brief §2/§5/§10/§13). A remote record with no local counterpart is
+// CREATED with its remote attachmentId kept exactly as given (never
+// regenerated); a remote record whose attachmentId already exists locally is
+// MERGED into the existing record in place — never appended as a second one
+// (brief §4/§10/§12, Test 7/12).
+function applyRemoteAttachments(remoteParsed) {
+  if (!remoteParsed || !remoteParsed._syncMeta || !remoteParsed._syncMeta.attachmentsMeta) return false;
+  const remoteMetaMap = remoteParsed._syncMeta.attachmentsMeta;
+  const remoteRecords = Array.isArray(remoteParsed.attachments) ? remoteParsed.attachments : [];
+  const rec = ensureDomainRecord('attachments');
+  let changed = false;
+  const touchedTaskIds = [];
+
+  Object.keys(remoteMetaMap).forEach(key => {
+    const remoteMeta = remoteMetaMap[key];
+    if (!remoteMeta || !remoteMeta.modifiedAt) return; // no timestamp from the sender — never overwrite blind
+    const localEntity = rec.entities[key];
+    // Local wins on newer-or-tied, exactly like every other per-entity domain
+    // here — this is also what stops Device B from ever re-uploading a stale
+    // local copy of an attachment IT just deleted (brief §15): its own
+    // 'delete' tombstone timestamp is necessarily >= anything remote could
+    // report about the same key at that point.
+    if (localEntity && localEntity.timestamp >= remoteMeta.modifiedAt) return;
+
+    const attachmentId = parseInt(key, 10);
+    if (isNaN(attachmentId)) return;
+    const existingIdx = attachments.findIndex(a => a.attachmentId === attachmentId);
+
+    if (remoteMeta.operation === 'delete') {
+      // brief §14/§15: a remote deletion is adopted even if this device never
+      // saw the attachment before (nothing to remove locally, but the
+      // tombstone below still must be recorded so a later, older/stale
+      // 'create' entry for the same id is never allowed to recreate it).
+      if (existingIdx !== -1) {
+        const existing = attachments[existingIdx];
+        attachments.splice(existingIdx, 1);
+        if (typeof AttachmentBlobStore !== 'undefined' && typeof AttachmentBlobStore.deleteBlob === 'function') {
+          AttachmentBlobStore.deleteBlob(attachmentId);
+        }
+        if (existing && touchedTaskIds.indexOf(existing.taskId) === -1) touchedTaskIds.push(existing.taskId);
+      }
+      rec.entities[key] = { operation: 'delete', version: rec.version, timestamp: remoteMeta.modifiedAt, deviceId: remoteMeta.deviceId || null };
+      changed = true;
+      return;
+    }
+
+    const remoteRecord = remoteRecords.find(a => a && a.attachmentId === attachmentId);
+    if (!remoteRecord) return; // a meta entry with no matching business record — nothing to apply yet
+
+    if (existingIdx !== -1) {
+      // MERGE/UPDATE in place (brief §4) — never touches any other record's
+      // attachmentId/driveFileId, so two attachments sharing a filename (or a
+      // driveFileId belonging to an unrelated record) are never confused.
+      const existing = attachments[existingIdx];
+      existing.taskId = remoteRecord.taskId;
+      existing.recurringPlanId = remoteRecord.recurringPlanId || null;
+      existing.fileName = remoteRecord.fileName || '';
+      existing.mimeType = remoteRecord.mimeType || '';
+      existing.size = remoteRecord.size || 0;
+      // brief §6: preserve the Drive file id where appropriate — a remote
+      // record that hasn't uploaded yet (driveFileId null) never clobbers a
+      // driveFileId this device already knows about for the same attachment.
+      existing.driveFileId = remoteRecord.driveFileId || existing.driveFileId || null;
+      existing.driveFolderId = remoteRecord.driveFolderId || existing.driveFolderId || null;
+      existing.syncStatus = remoteRecord.syncStatus || existing.syncStatus;
+      existing.updatedAt = remoteRecord.updatedAt || existing.updatedAt;
+      delete existing.lastError;
+      if (touchedTaskIds.indexOf(existing.taskId) === -1) touchedTaskIds.push(existing.taskId);
+    } else {
+      // CREATE — brief §7/§8: metadata only, right now. The binary is never
+      // fetched here regardless of syncStatus/driveFileId; it stays a "remote/
+      // available" attachment until the user explicitly opens it, at which
+      // point resolveAttachmentBlobForView() (Phase 30, unchanged) does the
+      // single targeted Drive read by this exact driveFileId.
+      attachments.push({
+        attachmentId: attachmentId,
+        taskId: remoteRecord.taskId,
+        recurringPlanId: remoteRecord.recurringPlanId || null,
+        fileName: remoteRecord.fileName || '',
+        mimeType: remoteRecord.mimeType || '',
+        size: remoteRecord.size || 0,
+        createdAt: remoteRecord.createdAt || remoteRecord.updatedAt || new Date().toISOString(),
+        updatedAt: remoteRecord.updatedAt || new Date().toISOString(),
+        driveFileId: remoteRecord.driveFileId || null,
+        driveFolderId: remoteRecord.driveFolderId || null,
+        syncStatus: remoteRecord.syncStatus || (remoteRecord.driveFileId ? 'synced' : 'local-only')
+      });
+      if (touchedTaskIds.indexOf(remoteRecord.taskId) === -1) touchedTaskIds.push(remoteRecord.taskId);
+    }
+
+    // Max-wins counter bump (mirrors applyRemoteCountersIfHigher()'s posture
+    // for task/log/plan ids) — never let a future local generateAttachmentId()
+    // collide with an id that already exists on another device.
+    if (attachmentId > attachmentIdCounter) attachmentIdCounter = attachmentId;
+
+    rec.entities[key] = { operation: remoteMeta.operation || 'update', version: rec.version, timestamp: remoteMeta.modifiedAt, deviceId: remoteMeta.deviceId || null };
+    changed = true;
+  });
+
+  if (changed) {
+    // Re-derive the domain's own dirty flag from what's actually still
+    // pending locally (a real local upload/delete this device hasn't pushed
+    // yet) rather than blindly clearing or setting it — reuses Phase 31's
+    // own reconciliation exactly as its post-Sync-pass call site does, so
+    // adopting a remote change here can never mask genuine outstanding local
+    // attachment work, and never falsely re-marks the domain dirty either.
+    if (typeof AttachmentManager !== 'undefined' && typeof AttachmentManager.reconcileAttachmentsDirtyFlag === 'function') {
+      AttachmentManager.reconcileAttachmentsDirtyFlag();
+    }
+    saveDomainSyncState();
+    _lastAttachmentsTouchedTaskIds = touchedTaskIds;
+  }
+  return changed;
+}
+// ── End Cross-Device Attachment Synchronization (Phase 32) ────────────────────
+
 // mergeNonTaskDomains(): the single public entry point (mirrors
 // BatchCloudMerge.mergeTaskCollection()'s role, but for everything that pipeline
 // doesn't cover). Takes an ALREADY-downloaded, already-parsed remote state object —
@@ -3826,6 +4112,12 @@ function mergeNonTaskDomains(remoteParsed) {
     // six domains above — no change to this function's own shape.
     if (applyRemoteLogEntriesIfNewer(remoteParsed)) changed.push('logEntries');
     if (applyRemoteRecurringPlansIfNewer(remoteParsed)) changed.push('recurringPlans');
+    // Phase 32: attachment metadata cross-device sync — see
+    // applyRemoteAttachments() above for the full per-entity merge/tombstone
+    // contract. Runs on every pass alongside the seven domains above, same
+    // "no second download" posture (remoteParsed is the one already-fetched
+    // payload every caller of mergeNonTaskDomains() passes in).
+    if (applyRemoteAttachments(remoteParsed)) changed.push('attachments');
   } catch (e) {}
   if (changed.length > 0) {
     saveState();
@@ -3865,6 +4157,24 @@ function mergeNonTaskDomains(remoteParsed) {
       // sites) — this is that same "only re-render what's actually
       // affected" convention, applied to a remote-originated change.
       if (typeof updateLogPanel === 'function') updateLogPanel();
+    }
+    if (changedSet.indexOf('attachments') !== -1) {
+      // Phase 32: only the specific tasks whose attachments actually changed
+      // (touched by applyRemoteAttachments(), just above) get their Task Card
+      // re-rendered — never a full renderList() for an attachment-only
+      // remote change. The Log Table has no per-task granularity, so it's
+      // refreshed once via the same updateLogTable() every local attachment
+      // mutation already calls.
+      const affectedTaskIds = Array.isArray(_lastAttachmentsTouchedTaskIds) ? _lastAttachmentsTouchedTaskIds : [];
+      affectedTaskIds.forEach(tid => { if (typeof renderRow === 'function') renderRow(tid); });
+      if (typeof updateLogTable === 'function') updateLogTable();
+      // If the Attachment List modal is currently open on one of the
+      // affected tasks, re-render it in place — same "no page reload"
+      // posture deleteAttachmentLocal() (Phase 31) already uses for a local
+      // deletion, applied here to a remote-originated change.
+      if (_attachmentListContext && affectedTaskIds.indexOf(_attachmentListContext.taskId) !== -1 && typeof openAttachmentList === 'function') {
+        openAttachmentList(_attachmentListContext.taskId, _attachmentListContext.allowAdd);
+      }
     }
     // recurringPlans has no dedicated live panel comparable to the log panel
     // or masters tab (confirmed against existing render call sites) — no
@@ -5700,7 +6010,15 @@ const GoogleDriveWorkspace = (function () {
       userName: userName,
       theme: getStoredTheme(),
       breakData: getBreakData(),
-      weekendOverrides: weekendOverrides
+      weekendOverrides: weekendOverrides,
+      // Phase 32: attachment METADATA only (never the binary — that stays
+      // local to AttachmentBlobStore/Drive, brief §7). Excludes
+      // 'pending-delete' records, same filter getAttachmentsForTask() (Phase
+      // 28/31) already applies — a receiving device should never see an
+      // attachment this device already decided to delete just because the
+      // Drive-side cleanup hasn't run yet; the delete tombstone in
+      // attachmentsMeta below (§14/§15) is what actually propagates that.
+      attachments: (Array.isArray(attachments) ? attachments.filter(a => a && a.syncStatus !== 'pending-delete') : [])
     };
     const nowIso = new Date().toISOString();
     const meta = {
@@ -5717,7 +6035,11 @@ const GoogleDriveWorkspace = (function () {
       // without per-entity sync metadata the way tasks have. See
       // SYNC_IMPLEMENTATION.md's Phase 19E section for the full design.
       domainMeta: buildDomainMeta(),
-      weekendOverridesMeta: buildWeekendOverridesMeta(weekendOverrides)
+      weekendOverridesMeta: buildWeekendOverridesMeta(weekendOverrides),
+      // Phase 32: per-attachmentId change metadata (including delete
+      // tombstones) — see buildAttachmentsMeta() for why this needs its own
+      // shape rather than reusing weekendOverridesMeta's.
+      attachmentsMeta: buildAttachmentsMeta()
     };
     return Object.assign({ _syncMeta: meta }, business);
   }
@@ -6228,6 +6550,48 @@ const GoogleDriveWorkspace = (function () {
     });
   }
 
+  // ── Attachment Deletion (Phase 31) ──────────────────────────────────────
+  // Deletes exactly the one Drive file identified by the caller-supplied
+  // fileId — never a filename-based lookup, never a folder listing (brief
+  // §7/§8/§19/§22). Reuses driveFetch() exactly like every other Drive call
+  // in this module (same auth/401/403/error-classification handling), so
+  // this needs no new low-level request helper.
+  //
+  // Issues a real DELETE (files.delete), not a trashed:true PATCH: these
+  // attachment files live in the hidden appDataFolder space (see
+  // GOOGLE_WORKSPACE_ROOT_NAME/findFolder's spaces=appDataFolder), which has
+  // no user-visible Drive UI or Trash the person could ever restore from
+  // anyway, so there is no "TTL deletion policy" to preserve beyond removing
+  // the file outright.
+  //
+  // Called ONLY from AttachmentManager.processPendingDeletes(), itself
+  // called ONLY from inside an explicit manual Sync transaction (brief §6:
+  // "Manual Sync only") — never from deleteAttachmentLocal() or any other
+  // local-mutation code path, matching uploadAttachmentToDrive()'s own
+  // "called only from inside a manual Sync" posture above.
+  //
+  // A 404 here (the file is already gone — deleted externally, or a retry
+  // after a prior deletion whose success confirmation was lost) is left for
+  // the CALLER to classify as an already-satisfied deletion (brief §10) via
+  // the httpStatus driveFetch() already attaches to every rejection — this
+  // function itself makes no special case for it, exactly like
+  // uploadAttachmentToDrive() leaves 403-vs-other classification to its own
+  // caller.
+  //
+  // brief §12 (account/workspace safety): a stored driveFileId that does
+  // NOT belong to the currently authenticated account is never something
+  // this function (or the caller) can silently detect in advance — but
+  // nothing needs to, because appDataFolder is itself per-app-per-account:
+  // Drive will not resolve a fileId under a DIFFERENT account's
+  // appDataFolder space at all, so such a call fails as an ordinary 404
+  // (file not found under this account) or 403, both already handled by
+  // driveFetch()'s existing classification. No blind delete of a
+  // cross-account file is possible through this path.
+  function deleteAttachmentFromDrive(fileId, purpose) {
+    const url = GOOGLE_DRIVE_FILES_ENDPOINT + '/' + encodeURIComponent(fileId);
+    return driveFetch(url, { method: 'DELETE' }, { operation: 'files.delete', purpose: purpose || 'delete attachment file' });
+  }
+
   // ── Phase 22B PART 3/4 (Account Switch Fix): Google Drive Workspace Reset
   // Clears every in-memory, account-scoped Drive workspace + state.json
   // runtime field back to its startup default, so a newly authenticated
@@ -6282,6 +6646,10 @@ const GoogleDriveWorkspace = (function () {
     // above) — called only from resolveAttachmentBlobForView(), never from
     // any Sync/background path.
     downloadAttachmentFromDrive,
+    // Phase 31: single-attachment binary deletion (see function above) —
+    // called only from AttachmentManager.processPendingDeletes() inside a
+    // manual Sync.
+    deleteAttachmentFromDrive,
     // Phase 7: Tasks/state.json core read/write (manual trigger only)
     findStateFile,
     pushStateToStateFile,
@@ -6647,10 +7015,10 @@ const BatchTaskUpload = (function () {
     // could never sync no matter how many passes ran. Snapshot which domains are
     // dirty right now (before the push) so we know exactly what this push covers.
     // Phase 29: 'attachments' is deliberately EXCLUDED from this snapshot/clear.
-    // buildStatePayload() never includes the `attachments` array (Phase 28 §15 —
-    // attachment metadata isn't part of state.json at all), so a state.json push
-    // confirms nothing about whether any attachment's BINARY actually reached
-    // Drive. Blindly clearing 'attachments' dirty here (like every other domain)
+    // buildStatePayload() carries attachment METADATA (Phase 32), but a
+    // state.json push confirms nothing about whether any attachment's BINARY
+    // actually reached Drive — that's a separate write AttachmentManager owns.
+    // Blindly clearing 'attachments' dirty here (like every other domain)
     // would falsely clear Sync Required before AttachmentManager.processPendingUploads()
     // has even run, violating Phase 29 §6/§14 ("Sync Required must stay true until
     // the attachment upload is confirmed"). AttachmentManager owns clearing this
@@ -6936,7 +7304,174 @@ const AttachmentManager = (function () {
     });
   }
 
-  return { hasPendingUploadWork, processPendingUploads };
+  // ── Attachment Deletion (Phase 31) ──────────────────────────────────────
+  // An attachment needs DELETE work only once it has both been locally
+  // deleted (syncStatus === 'pending-delete', set by deleteAttachmentLocal())
+  // AND actually has a Drive file to remove (driveFileId). An attachment
+  // deleted locally before ever being uploaded never reaches this state at
+  // all — deleteAttachmentLocal() splices it out of `attachments` entirely,
+  // outright, at delete time (brief §5) — so this function, by construction,
+  // only ever matches a record that genuinely needs one files.delete call
+  // (brief §5/§19: "0 Drive calls" for a never-synced attachment).
+  function needsDeleteRecord(a) {
+    return !!a && a.syncStatus === 'pending-delete' && !!a.driveFileId;
+  }
+
+  function hasPendingDeleteWork() {
+    return Array.isArray(attachments) && attachments.some(needsDeleteRecord);
+  }
+
+  // Success: the local record is removed from `attachments` outright — this
+  // IS "local deletion finalized" (brief §4's diagram) for a synced
+  // attachment, mirroring markSynced()'s "commit and never touch again"
+  // posture above, just ending in removal instead of a driveFileId.
+  function finalizeDeleted(record) {
+    const i = attachments.indexOf(record);
+    if (i !== -1) attachments.splice(i, 1);
+  }
+
+  function markDeleteError(record, reason) {
+    record.updatedAt = new Date().toISOString();
+    // record.syncStatus is deliberately left at 'pending-delete' — brief §20:
+    // "no automatic retry." The record simply stays pending until the next
+    // user-initiated Sync tries again (exactly processPendingUploads()'s
+    // markError() posture, mirrored for the delete side).
+    record.lastError = reason || (ATTACHMENT_ERROR_STATES && ATTACHMENT_ERROR_STATES.DRIVE_API_FAILURE) || 'delete-failed';
+  }
+
+  // Deletes every pending-delete attachment's Drive file SEQUENTIALLY —
+  // never in parallel — mirroring processPendingUploads()'s exact posture so
+  // a partial failure (brief §9: "Attachment A deletion succeeds, B fails")
+  // leaves an unambiguous, individually-confirmed state per record: A is
+  // gone from `attachments` for good; B stays 'pending-delete' untouched;
+  // nothing here ever rolls back A because B failed.
+  //
+  // Deliberately does NOT check GoogleDriveWorkspace.getAttachmentsFolderId()
+  // — unlike processPendingUploads(), a delete needs no folder id at all
+  // (files/{fileId} is a direct, self-contained reference — brief §7 "reuse
+  // the existing Drive API abstraction," not "reuse the folder lookup").
+  function processPendingDeletes() {
+    if (typeof GoogleDriveWorkspace === 'undefined' || typeof GoogleDriveWorkspace.deleteAttachmentFromDrive !== 'function') {
+      return Promise.resolve({ ok: false, reason: 'workspace-unavailable', processed: 0, completed: 0, failed: 0, results: [] });
+    }
+    const pending = (Array.isArray(attachments) ? attachments : []).filter(needsDeleteRecord);
+    if (pending.length === 0) {
+      return Promise.resolve({ ok: true, processed: 0, completed: 0, failed: 0, results: [] });
+    }
+
+    let completed = 0, failed = 0;
+    const results = [];
+    let chain = Promise.resolve();
+    pending.forEach(record => {
+      chain = chain.then(() => {
+        // Re-checked immediately before this specific delete (not just at
+        // filter time above), mirroring processPendingUploads()'s own
+        // re-check — costs nothing and guards the same theoretical
+        // mid-pass-race case.
+        if (record.syncStatus !== 'pending-delete' || !record.driveFileId) return;
+        const purpose = 'sync: delete attachment "' + record.fileName + '" for task ' + record.taskId;
+        return GoogleDriveWorkspace.deleteAttachmentFromDrive(record.driveFileId, purpose)
+          .then(() => {
+            finalizeDeleted(record);
+            completed++;
+            results.push({ ok: true, attachmentId: record.attachmentId });
+          })
+          .catch(err => {
+            // brief §10: the Drive file already being gone is treated as the
+            // deletion having effectively succeeded — never retried forever
+            // against a permanently missing file, and never an attempt to
+            // recreate it.
+            if (err && err.httpStatus === 404) {
+              finalizeDeleted(record);
+              completed++;
+              results.push({ ok: true, attachmentId: record.attachmentId, note: 'already-missing-on-drive' });
+              return;
+            }
+            const reason = (err && err.httpStatus === 403)
+              ? ((ATTACHMENT_ERROR_STATES && ATTACHMENT_ERROR_STATES.PERMISSION_FAILURE) || 'permission-failure')
+              : ((ATTACHMENT_ERROR_STATES && ATTACHMENT_ERROR_STATES.DRIVE_API_FAILURE) || 'drive-api-failure');
+            markDeleteError(record, reason);
+            failed++;
+            results.push({ ok: false, attachmentId: record.attachmentId, reason: (err && err.message) || String(err) });
+          });
+      });
+    });
+
+    return chain.then(() => {
+      // Persist every record touched above — a finalized (removed) record's
+      // absence, and any surviving pending-delete record's lastError — in
+      // one write, exactly like processPendingUploads()'s own final
+      // saveState() call.
+      if (typeof saveState === 'function') saveState();
+      return { ok: failed === 0, processed: pending.length, completed: completed, failed: failed, results: results };
+    });
+  }
+
+  // Single entry point runSynchronizationPass() calls (replacing its old
+  // direct processPendingUploads() call) — runs uploads first, then
+  // deletions, sequentially, and merges both outcomes into one result object
+  // so every existing `attachmentResult.ok`/`attachmentResult` check
+  // downstream (bootstrapFirstSyncState(), the noop branch, the ordinary
+  // upload/merge branch) already correctly reflects BOTH upload and delete
+  // outcomes without any of those call sites needing to change at all.
+  //
+  // Also the single place that reconciles the 'attachments' domain's Sync
+  // Required flag against BOTH upload and delete state together (brief §9:
+  // "do not falsely report Fully Synced while [a pending deletion] remains
+  // pending"). processPendingUploads() above still clears the domain dirty
+  // flag on its own success (Phase 29, unchanged) — necessary here because a
+  // delete may still be pending/failed even when every upload just
+  // succeeded, which would otherwise leave Sync Required incorrectly
+  // cleared. Conversely, if nothing was pending on either side (both steps
+  // skipped) but the domain was left dirty by an earlier local edit that
+  // turned out to need no Drive work at all (brief §5/§18 — e.g. an
+  // attachment created and deleted again before ever syncing), this is also
+  // where that stale flag finally gets cleared. Uses the same
+  // ensureDomainRecord()/saveDomainSyncState() primitives recordSyncChange()
+  // itself is built on — no second Sync Required implementation (brief
+  // §18's own instruction).
+  function reconcileAttachmentsDirtyFlag() {
+    const stillPending = hasPendingUploadWork() || hasPendingDeleteWork();
+    if (!stillPending) {
+      if (typeof clearDomainDirty === 'function') clearDomainDirty('attachments');
+    } else if (typeof ensureDomainRecord === 'function' && typeof saveDomainSyncState === 'function') {
+      const rec = ensureDomainRecord('attachments');
+      if (rec && !rec.dirty) { rec.dirty = true; saveDomainSyncState(); }
+    }
+  }
+
+  function processPendingAttachmentWork() {
+    const uploadStep = hasPendingUploadWork() ? processPendingUploads() : Promise.resolve(null);
+    return uploadStep.then(uploadResult => {
+      const deleteStep = hasPendingDeleteWork() ? processPendingDeletes() : Promise.resolve(null);
+      return deleteStep.then(deleteResult => {
+        reconcileAttachmentsDirtyFlag();
+        if (!uploadResult && !deleteResult) return null; // nothing at all was pending — identical to the old "no attachment work" case
+        const ok = (!uploadResult || uploadResult.ok !== false) && (!deleteResult || deleteResult.ok !== false);
+        return {
+          ok: ok,
+          uploads: uploadResult,
+          deletes: deleteResult,
+          processed: (uploadResult ? uploadResult.processed : 0) + (deleteResult ? deleteResult.processed : 0),
+          completed: (uploadResult ? uploadResult.completed : 0) + (deleteResult ? deleteResult.completed : 0),
+          failed: (uploadResult ? uploadResult.failed : 0) + (deleteResult ? deleteResult.failed : 0)
+        };
+      });
+    });
+  }
+  // ── End Attachment Deletion (Phase 31) ──────────────────────────────────
+
+  return {
+    hasPendingUploadWork, processPendingUploads,
+    // Phase 31 additions (see functions above)
+    hasPendingDeleteWork, processPendingDeletes,
+    processPendingAttachmentWork,
+    // Phase 32: exposed so applyRemoteAttachments() (outside this module) can
+    // re-derive the domain's dirty flag after adopting a remote change,
+    // without duplicating this function's hasPendingUploadWork()/
+    // hasPendingDeleteWork() logic a second time.
+    reconcileAttachmentsDirtyFlag
+  };
 })();
 // ── End Attachment Manager (Phase 29) ────────────────────────────────────
 
@@ -9131,11 +9666,11 @@ const BackgroundScheduler = (function () {
       }
       if (typeof getDirtyDomains === 'function' && typeof clearDomainDirty === 'function') {
         // Phase 29: exclude 'attachments' here too — bootstrapFirstSyncState()
-        // only confirms state.json (which never includes attachment metadata,
-        // Phase 28 §15), never any attachment binary. See the identical
-        // exclusion/comment in BatchTaskUpload.processUploadQueue() above for
-        // the full reasoning. AttachmentManager clears this domain itself,
-        // only once its own upload pass confirms every pending attachment.
+        // only confirms state.json (metadata, Phase 32), never any attachment
+        // BINARY. See the identical exclusion/comment in
+        // BatchTaskUpload.processUploadQueue() above for the full reasoning.
+        // AttachmentManager clears this domain itself, only once its own
+        // upload pass confirms every pending attachment.
         getDirtyDomains().filter(d => d !== 'attachments').forEach(clearDomainDirty);
       }
       if (typeof saveState === 'function') saveState();
@@ -9225,8 +9760,17 @@ const BackgroundScheduler = (function () {
       // runSynchronizationPass() after GoogleDriveWorkspace.initializeWorkspace()
       // has confirmed it, so no separate "ensure TTL/Attachments" call is
       // needed here (Phase 28's getAttachmentsFolderId() already reflects it).
-      const attachmentStep = (typeof AttachmentManager !== 'undefined' && AttachmentManager.hasPendingUploadWork())
-        ? AttachmentManager.processPendingUploads()
+      //
+      // Phase 31: also runs pending attachment DELETIONS in the same step —
+      // AttachmentManager.processPendingAttachmentWork() internally runs
+      // processPendingUploads() then processPendingDeletes() sequentially
+      // and merges their outcomes, replacing the old direct
+      // processPendingUploads()-only call. Every downstream use of
+      // `attachmentResult` below is completely unchanged, since the merged
+      // result shape still exposes the same `.ok` every existing check
+      // already reads.
+      const attachmentStep = (typeof AttachmentManager !== 'undefined' && typeof AttachmentManager.processPendingAttachmentWork === 'function')
+        ? AttachmentManager.processPendingAttachmentWork()
         : Promise.resolve(null);
 
       return attachmentStep.then(attachmentResult => {
