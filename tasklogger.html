@@ -3007,6 +3007,15 @@ function createAttachmentMetadata(taskId, fileMeta) {
   const record = {
     attachmentId: attachmentId,
     taskId: taskId,
+    // Phase 32 root-cause fix: `taskId` above is this DEVICE's local,
+    // device-scoped task id (SYNC_DATA_MODEL.md §3) — never valid on
+    // another device. `taskSyncId` is the STABLE cross-device identity
+    // (task._sync.syncId), captured at creation time exactly the way
+    // Phase 16B's log-entry linking already stamps `taskSyncId` on log
+    // entries for the same reason. applyRemoteAttachments() on the
+    // RECEIVING device maps this back to ITS OWN local task id — it never
+    // trusts the sending device's raw `taskId` (brief §9).
+    taskSyncId: (task && task._sync && task._sync.syncId) || null,
     recurringPlanId: (task && task.recurringPlanId) || null,
     fileName: (fileMeta && fileMeta.fileName) || '',
     mimeType: (fileMeta && fileMeta.mimeType) || '',
@@ -3979,6 +3988,51 @@ function applyRemoteWeekendOverrides(remoteParsed) {
 // regenerated); a remote record whose attachmentId already exists locally is
 // MERGED into the existing record in place — never appended as a second one
 // (brief §4/§10/§12, Test 7/12).
+// Phase 32 root-cause fix (brief §9/§17, CRITICAL): a remote attachment
+// record's `taskId` is the SENDING device's local, device-scoped task id —
+// never valid to store as-is on this device (SYNC_DATA_MODEL.md §3, same
+// reasoning Phase 16B already applies to log entries via `taskSyncId`/
+// findRunningTask()'s reconciliation). This resolves the remote record's
+// stable `taskSyncId` to THIS device's own local task, reusing the exact
+// same lookup-by-syncId the task-merge pipeline itself uses
+// (findLocalTaskBySyncId(), SingleTaskMerge) — never a second identity
+// mechanism (brief §9: "Reuse that mapping. Do not create a second task
+// identity mechanism.").
+//
+// Returns the local task id, or null if:
+//   - the remote record predates this fix and carries no taskSyncId at all
+//     (legacy data — falls back to the old, best-effort raw taskId so an
+//     already-synced attachment doesn't just disappear), or
+//   - a taskSyncId IS present but no local task with that Sync ID exists
+//     yet on THIS device (its own task hasn't been merged in THIS Sync
+//     pass, or ever) — the caller must defer rather than attach to a
+//     task id that doesn't exist locally.
+function resolveLocalTaskIdForRemoteAttachment(remoteRecord) {
+  if (!remoteRecord) return { taskId: null, deferred: false };
+  if (!remoteRecord.taskSyncId) {
+    // Legacy record with no stable identity to reconcile against — same
+    // documented posture as Phase 16B's log-entry linking for the same
+    // case ("legacy entry — no stable identity to reconcile against").
+    return { taskId: (typeof remoteRecord.taskId === 'number') ? remoteRecord.taskId : null, deferred: false };
+  }
+  // BatchCloudMerge.findLocalTaskBySyncId() (Phase 11) implements this exact
+  // same "match by Sync ID, never by title/position" lookup already — but it
+  // is a private helper inside that module's own closure, not exported. This
+  // performs the identical lookup directly against the same global `tasks`
+  // array (SYNC_DATA_MODEL.md §3: Sync ID is the only cross-device-safe
+  // identifier) rather than exporting a second entry point from that module
+  // — no new identity mechanism, just the same one, called from here too.
+  const localTask = (Array.isArray(tasks) ? tasks : []).find(
+    t => t && t._sync && t._sync.syncId === remoteRecord.taskSyncId
+  ) || null;
+  if (localTask && !isTaskDeleted(localTask)) return { taskId: localTask.id, deferred: false };
+  // The owning task hasn't been merged onto this device yet in this pass
+  // (or at all) — defer this attachment rather than link it to a taskId
+  // that doesn't exist locally; caller must NOT record this key as handled
+  // so the next manual Sync retries once the task itself has arrived.
+  return { taskId: null, deferred: true };
+}
+
 function applyRemoteAttachments(remoteParsed) {
   if (!remoteParsed || !remoteParsed._syncMeta || !remoteParsed._syncMeta.attachmentsMeta) return false;
   const remoteMetaMap = remoteParsed._syncMeta.attachmentsMeta;
@@ -4023,12 +4077,28 @@ function applyRemoteAttachments(remoteParsed) {
     const remoteRecord = remoteRecords.find(a => a && a.attachmentId === attachmentId);
     if (!remoteRecord) return; // a meta entry with no matching business record — nothing to apply yet
 
+    // Phase 32 root-cause fix (brief §9): resolve the remote record's task
+    // to THIS device's own local task id before touching `attachments` at
+    // all — never the raw remoteRecord.taskId (see
+    // resolveLocalTaskIdForRemoteAttachment() above for the full reasoning).
+    const taskResolution = resolveLocalTaskIdForRemoteAttachment(remoteRecord);
+    if (taskResolution.deferred) {
+      // The owning task isn't locally known yet in this pass — leave
+      // rec.entities[key] UNTOUCHED (do not mark this key handled) so the
+      // next manual Sync re-attempts the mapping once the task itself has
+      // been merged in. Never create/update with a dangling taskId.
+      return;
+    }
+
     if (existingIdx !== -1) {
       // MERGE/UPDATE in place (brief §4) — never touches any other record's
       // attachmentId/driveFileId, so two attachments sharing a filename (or a
       // driveFileId belonging to an unrelated record) are never confused.
       const existing = attachments[existingIdx];
-      existing.taskId = remoteRecord.taskId;
+      // Only remap taskId when resolution actually succeeded — never
+      // clobber an existing, already-correct local taskId with null.
+      if (taskResolution.taskId !== null) existing.taskId = taskResolution.taskId;
+      existing.taskSyncId = remoteRecord.taskSyncId || existing.taskSyncId || null;
       existing.recurringPlanId = remoteRecord.recurringPlanId || null;
       existing.fileName = remoteRecord.fileName || '';
       existing.mimeType = remoteRecord.mimeType || '';
@@ -4050,7 +4120,8 @@ function applyRemoteAttachments(remoteParsed) {
       // single targeted Drive read by this exact driveFileId.
       attachments.push({
         attachmentId: attachmentId,
-        taskId: remoteRecord.taskId,
+        taskId: taskResolution.taskId,
+        taskSyncId: remoteRecord.taskSyncId || null,
         recurringPlanId: remoteRecord.recurringPlanId || null,
         fileName: remoteRecord.fileName || '',
         mimeType: remoteRecord.mimeType || '',
@@ -4061,7 +4132,7 @@ function applyRemoteAttachments(remoteParsed) {
         driveFolderId: remoteRecord.driveFolderId || null,
         syncStatus: remoteRecord.syncStatus || (remoteRecord.driveFileId ? 'synced' : 'local-only')
       });
-      if (touchedTaskIds.indexOf(remoteRecord.taskId) === -1) touchedTaskIds.push(remoteRecord.taskId);
+      if (touchedTaskIds.indexOf(taskResolution.taskId) === -1) touchedTaskIds.push(taskResolution.taskId);
     }
 
     // Max-wins counter bump (mirrors applyRemoteCountersIfHigher()'s posture
@@ -4085,6 +4156,36 @@ function applyRemoteAttachments(remoteParsed) {
     }
     saveDomainSyncState();
     _lastAttachmentsTouchedTaskIds = touchedTaskIds;
+  }
+  return changed;
+}
+
+// Phase 32 root-cause fix: the public entry point runSynchronizationPass()
+// now calls directly, AFTER the task download/merge step has finished (see
+// the comment inside mergeNonTaskDomains() where this used to be called
+// from). Wraps applyRemoteAttachments() with exactly the same
+// save/re-render posture mergeNonTaskDomains() already uses for every other
+// domain — saveState() only if something actually changed, then the same
+// targeted per-task Task Card + Log Table + open-modal refresh this logic
+// always had, unchanged in behavior, just moved so the taskSyncId ->
+// local-task lookup it depends on always runs after that mapping exists.
+function applyRemoteAttachmentsAndRefresh(remoteParsed) {
+  let changed = false;
+  try {
+    changed = applyRemoteAttachments(remoteParsed);
+  } catch (e) {}
+  if (changed) {
+    saveState();
+    const affectedTaskIds = Array.isArray(_lastAttachmentsTouchedTaskIds) ? _lastAttachmentsTouchedTaskIds : [];
+    affectedTaskIds.forEach(tid => { if (typeof renderRow === 'function') renderRow(tid); });
+    if (typeof updateLogTable === 'function') updateLogTable();
+    // If the Attachment List modal is currently open on one of the
+    // affected tasks, re-render it in place — same "no page reload"
+    // posture deleteAttachmentLocal() (Phase 31) already uses for a local
+    // deletion, applied here to a remote-originated change.
+    if (_attachmentListContext && affectedTaskIds.indexOf(_attachmentListContext.taskId) !== -1 && typeof openAttachmentList === 'function') {
+      openAttachmentList(_attachmentListContext.taskId, _attachmentListContext.allowAdd);
+    }
   }
   return changed;
 }
@@ -4112,12 +4213,19 @@ function mergeNonTaskDomains(remoteParsed) {
     // six domains above — no change to this function's own shape.
     if (applyRemoteLogEntriesIfNewer(remoteParsed)) changed.push('logEntries');
     if (applyRemoteRecurringPlansIfNewer(remoteParsed)) changed.push('recurringPlans');
-    // Phase 32: attachment metadata cross-device sync — see
-    // applyRemoteAttachments() above for the full per-entity merge/tombstone
-    // contract. Runs on every pass alongside the seven domains above, same
-    // "no second download" posture (remoteParsed is the one already-fetched
-    // payload every caller of mergeNonTaskDomains() passes in).
-    if (applyRemoteAttachments(remoteParsed)) changed.push('attachments');
+    // Phase 32 root-cause fix: attachments are DELIBERATELY NOT merged here
+    // anymore. mergeNonTaskDomains() runs BEFORE the task download/merge
+    // step (BatchCloudMerge/processBatchMerge) in runSynchronizationPass() —
+    // but applyRemoteAttachments() now needs to resolve each remote
+    // attachment's taskSyncId against THIS device's own local tasks
+    // (findLocalTaskBySyncId()), which for a brand-new incoming task isn't
+    // populated until THAT later step runs. Calling it here, before that
+    // mapping data exists, was the actual root cause of "attachment doesn't
+    // appear on Device B" (brief §9/§17): it isn't a payload-staleness bug,
+    // it's an ordering bug. applyRemoteAttachments() is now called
+    // explicitly by runSynchronizationPass() itself, AFTER the task
+    // merge step completes, reusing this exact same already-downloaded
+    // remoteParsed — still zero extra Drive calls.
   } catch (e) {}
   if (changed.length > 0) {
     saveState();
@@ -4158,24 +4266,11 @@ function mergeNonTaskDomains(remoteParsed) {
       // affected" convention, applied to a remote-originated change.
       if (typeof updateLogPanel === 'function') updateLogPanel();
     }
-    if (changedSet.indexOf('attachments') !== -1) {
-      // Phase 32: only the specific tasks whose attachments actually changed
-      // (touched by applyRemoteAttachments(), just above) get their Task Card
-      // re-rendered — never a full renderList() for an attachment-only
-      // remote change. The Log Table has no per-task granularity, so it's
-      // refreshed once via the same updateLogTable() every local attachment
-      // mutation already calls.
-      const affectedTaskIds = Array.isArray(_lastAttachmentsTouchedTaskIds) ? _lastAttachmentsTouchedTaskIds : [];
-      affectedTaskIds.forEach(tid => { if (typeof renderRow === 'function') renderRow(tid); });
-      if (typeof updateLogTable === 'function') updateLogTable();
-      // If the Attachment List modal is currently open on one of the
-      // affected tasks, re-render it in place — same "no page reload"
-      // posture deleteAttachmentLocal() (Phase 31) already uses for a local
-      // deletion, applied here to a remote-originated change.
-      if (_attachmentListContext && affectedTaskIds.indexOf(_attachmentListContext.taskId) !== -1 && typeof openAttachmentList === 'function') {
-        openAttachmentList(_attachmentListContext.taskId, _attachmentListContext.allowAdd);
-      }
-    }
+    // Phase 32: attachments UI refresh moved to its own function,
+    // applyRemoteAttachmentsAndRefresh() below — called directly by
+    // runSynchronizationPass() after the task merge step, not from here.
+    // See the comment above the (removed) applyRemoteAttachments() call
+    // in this function for why.
     // recurringPlans has no dedicated live panel comparable to the log panel
     // or masters tab (confirmed against existing render call sites) — no
     // render call needed here, matching counters/userName above.
@@ -8011,6 +8106,22 @@ const BatchCloudMerge = (function () {
     if (typeof mergeNonTaskDomains === 'function' && downloadResult && downloadResult.parsed) {
       domainMergeResult = mergeNonTaskDomains(downloadResult.parsed);
     }
+    // Phase 32 root-cause fix: applied HERE — after dedupeRecurringOccurrences()
+    // and every task create/merge above in this SAME function has already run
+    // — so applyRemoteAttachmentsAndRefresh()'s taskSyncId -> local-task
+    // lookup always has this pass's own newly-merged tasks available. This is
+    // the one place both real callers of processBatchMerge() go through (the
+    // standalone manual "Batch Cloud Merge" button AND
+    // BackgroundScheduler.runSynchronizationPass()'s downloadStep), so fixing
+    // it here covers both instead of duplicating the ordering fix per-caller.
+    // Safe/idempotent to also run from runSynchronizationPass() itself for the
+    // needsDownload===false case (see that call site) — applyRemoteAttachments()
+    // already no-ops a key it's already recorded as handled at the same
+    // remote modifiedAt timestamp, exactly like every other per-entity domain
+    // merge here.
+    if (typeof applyRemoteAttachmentsAndRefresh === 'function' && downloadResult && downloadResult.parsed) {
+      applyRemoteAttachmentsAndRefresh(downloadResult.parsed);
+    }
     saveState();
     summary.domainsMerged = domainMergeResult ? domainMergeResult.changed : [];
     return summary;
@@ -9864,6 +9975,17 @@ const BackgroundScheduler = (function () {
         // wake-up: a plan was built, but neither upload nor download is
         // invoked (BACKGROUND_SYNC.md §10 CPU usage). The domain merge above
         // (if anything) has already happened regardless of this early return.
+        //
+        // Phase 32 root-cause fix: no TASK download is happening this pass,
+        // but this device's already-known local tasks (from any earlier
+        // Sync) are already present — so an attachment-metadata-only remote
+        // change (e.g. another device added an attachment to a task both
+        // devices already share) can still be resolved and applied right
+        // here, same already-downloaded planResult.remoteState, zero extra
+        // Drive calls.
+        const attachmentsMergedNoop = planResult.remoteState
+          ? applyRemoteAttachmentsAndRefresh(planResult.remoteState)
+          : false;
         _running = false;
         _lastSyncAt = new Date().toISOString();
         // Phase 29: an attachment upload can still be the ONLY reason this
@@ -9872,7 +9994,7 @@ const BackgroundScheduler = (function () {
         // still gates whether this pass is reported completed.
         const attachmentsOkNoop = !attachmentResult || attachmentResult.ok !== false;
         _status = attachmentsOkNoop ? 'completed' : 'failed';
-        _lastResult = { ok: attachmentsOkNoop, trigger, plan: planResult, uploaded: null, merged: null, noop: true, domainsMerged: domainMergeResult && domainMergeResult.changed, attachments: attachmentResult };
+        _lastResult = { ok: attachmentsOkNoop, trigger, plan: planResult, uploaded: null, merged: null, noop: true, domainsMerged: domainMergeResult && domainMergeResult.changed, attachmentsDomainMerged: attachmentsMergedNoop, attachments: attachmentResult };
         finalizeRetryState(_lastResult);
         return _lastResult;
       }
@@ -9924,6 +10046,22 @@ const BackgroundScheduler = (function () {
           }
           const uploadOk = !uploadResult || uploadResult.ok !== false;
           const mergeOk = !mergeResult || mergeResult.ok !== false;
+          // Phase 32 root-cause fix: apply remote attachment metadata ONLY
+          // now, after downloadStep (the task merge — BatchCloudMerge /
+          // processBatchMerge) has actually finished. A brand-new remote
+          // task's local counterpart doesn't exist until that step
+          // completes, and applyRemoteAttachments() needs it to map each
+          // remote attachment's taskSyncId to THIS device's own local task
+          // id (see resolveLocalTaskIdForRemoteAttachment()). Calling this
+          // any earlier in the pass (it used to run inside
+          // mergeNonTaskDomains(), immediately after buildSyncPlan() and
+          // BEFORE this task merge) was the actual defect behind "attachment
+          // does not appear on Device B" — reuses the exact same already-
+          // downloaded planResult.remoteState, so this adds no new Drive
+          // call regardless of which branch of this pass ran.
+          const attachmentsDomainMerged = planResult.remoteState
+            ? applyRemoteAttachmentsAndRefresh(planResult.remoteState)
+            : false;
           // Phase 29: fold the attachment step's own outcome into this
           // pass's overall ok/status — a task/state sync that completed
           // successfully while an attachment upload failed is still
@@ -9933,7 +10071,7 @@ const BackgroundScheduler = (function () {
           const attachmentsOk = !attachmentResult || attachmentResult.ok !== false;
           _lastSyncAt = new Date().toISOString();
           _status = (uploadOk && mergeOk && attachmentsOk) ? 'completed' : 'failed';
-          _lastResult = { ok: uploadOk && mergeOk && attachmentsOk, trigger, plan: planResult, uploaded: uploadResult, merged: mergeResult, domainsMerged: domainMergeResult && domainMergeResult.changed, attachments: attachmentResult };
+          _lastResult = { ok: uploadOk && mergeOk && attachmentsOk, trigger, plan: planResult, uploaded: uploadResult, merged: mergeResult, domainsMerged: domainMergeResult && domainMergeResult.changed, attachmentsDomainMerged: attachmentsDomainMerged, attachments: attachmentResult };
           finalizeRetryState(_lastResult);
           return _lastResult;
         });
