@@ -3196,6 +3196,43 @@ function isAllowedAttachmentFile(file) {
 // same-filename duplicate (Phase 29A §8) is never treated as a rejection since
 // nothing here does filename-based dedup (identity is always the generated
 // attachmentId, per Phase 28 §9 / Phase 29A §7).
+// Phase 32A §3: browsers reliably report `file.type` for common image/PDF
+// formats, but are well known to report an EMPTY string for several formats
+// this app accepts — .xlsx, .xls, .msg, .eml, .xml in particular, depending
+// on OS file-association state. Falling back straight to the fully generic
+// 'application/octet-stream' in that case (the previous behavior) is safe
+// for the BYTES but throws away recoverable, format-specific information
+// that resolveAttachmentBlobForView()/renderAttachmentPreview() later need
+// to render a correct preview. This is the "safe extension fallback" the
+// brief asks for — consulted ONLY when the browser gave no MIME type at
+// all; a MIME type the browser DID report is always trusted as-is over this
+// table (brief §3: "Do not infer MIME type only from filename when a valid
+// MIME type was captured from the original File object").
+const ATTACHMENT_MIME_BY_EXTENSION = {
+  '.png':  'image/png',
+  '.jpg':  'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.svg':  'image/svg+xml',
+  '.pdf':  'application/pdf',
+  '.xls':  'application/vnd.ms-excel',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.xml':  'application/xml',
+  '.eml':  'message/rfc822',
+  '.msg':  'application/vnd.ms-outlook'
+};
+
+// Resolves the best available MIME type for a File at selection time: the
+// browser-reported type when present (always trusted first), otherwise the
+// extension-based fallback table above, otherwise the fully generic type as
+// the last resort. Never touches/inspects file bytes — filename-extension
+// and the browser's own File.type are the only inputs, exactly as brief §3
+// describes.
+function resolveFileMimeTypeForUpload(file) {
+  if (file && file.type) return file.type;
+  const ext = getFileExtension(file && file.name);
+  return ATTACHMENT_MIME_BY_EXTENSION[ext] || 'application/octet-stream';
+}
+
 function addAttachmentsToTask(taskId, fileList) {
   if (!fileList || fileList.length === 0) return; // cancelled picker — Phase 29 §26 Test 2: no-op
   const allFiles = Array.from(fileList);
@@ -3216,7 +3253,7 @@ function addAttachmentsToTask(taskId, fileList) {
   validFiles.forEach(file => {
     const record = createAttachmentMetadata(taskId, {
       fileName: file.name,
-      mimeType: file.type || 'application/octet-stream',
+      mimeType: resolveFileMimeTypeForUpload(file),
       size: file.size
     });
     // Store the actual bytes locally. Only once this local write is confirmed
@@ -3309,6 +3346,24 @@ function formatAttachmentSize(bytes) {
 // existing silent session, this simply rejects with 'auth-required' rather
 // than prompting (brief §16: no new login flow merely because a view was
 // requested).
+//
+// Phase 32A §6: a Drive download is never trusted purely because the HTTP
+// request succeeded — the returned Blob's own byte size is checked against
+// this record's own captured `size` (from the original File object at
+// upload time) before it is ever handed back to a caller. A zero-byte or
+// mismatched response is rejected with a distinct 'integrity-failure' code
+// rather than silently producing a URL.createObjectURL() over broken/empty
+// content (brief §6: "do not present the attachment as successfully
+// retrieved").
+//
+// Phase 32A §9: on a successful, validated Drive download, the bytes are
+// cached back into the SAME local IndexedDB store a same-device upload
+// already uses — purely a local performance optimization (brief §9/§21:
+// "second open: 0 Drive downloads"). This is a READ-triggered cache fill,
+// never a business-data mutation: it does not call recordSyncChange() or
+// touch `syncStatus`/Sync Required (brief §24/§25), and it never creates a
+// second attachment record — it is keyed by the SAME record.attachmentId
+// every other part of this feature already uses.
 function resolveAttachmentBlobForView(record) {
   return AttachmentBlobStore.getBlob(record.attachmentId).then(blob => {
     if (blob) return { blob: blob, source: 'local' };
@@ -3322,7 +3377,27 @@ function resolveAttachmentBlobForView(record) {
       return Promise.reject(Object.assign(new Error('drive-unavailable'), { code: 'drive-unavailable' }));
     }
     return GoogleDriveWorkspace.downloadAttachmentFromDrive(record.driveFileId, 'view attachment: ' + record.fileName)
-      .then(blob => ({ blob: blob, source: 'drive' }));
+      .then(downloadedBlob => {
+        const downloadedSize = (downloadedBlob && typeof downloadedBlob.size === 'number') ? downloadedBlob.size : 0;
+        if (downloadedSize === 0) {
+          return Promise.reject(Object.assign(
+            new Error('Downloaded attachment was empty.'),
+            { code: 'integrity-failure' }
+          ));
+        }
+        if (typeof record.size === 'number' && record.size > 0 && downloadedSize !== record.size) {
+          return Promise.reject(Object.assign(
+            new Error('Downloaded attachment size (' + downloadedSize + ') did not match the expected size (' + record.size + ').'),
+            { code: 'integrity-failure' }
+          ));
+        }
+        // Fire-and-forget local cache fill — never gates the view itself on
+        // whether the cache write succeeds, and never touches sync state.
+        if (typeof AttachmentBlobStore !== 'undefined' && typeof AttachmentBlobStore.putBlob === 'function') {
+          AttachmentBlobStore.putBlob(record.attachmentId, downloadedBlob);
+        }
+        return { blob: downloadedBlob, source: 'drive' };
+      });
   });
 }
 
@@ -3447,7 +3522,29 @@ function renderAttachmentPreview(record, blob) {
   const ext = getFileExtension(record.fileName);
   const body = document.getElementById('attachment-viewer-body');
   const footer = document.getElementById('attachment-viewer-footer');
-  const typedBlob = (blob && blob.type) ? blob : new Blob([blob], { type: record.mimeType || 'application/octet-stream' });
+  // Phase 32A root-cause fix (brief §7): the PREVIOUS logic only fell back to
+  // record.mimeType when the returned Blob had NO type at all
+  // (`blob.type` falsy) — but Google Drive's `alt=media` response's
+  // Content-Type is not guaranteed to be the specific original type (it can
+  // come back as a generic 'application/octet-stream', or otherwise not
+  // match what the browser originally captured at upload time), and a Blob
+  // used as an `<img>`/`<iframe>` `src` is rendered ENTIRELY according to
+  // its own `.type` — the browser does not sniff blob: URL content the way
+  // it does a normal network response. A non-image/non-PDF `.type` here is
+  // exactly why an actual PNG/PDF could fail to render at all ("cannot be
+  // viewed") even though the underlying bytes were completely intact.
+  //
+  // Fix: the record's OWN captured mimeType (resolveFileMimeTypeForUpload()
+  // at selection time — always the browser's own File.type first, Phase
+  // 32A §3's extension fallback only when that was empty) is the most
+  // reliable source of truth for what this file actually is, and is always
+  // preferred for the VIEWER's Blob type. Brief §8: only re-wrap the Blob
+  // (a cheap, bytes-preserving Blob-from-Blob construction — never an
+  // ArrayBuffer round-trip) when the type actually needs correcting; if
+  // Drive already returned the exact right type, the original Blob is used
+  // directly with no reconstruction at all.
+  const resolvedMimeType = record.mimeType || 'application/octet-stream';
+  const typedBlob = (blob && blob.type === resolvedMimeType) ? blob : new Blob([blob], { type: resolvedMimeType });
   const url = URL.createObjectURL(typedBlob);
   _attachmentViewerBlobUrl = url;
 
@@ -3493,17 +3590,29 @@ function renderAttachmentUnavailable(err) {
   const footer = document.getElementById('attachment-viewer-footer');
   if (!body || !footer) return;
   const code = err && err.code;
+  // Phase 32A §23: a distinct, meaningful message per failure kind — never
+  // the generic "Sync failed" wording (this is a read-only view action, not
+  // a Sync transaction; see resolveAttachmentBlobForView()'s own header
+  // comment on why it never touches syncStatus/Sync Required either way).
   const msg = code === 'auth-required'
     ? 'Sign in to Google Drive (via the app\'s existing Sync sign-in) to view this synced attachment.'
     : code === 'not-available'
       ? 'This attachment isn\'t available locally and hasn\'t finished syncing yet.'
-      : 'This attachment could not be retrieved right now.';
+      : code === 'integrity-failure'
+        ? 'The downloaded file did not match the original attachment and was discarded. Try again, or re-upload the attachment from the device that added it.'
+        : code === 'drive-unavailable'
+          ? 'Google Drive isn\'t available right now.'
+          : (err && err.httpStatus === 404)
+            ? 'This attachment\'s file could no longer be found on Google Drive.'
+            : (err && (err.httpStatus === 401 || err.httpStatus === 403))
+              ? 'Google Drive denied access to this attachment. Try signing in again.'
+              : 'This attachment could not be retrieved right now.';
   body.innerHTML = '<div style="text-align:center;color:var(--text-tertiary);font-size:13px;padding:16px 0">'
     + '<i class="ti ti-alert-circle" style="font-size:32px;display:block;margin-bottom:8px"></i>' + esc(msg)
     + '</div>';
   footer.innerHTML = '';
 }
-// ── End Attachment View / Open (Phase 30) ────────────────────────────────────────
+// ── End Attachment View / Open (Phase 30, corrected Phase 32A) ────────────────────
 
 // ── Attachment Deletion (Phase 31) ────────────────────────────────────────────────
 // Reuses the exact same attachment identity (taskId+attachmentId — never array
