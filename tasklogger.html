@@ -2972,7 +2972,13 @@ const ATTACHMENT_ERROR_STATES = {
   AUTH_UNAVAILABLE:      'authentication-unavailable',
   DRIVE_API_FAILURE:     'drive-api-failure',
   PERMISSION_FAILURE:    'permission-failure',
-  FILE_MISSING:          'drive-file-missing'
+  FILE_MISSING:          'drive-file-missing',
+  // Phase 32A-2: the Drive PATCH itself returned 200, but the byte count
+  // Drive reports back for the file it just stored does not match the
+  // original — distinct from DRIVE_API_FAILURE (a request-level failure)
+  // so this specific, otherwise-silent failure mode is never conflated
+  // with an ordinary network/HTTP error in diagnostics or Sync UI text.
+  UPLOAD_INTEGRITY_FAILURE: 'upload-integrity-failure'
 };
 
 // Documented future-synchronization states (Phase 28 §10) an attachment record's
@@ -6737,18 +6743,69 @@ const GoogleDriveWorkspace = (function () {
     }, { operation: 'files.update', purpose: purpose || 'upload attachment content' });
   }
 
+  // Phase 32A-2 root-cause fix: the ONLY byte-integrity check that existed
+  // before this fix was on the DOWNLOAD side (resolveAttachmentBlobForView()
+  // in the main script, "Phase 32A §6") — the upload side (here) confirmed
+  // only that Drive returned a file `id`, never that the bytes Drive
+  // actually stored matched what was sent. A Drive-side truncation/partial
+  // write (e.g. an interrupted PATCH that Drive still 200s, or any other
+  // cause that leaves the stored file shorter/longer than the source) was
+  // therefore committed to `driveFileId`/`syncStatus:'synced'` without any
+  // check, and would then read back as a PERMANENT, DETERMINISTIC
+  // integrity-failure on every other device from then on — exactly the
+  // "consistently rejected" symptom this phase fixes, and exactly why
+  // Phase 32A's own download-side check (correctly) started catching it:
+  // that check was doing its job against bytes that were already bad
+  // before it ever ran. This adds the missing write-side half of the same
+  // guarantee, using the `size` Drive already returns in this same PATCH
+  // response (`fields=...,size`, requested by uploadAttachmentFileContent()
+  // above — nothing new is fetched, no extra Drive call is added).
+  //
+  // Drive API v3 serializes `size` as a STRING (it is an int64 on Drive's
+  // side, and JS numbers cannot losslessly represent every int64), so this
+  // is compared numerically rather than with a strict `!==` against
+  // `blob.size` directly — a naive `confirmed.size !== blob.size` would
+  // ALWAYS mismatch (string vs number) and falsely fail every upload.
+  function uploadedSizeMatches(confirmed, blob) {
+    const reportedRaw = confirmed && confirmed.size;
+    if (reportedRaw == null || reportedRaw === '') return true; // nothing to compare — never block on a field Drive omitted
+    const reported = Number(reportedRaw);
+    const expected = (blob && typeof blob.size === 'number') ? blob.size : null;
+    if (!isFinite(reported) || expected === null) return true; // unparseable/unknown — never block on our own parsing gap
+    return reported === expected;
+  }
+
   // Public entry point (called ONLY from AttachmentManager.processPendingUploads(),
   // itself called ONLY from inside an explicit manual Sync transaction — Phase 29
   // §7/§22/§23). Creates the Drive file, then writes its content, then confirms —
   // matching the Verification-after-write posture pushStateToStateFile() already
-  // uses. On any failure (metadata create OR content write), the rejection
-  // propagates up so the caller can mark this one attachment's syncStatus
-  // 'error' without touching any other pending attachment (Phase 29 §14/§15).
+  // uses. On any failure (metadata create OR content write OR the upload-side
+  // integrity check above), the rejection propagates up so the caller can mark
+  // this one attachment's syncStatus 'error' without touching any other pending
+  // attachment (Phase 29 §14/§15) — 'error' is already a recoverable state that
+  // AttachmentManager.needsUploadRecord() retries on the next manual Sync
+  // (brief: never automatic retry, always the user's own next Sync press), so a
+  // caught upload-integrity failure here self-heals via the EXACT same path a
+  // network failure already does, with no new retry mechanism introduced.
   function uploadAttachmentToDrive(fileName, mimeType, blob, folderId, purpose) {
     return createAttachmentFileMetadata(fileName, mimeType, folderId, purpose).then(created => {
       if (!created || !created.id) throw new Error('Attachment file metadata create could not be confirmed.');
       return uploadAttachmentFileContent(created.id, blob, mimeType, purpose).then(confirmed => {
         if (!confirmed || !confirmed.id) throw new Error('Attachment content upload could not be confirmed.');
+        if (!uploadedSizeMatches(confirmed, blob)) {
+          // The Drive file DOES exist (files.create succeeded) but its
+          // stored content is now known-bad — never leave it sitting in
+          // TTL/Attachments under a name that looks legitimate. Best-effort
+          // only: a cleanup failure must never mask the real error below,
+          // and this never blocks/delays reporting the integrity failure.
+          deleteAttachmentFromDrive(created.id, 'cleanup: incomplete attachment upload "' + fileName + '"').catch(() => {});
+          const err = new Error(
+            'Uploaded attachment "' + fileName + '" did not reach Google Drive intact (stored size ' +
+            confirmed.size + ' did not match the original file size ' + (blob && blob.size) + ').'
+          );
+          err.code = 'upload-integrity-failure';
+          throw err;
+        }
         return { ok: true, fileId: confirmed.id, folderId: folderId };
       });
     });
@@ -7481,9 +7538,17 @@ const AttachmentManager = (function () {
               results.push({ ok: true, attachmentId: record.attachmentId, fileId: uploadResult.fileId });
             })
             .catch(err => {
-              const reason = (err && err.httpStatus === 403)
+              const reason = (err && err.code === 'upload-integrity-failure')
+                ? ((ATTACHMENT_ERROR_STATES && ATTACHMENT_ERROR_STATES.UPLOAD_INTEGRITY_FAILURE) || 'upload-integrity-failure')
+                : (err && err.httpStatus === 403)
                 ? ((ATTACHMENT_ERROR_STATES && ATTACHMENT_ERROR_STATES.PERMISSION_FAILURE) || 'permission-failure')
                 : ((ATTACHMENT_ERROR_STATES && ATTACHMENT_ERROR_STATES.DRIVE_API_FAILURE) || 'drive-api-failure');
+              // record.driveFileId is deliberately left untouched (still
+              // null/whatever it was) — markSynced() above is the ONLY
+              // place that ever sets it, and it was never reached on this
+              // path, so this attachment stays correctly eligible for a
+              // full, clean re-upload on the next manual Sync (brief: never
+              // a second/duplicate attachment record, never automatic retry).
               markError(record, reason);
               failed++;
               results.push({ ok: false, attachmentId: record.attachmentId, reason: (err && err.message) || String(err) });
