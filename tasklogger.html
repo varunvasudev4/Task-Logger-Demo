@@ -6734,8 +6734,28 @@ const GoogleDriveWorkspace = (function () {
   }
 
   function uploadAttachmentFileContent(fileId, blob, mimeType, purpose) {
+    // Phase 32B diagnostic (brief §1): the last point in this module where
+    // the exact object about to become the fetch() request body can still
+    // be inspected. Safe metadata only (name/constructor/size/type), same
+    // posture as DriveDiagnostics.recordCall() above — never the bytes
+    // themselves, never logged anywhere persisted.
+    console.debug('[GoogleDriveWorkspace] uploadAttachmentFileContent: blob entering fetch()', {
+      fileId: fileId,
+      blobConstructor: blob && blob.constructor && blob.constructor.name,
+      blobIsBlob: (typeof Blob !== 'undefined') && (blob instanceof Blob),
+      blobSize: blob && blob.size,
+      blobType: blob && blob.type,
+      mimeType: mimeType
+    });
     const url = GOOGLE_DRIVE_UPLOAD_ENDPOINT + '/' + encodeURIComponent(fileId)
       + '?uploadType=media&fields=' + encodeURIComponent('id,name,modifiedTime,size');
+    // Phase 32B: body is the Blob/File reference itself, passed straight
+    // through to driveFetch()/fetch() — no intermediate .text()/
+    // .arrayBuffer()/JSON.stringify() conversion, no Request/Response
+    // wrapping, and driveFetch() (see its definition above) only ever
+    // touches `options.headers`, never `options.body`. fetch() accepts a
+    // Blob body natively and sets Content-Length from blob.size itself, so
+    // nothing here needs to (or should) set that header by hand.
     return driveFetch(url, {
       method: 'PATCH',
       headers: { 'Content-Type': mimeType || 'application/octet-stream' },
@@ -7528,6 +7548,40 @@ const AttachmentManager = (function () {
             markError(record, 'local-file-missing');
             failed++;
             results.push({ ok: false, attachmentId: record.attachmentId, reason: 'blob-missing' });
+            return;
+          }
+          // Phase 32B root-cause fix: `blob` being truthy (a real Blob/File
+          // object) is NOT the same guarantee as it holding the original
+          // bytes — `if (!blob)` above only catches getBlob() returning
+          // null/undefined, never a Blob instance whose OWN size is 0 (a
+          // zero-byte Blob is still truthy in JS). Before this fix, a blob
+          // that survived IndexedDB retrieval as a valid-but-empty Blob
+          // (e.g. a stored-then-read-back Blob whose backing bytes were
+          // never actually persisted) sailed straight past every existing
+          // check and into a REAL Drive files.create + PATCH uploadType=media
+          // call — Drive faithfully stores exactly the (empty) bytes it was
+          // given, so it correctly reports back `size: 0`, and the existing
+          // upload-side integrity check (Phase 32A-2, uploadedSizeMatches())
+          // catches the mismatch — but only AFTER an avoidable Drive
+          // round-trip and an orphan-file cleanup delete already happened.
+          // This guard fails fast, locally, before any Drive call, whenever
+          // the retrieved blob's own size doesn't match what was captured
+          // at selection time (record.size, from the original File object —
+          // Phase 28), which is the earliest point in this exact path where
+          // an already-corrupted/emptied blob can be detected.
+          if (typeof blob.size !== 'number' || blob.size === 0 || (record.size > 0 && blob.size !== record.size)) {
+            console.warn('[AttachmentManager] Retrieved blob failed local integrity check before upload — refusing to call Drive.', {
+              attachmentId: record.attachmentId,
+              fileName: record.fileName,
+              blobConstructor: blob && blob.constructor && blob.constructor.name,
+              blobIsBlob: (typeof Blob !== 'undefined') && (blob instanceof Blob),
+              blobSize: blob && blob.size,
+              blobType: blob && blob.type,
+              expectedSize: record.size
+            });
+            markError(record, 'local-blob-corrupt');
+            failed++;
+            results.push({ ok: false, attachmentId: record.attachmentId, reason: 'blob-empty-or-mismatched' });
             return;
           }
           const purpose = 'sync: upload attachment "' + record.fileName + '" for task ' + record.taskId;
