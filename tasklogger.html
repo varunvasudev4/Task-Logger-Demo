@@ -9722,6 +9722,30 @@ function driveFailureFields(sub, fallbackReason) {
     resource: (sub && sub.resource) || null
   };
 }
+// attachmentFailureFields(): the attachment step (AttachmentManager.
+// processPendingAttachmentWork()) fails in one of two shapes — the whole
+// step can refuse to run at all (a top-level .reason, e.g.
+// 'workspace-unavailable' / 'attachment-folder-unavailable', from
+// processPendingUploads()'s own early returns), or the step can run but one
+// or more individual attachments fail (no top-level .reason at all — the
+// real detail is the first failed entry in .uploads.results / .deletes.
+// results, each of which already carries its own .reason — see
+// processPendingUploads()/processPendingDeletes()). This only reads
+// whichever shape is actually present; it never invents detail that wasn't
+// already produced upstream, and it never touches AttachmentManager itself.
+function attachmentFailureFields(attachmentResult) {
+  if (attachmentResult.reason) {
+    return driveFailureFields(attachmentResult, 'attachment-failed');
+  }
+  const failedUpload = attachmentResult.uploads && Array.isArray(attachmentResult.uploads.results) && attachmentResult.uploads.results.find(r => r && r.ok === false);
+  const failedDelete = !failedUpload && attachmentResult.deletes && Array.isArray(attachmentResult.deletes.results) && attachmentResult.deletes.results.find(r => r && r.ok === false);
+  const failedEntry = failedUpload || failedDelete || null;
+  return {
+    reason: failedUpload ? 'attachment-upload-failed' : (failedDelete ? 'attachment-delete-failed' : 'attachment-failed'),
+    message: (failedEntry && failedEntry.reason) || ((attachmentResult.failed || 0) + ' of ' + (attachmentResult.processed || 0) + ' attachment operations failed'),
+    httpStatus: null, authFailure: false, permissionDenied: false, resource: null
+  };
+}
 // locateSyncFailureStage(): identifies the ONE stage that actually failed
 // for a finished pass result, and that stage's own exact reason/message/
 // httpStatus — never a re-derived or generic one. Read-only; never mutates
@@ -9730,8 +9754,13 @@ function locateSyncFailureStage(result) {
   if (!result || result.ok !== false) return null;
 
   // Bootstrap (first-sync) push failure (Phase 21A) — the most specific
-  // stage available whenever present.
-  if (result.bootstrap) {
+  // stage available whenever present. result.bootstrap is also set to the
+  // boolean `true` on a SUCCESSFUL bootstrap push (see
+  // bootstrapFirstSyncState()'s completed-pass _lastResult) — that must
+  // never be mistaken for a bootstrap failure here, or a real failure
+  // later in that same pass (e.g. the attachment step, below) gets
+  // misattributed to BOOTSTRAP with no actual detail to show.
+  if (result.bootstrap && typeof result.bootstrap === 'object' && result.bootstrap.ok === false) {
     return Object.assign({ stage: 'BOOTSTRAP', stateFilePresent: false }, driveFailureFields(result.bootstrap, 'bootstrap-failed'));
   }
 
@@ -9778,6 +9807,18 @@ function locateSyncFailureStage(result) {
       message: (result.merged.tasksFailed || 0) + ' of ' + (result.merged.tasksDownloaded || 0) + ' downloaded tasks failed to merge',
       httpStatus: null, authFailure: false, permissionDenied: false
     };
+  }
+
+  // Attachment step failed (Phase 29) while every earlier stage in this
+  // pass succeeded (or never ran, e.g. a noop task pass) — previously
+  // unhandled here, which is exactly why a pure attachment failure fell
+  // through to the generic UNEXPECTED/unknown-error branch below with no
+  // reason or message: result.reason/result.error are never set at the top
+  // level for this case (see the noop/bootstrap-success/ordinary-completion
+  // _lastResult shapes in runSynchronizationPass()/bootstrapFirstSyncState()
+  // — the only place the real detail lives is result.attachments itself).
+  if (result.attachments && result.attachments.ok === false) {
+    return Object.assign({ stage: 'ATTACHMENTS', stateFilePresent: true }, attachmentFailureFields(result.attachments));
   }
 
   // Pre-flight guard outcome (not-authenticated / workspace-unavailable /
@@ -10604,7 +10645,7 @@ const RetryEngine = (function () {
   // often only present on the sub-result, not re-stated at the top level.
   function classify(result) {
     if (!result) return 'ignore';
-    const parts = [result, result.plan, result.uploaded, result.merged].filter(Boolean);
+    const parts = [result, result.plan, result.uploaded, result.merged, result.attachments].filter(Boolean);
     // Phase 21: only a true authentication-shaped failure (401, or a 403
     // classified as auth-shaped by classifyDriveErrorBody()) routes into the
     // silent-refresh recovery path below. A genuine 403 permission/
@@ -15447,7 +15488,8 @@ function renderMastersContent() {
     const DIAGNOSTIC_STAGE_LABELS = {
       'PRE-FLIGHT': 'Pre-flight', 'STATE DISCOVERY': 'State Discovery',
       'STATE VALIDATION': 'State Validation', 'BOOTSTRAP': 'Bootstrap',
-      'UPLOAD': 'Upload', 'MERGE': 'Download / Merge', 'UNEXPECTED': 'Unexpected'
+      'UPLOAD': 'Upload', 'MERGE': 'Download / Merge', 'ATTACHMENTS': 'Attachment Upload',
+      'UNEXPECTED': 'Unexpected'
     };
     function formatDiagnosticStage(stage) { return DIAGNOSTIC_STAGE_LABELS[stage] || stage || 'Unknown'; }
     // Reuses MERGE_REASON_LABELS (Phase 10) for any reason code the plan
