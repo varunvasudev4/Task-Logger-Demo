@@ -6771,34 +6771,91 @@ const GoogleDriveWorkspace = (function () {
     }, { operation: 'files.create', purpose: purpose || ('create attachment file: ' + fileName) });
   }
 
-  function uploadAttachmentFileContent(fileId, blob, mimeType, purpose) {
-    // Phase 32B diagnostic (brief §1): the last point in this module where
-    // the exact object about to become the fetch() request body can still
-    // be inspected. Safe metadata only (name/constructor/size/type), same
-    // posture as DriveDiagnostics.recordCall() above — never the bytes
-    // themselves, never logged anywhere persisted.
-    console.debug('[GoogleDriveWorkspace] uploadAttachmentFileContent: blob entering fetch()', {
+  function uploadAttachmentFileContent(attachmentId, fileId, fileName, blob, mimeType, purpose) {
+    // Phase 32E STEP 1 diagnostic: the last point in this module where the
+    // exact object about to become the fetch() request body can still be
+    // inspected, BEFORE any conversion below touches it. Safe metadata only
+    // (ids/name/constructor/size/type/method/URL-minus-token), same posture
+    // as DriveDiagnostics.recordCall() above — never the bytes themselves,
+    // never the Authorization header, never logged anywhere persisted.
+    const url = GOOGLE_DRIVE_UPLOAD_ENDPOINT + '/' + encodeURIComponent(fileId)
+      + '?uploadType=media&fields=' + encodeURIComponent('id,name,modifiedTime,size');
+    console.debug('[GoogleDriveWorkspace] uploadAttachmentFileContent: local Blob immediately before fetch()', {
+      attachmentId: attachmentId,
       fileId: fileId,
+      fileName: fileName,
       blobConstructor: blob && blob.constructor && blob.constructor.name,
       blobIsBlob: (typeof Blob !== 'undefined') && (blob instanceof Blob),
       blobSize: blob && blob.size,
       blobType: blob && blob.type,
-      mimeType: mimeType
+      mimeType: mimeType,
+      httpMethod: 'PATCH',
+      uploadUrl: url // never contains the access token — that only ever goes in the Authorization header, added later by driveFetch()
     });
-    const url = GOOGLE_DRIVE_UPLOAD_ENDPOINT + '/' + encodeURIComponent(fileId)
-      + '?uploadType=media&fields=' + encodeURIComponent('id,name,modifiedTime,size');
-    // Phase 32B: body is the Blob/File reference itself, passed straight
-    // through to driveFetch()/fetch() — no intermediate .text()/
-    // .arrayBuffer()/JSON.stringify() conversion, no Request/Response
-    // wrapping, and driveFetch() (see its definition above) only ever
-    // touches `options.headers`, never `options.body`. fetch() accepts a
-    // Blob body natively and sets Content-Length from blob.size itself, so
-    // nothing here needs to (or should) set that header by hand.
-    return driveFetch(url, {
-      method: 'PATCH',
-      headers: { 'Content-Type': mimeType || 'application/octet-stream' },
-      body: blob
-    }, { operation: 'files.update', purpose: purpose || 'upload attachment content' });
+
+    // Phase 32E root-cause fix (STEP 4 of the brief): a Blob read back out
+    // of AttachmentBlobStore (IndexedDB) can report a correct, non-zero
+    // `.size` while its backing byte store is already gone — `.size` is
+    // cached Blob metadata, not proof the bytes are still readable. STEP 1's
+    // own local checks above (and AttachmentManager's pre-upload guard)
+    // only ever compare this cached `.size` number, so they cannot catch
+    // that case; passing such a Blob straight through as a PATCH body
+    // (the prior Phase 32B behavior) reproduces exactly brief's failure —
+    // a well-formed request Drive 200s, but with zero bytes actually
+    // transmitted, on both devices, every time.
+    //
+    // blob.arrayBuffer() forces the browser to materialize the actual
+    // bytes NOW, synchronously with this upload attempt, instead of
+    // deferring that read into fetch()'s own internal Blob body
+    // serialization. That surfaces a truly-empty/short backing store HERE,
+    // before any Drive call is made (STEP 7: never commit driveFileId/
+    // syncStatus on a bad upload), and — per the brief's own decision
+    // tree — if the ArrayBuffer instead comes back the full, correct
+    // length, sending THAT as the fetch body is "the smallest safe
+    // binary-body representation that fetch reliably sends" for this
+    // environment, exactly as STEP 4 specifies. No text conversion, no
+    // base64, no change to MIME type/Content-Type, no extra Drive call,
+    // and no manually-set Content-Length (STEP 5) — fetch still sets that
+    // itself from the ArrayBuffer's byte length.
+    return blob.arrayBuffer().then(function (arrayBuffer) {
+      console.debug('[GoogleDriveWorkspace] uploadAttachmentFileContent: blob materialized as ArrayBuffer', {
+        attachmentId: attachmentId,
+        fileName: fileName,
+        arrayBufferByteLength: arrayBuffer && arrayBuffer.byteLength,
+        expectedBlobSize: blob && blob.size
+      });
+      if (!arrayBuffer || typeof blob.size !== 'number' || arrayBuffer.byteLength !== blob.size) {
+        // Local read-back failure — never send a short/empty body to Drive
+        // at all. This fails BEFORE the files.create metadata call's Drive
+        // file has content written to it, so the caller's existing
+        // integrity-failure cleanup path (uploadedSizeMatches() below)
+        // still applies unchanged for every failure that reaches Drive.
+        const err = new Error(
+          'Local attachment blob for "' + fileName + '" could not be read back intact before upload ' +
+          '(expected ' + blob.size + ' bytes, got ' + (arrayBuffer ? arrayBuffer.byteLength : 'none') + ').'
+        );
+        err.code = 'local-blob-read-failure';
+        throw err;
+      }
+      const options = {
+        method: 'PATCH',
+        headers: { 'Content-Type': mimeType || 'application/octet-stream' },
+        body: arrayBuffer
+      };
+      // STEP 2 diagnostic: the exact options object, with the exact body,
+      // that is about to be passed to driveFetch()/fetch() — confirms
+      // nothing between this point and fetch() replaces or empties it.
+      console.debug('[GoogleDriveWorkspace] uploadAttachmentFileContent: options.body immediately before fetch()', {
+        attachmentId: attachmentId,
+        bodyExists: !!options.body,
+        bodyConstructor: options.body && options.body.constructor && options.body.constructor.name,
+        bodyByteLength: options.body && options.body.byteLength
+      });
+      // driveFetch() (see its definition above) only ever reads/assigns
+      // `options.headers` — it never touches `options.body` — so this
+      // ArrayBuffer reaches fetch() completely unchanged.
+      return driveFetch(url, options, { operation: 'files.update', purpose: purpose || 'upload attachment content' });
+    });
   }
 
   // Phase 32A-2 root-cause fix: the ONLY byte-integrity check that existed
@@ -6845,10 +6902,10 @@ const GoogleDriveWorkspace = (function () {
   // (brief: never automatic retry, always the user's own next Sync press), so a
   // caught upload-integrity failure here self-heals via the EXACT same path a
   // network failure already does, with no new retry mechanism introduced.
-  function uploadAttachmentToDrive(fileName, mimeType, blob, folderId, purpose) {
+  function uploadAttachmentToDrive(attachmentId, fileName, mimeType, blob, folderId, purpose) {
     return createAttachmentFileMetadata(fileName, mimeType, folderId, purpose).then(created => {
       if (!created || !created.id) throw new Error('Attachment file metadata create could not be confirmed.');
-      return uploadAttachmentFileContent(created.id, blob, mimeType, purpose).then(confirmed => {
+      return uploadAttachmentFileContent(attachmentId, created.id, fileName, blob, mimeType, purpose).then(confirmed => {
         if (!confirmed || !confirmed.id) throw new Error('Attachment content upload could not be confirmed.');
         if (!uploadedSizeMatches(confirmed, blob)) {
           // The Drive file DOES exist (files.create succeeded) but its
@@ -7640,14 +7697,16 @@ const AttachmentManager = (function () {
             return;
           }
           const purpose = 'sync: upload attachment "' + record.fileName + '" for task ' + record.taskId;
-          return GoogleDriveWorkspace.uploadAttachmentToDrive(record.fileName, record.mimeType, blob, folderId, purpose)
+          return GoogleDriveWorkspace.uploadAttachmentToDrive(record.attachmentId, record.fileName, record.mimeType, blob, folderId, purpose)
             .then(uploadResult => {
               markSynced(record, uploadResult);
               completed++;
               results.push({ ok: true, attachmentId: record.attachmentId, fileId: uploadResult.fileId });
             })
             .catch(err => {
-              const reason = (err && err.code === 'upload-integrity-failure')
+              const reason = (err && err.code === 'local-blob-read-failure')
+                ? 'local-blob-corrupt'
+                : (err && err.code === 'upload-integrity-failure')
                 ? ((ATTACHMENT_ERROR_STATES && ATTACHMENT_ERROR_STATES.UPLOAD_INTEGRITY_FAILURE) || 'upload-integrity-failure')
                 : (err && err.httpStatus === 403)
                 ? ((ATTACHMENT_ERROR_STATES && ATTACHMENT_ERROR_STATES.PERMISSION_FAILURE) || 'permission-failure')
