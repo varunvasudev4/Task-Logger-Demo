@@ -4322,11 +4322,45 @@ function applyRemoteAttachments(remoteParsed) {
 // targeted per-task Task Card + Log Table + open-modal refresh this logic
 // always had, unchanged in behavior, just moved so the taskSyncId ->
 // local-task lookup it depends on always runs after that mapping exists.
+// Phase 32F STEP 14: last attachment-metadata-merge failure, read-only
+// diagnostic capture only — mirrors buildSyncFailureDiagnostic()'s existing
+// "never invents detail, never retries, never touches auth/network" posture
+// (Phase 22E) but scoped to this one merge step, since that stage has no
+// result-object shape of its own for locateSyncFailureStage() to inspect.
+// Never contains an OAuth token, Authorization header, or file contents —
+// applyRemoteAttachments() only ever touches already-downloaded local state,
+// so err.message here can never carry any of those. Cleared to null on the
+// next successful merge attempt so a stale failure never lingers as if it
+// were still current.
+let _lastAttachmentMetadataMergeDiagnostic = null;
+function getLastAttachmentMetadataMergeDiagnostic() {
+  return _lastAttachmentMetadataMergeDiagnostic;
+}
 function applyRemoteAttachmentsAndRefresh(remoteParsed) {
   let changed = false;
   try {
     changed = applyRemoteAttachments(remoteParsed);
-  } catch (e) {}
+    // A clean pass (whether or not anything actually changed) supersedes
+    // any previously recorded failure — never leave a stale diagnostic
+    // pointing at a problem that no longer reproduces.
+    _lastAttachmentMetadataMergeDiagnostic = null;
+  } catch (e) {
+    // STEP 14: never swallow a real merge exception silently. Surface a
+    // diagnostic — logged (same tagged-console-object convention this file
+    // already uses for [SYNC-DEDUPE]/[SYNC-DELETE]/[SYNC-LOG-LINK]) and kept
+    // for inspection — WITHOUT retrying: this function is called exactly
+    // once per Sync pass by its one call site (completeBatchMerge()), same
+    // as before this fix, and returning `false` below simply means "no
+    // affected task ids to refresh," not "try again."
+    const diagnostic = {
+      stage: 'Attachment Metadata Merge',
+      reason: 'attachment-metadata-merge-failed',
+      error: (e && e.message) || String(e)
+    };
+    _lastAttachmentMetadataMergeDiagnostic = diagnostic;
+    console.error('[SYNC-ATTACHMENT-METADATA-MERGE-FAILED]', diagnostic);
+    changed = false;
+  }
   if (changed) {
     saveState();
     const affectedTaskIds = Array.isArray(_lastAttachmentsTouchedTaskIds) ? _lastAttachmentsTouchedTaskIds : [];
