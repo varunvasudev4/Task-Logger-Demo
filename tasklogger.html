@@ -3032,7 +3032,17 @@ function createAttachmentMetadata(taskId, fileMeta) {
     // TTL/Attachments — always null for every record created in this phase.
     driveFileId: null,
     driveFolderId: null,
-    syncStatus: 'local-only'
+    syncStatus: 'local-only',
+    // Phase 32D: provenance marker — this record was created BY THIS DEVICE
+    // from a real local file selection, so a real local Blob either already
+    // exists in AttachmentBlobStore or is about to (see the putBlob() call
+    // at this function's call site). 'local' is the only origin value
+    // needsUploadRecord() ever treats as upload-eligible; a record merged in
+    // from another device's state.json is stamped 'remote' instead (see
+    // applyRemoteAttachments() below) precisely so it can never be confused
+    // with a genuine local-upload candidate, regardless of what syncStatus
+    // label the remote metadata happens to carry.
+    origin: 'local'
   };
   attachments.push(record);
   if (typeof recordSyncChange === 'function') recordSyncChange('attachments', attachmentId, 'create');
@@ -4225,6 +4235,19 @@ function applyRemoteAttachments(remoteParsed) {
       existing.driveFolderId = remoteRecord.driveFolderId || existing.driveFolderId || null;
       existing.syncStatus = remoteRecord.syncStatus || existing.syncStatus;
       existing.updatedAt = remoteRecord.updatedAt || existing.updatedAt;
+      // Phase 32D: deliberately NEVER touch `existing.origin` here. Origin
+      // records WHERE THE BLOB LIVES (this device vs. never-downloaded-yet),
+      // which is a fact about THIS device's own IndexedDB — remote metadata
+      // has no authority over it either way. If this record was created
+      // locally on this device (origin 'local'), a remote echo of the same
+      // attachmentId must not relabel it 'remote' and hide a genuine local
+      // upload candidate; if it was created here via an earlier remote merge
+      // (origin 'remote', no local Blob), a later remote resend — even one
+      // whose syncStatus/driveFileId momentarily look "local-ish" because
+      // the sending device itself hadn't finished uploading yet — must not
+      // relabel it 'local' and turn it into a phantom upload job this device
+      // can never satisfy (brief: "REMOTE STATE MUST NOT TURN INTO A LOCAL
+      // UPLOAD JOB").
       delete existing.lastError;
       if (touchedTaskIds.indexOf(existing.taskId) === -1) touchedTaskIds.push(existing.taskId);
     } else {
@@ -4245,7 +4268,22 @@ function applyRemoteAttachments(remoteParsed) {
         updatedAt: remoteRecord.updatedAt || new Date().toISOString(),
         driveFileId: remoteRecord.driveFileId || null,
         driveFolderId: remoteRecord.driveFolderId || null,
-        syncStatus: remoteRecord.syncStatus || (remoteRecord.driveFileId ? 'synced' : 'local-only')
+        syncStatus: remoteRecord.syncStatus || (remoteRecord.driveFileId ? 'synced' : 'local-only'),
+        // Phase 32D root cause: this record did not come from a local file
+        // selection on this device — it was created purely from another
+        // device's state.json metadata, so this device has no local Blob for
+        // it (and never had one). The syncStatus field above is copied
+        // verbatim from the SENDING device's own (possibly still-in-flight,
+        // e.g. 'local-only'/'pending-upload'/'error') label and therefore
+        // cannot, by itself, be trusted to mean "this device needs to
+        // upload it" — that was the actual bug: needsUploadRecord() had no
+        // way to tell "genuinely local, needs upload" apart from "arrived
+        // via remote merge, never had a local Blob." `origin: 'remote'` is
+        // that missing signal, checked by needsUploadRecord() below
+        // independently of syncStatus/driveFileId so a remote attachment can
+        // never enter processPendingUploads() no matter what label it
+        // arrives with.
+        origin: 'remote'
       });
       if (touchedTaskIds.indexOf(taskResolution.taskId) === -1) touchedTaskIds.push(taskResolution.taskId);
     }
@@ -7475,8 +7513,25 @@ const AttachmentManager = (function () {
   // here — this is also this module's whole duplicate-upload defense
   // (Phase 29 §12): a record can only be in this candidate set if it does
   // NOT already carry a confirmed driveFileId.
+  // Phase 32D: driveFileId absence and a "needs upload" syncStatus are
+  // necessary but NOT sufficient — both are just labels, and a record that
+  // arrived purely via applyRemoteAttachments() (another device's
+  // state.json) can carry either one without this device ever having had a
+  // local Blob for it (root cause of the Device B "attachment-upload-failed:
+  // blob-missing" symptom). `origin` is this device's own record of WHERE
+  // the record came from — 'remote' means "merged in from another device's
+  // metadata, no local Blob was ever written here" and is never eligible,
+  // full stop, regardless of syncStatus/driveFileId. A record with no
+  // `origin` at all predates this fix and was necessarily created by THIS
+  // device's own createAttachmentMetadata() (the only place records were
+  // ever created before Phase 32), so it is treated as 'local' — the
+  // existing, already-correct behavior for that legacy data.
+  // This is the single authoritative upload-candidate predicate (see the
+  // module header) — every other caller in this file (hasPendingUploadWork()
+  // just below, processPendingUploads() further down) filters through this
+  // one function rather than re-deriving the condition.
   function needsUploadRecord(a) {
-    return !!a && !a.driveFileId
+    return !!a && !a.driveFileId && a.origin !== 'remote'
       && (a.syncStatus === 'local-only' || a.syncStatus === 'pending-upload' || a.syncStatus === 'error');
   }
 
