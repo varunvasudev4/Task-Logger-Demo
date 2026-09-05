@@ -3032,17 +3032,7 @@ function createAttachmentMetadata(taskId, fileMeta) {
     // TTL/Attachments — always null for every record created in this phase.
     driveFileId: null,
     driveFolderId: null,
-    syncStatus: 'local-only',
-    // Phase 32D: provenance marker — this record was created BY THIS DEVICE
-    // from a real local file selection, so a real local Blob either already
-    // exists in AttachmentBlobStore or is about to (see the putBlob() call
-    // at this function's call site). 'local' is the only origin value
-    // needsUploadRecord() ever treats as upload-eligible; a record merged in
-    // from another device's state.json is stamped 'remote' instead (see
-    // applyRemoteAttachments() below) precisely so it can never be confused
-    // with a genuine local-upload candidate, regardless of what syncStatus
-    // label the remote metadata happens to carry.
-    origin: 'local'
+    syncStatus: 'local-only'
   };
   attachments.push(record);
   if (typeof recordSyncChange === 'function') recordSyncChange('attachments', attachmentId, 'create');
@@ -4235,19 +4225,6 @@ function applyRemoteAttachments(remoteParsed) {
       existing.driveFolderId = remoteRecord.driveFolderId || existing.driveFolderId || null;
       existing.syncStatus = remoteRecord.syncStatus || existing.syncStatus;
       existing.updatedAt = remoteRecord.updatedAt || existing.updatedAt;
-      // Phase 32D: deliberately NEVER touch `existing.origin` here. Origin
-      // records WHERE THE BLOB LIVES (this device vs. never-downloaded-yet),
-      // which is a fact about THIS device's own IndexedDB — remote metadata
-      // has no authority over it either way. If this record was created
-      // locally on this device (origin 'local'), a remote echo of the same
-      // attachmentId must not relabel it 'remote' and hide a genuine local
-      // upload candidate; if it was created here via an earlier remote merge
-      // (origin 'remote', no local Blob), a later remote resend — even one
-      // whose syncStatus/driveFileId momentarily look "local-ish" because
-      // the sending device itself hadn't finished uploading yet — must not
-      // relabel it 'local' and turn it into a phantom upload job this device
-      // can never satisfy (brief: "REMOTE STATE MUST NOT TURN INTO A LOCAL
-      // UPLOAD JOB").
       delete existing.lastError;
       if (touchedTaskIds.indexOf(existing.taskId) === -1) touchedTaskIds.push(existing.taskId);
     } else {
@@ -4268,22 +4245,7 @@ function applyRemoteAttachments(remoteParsed) {
         updatedAt: remoteRecord.updatedAt || new Date().toISOString(),
         driveFileId: remoteRecord.driveFileId || null,
         driveFolderId: remoteRecord.driveFolderId || null,
-        syncStatus: remoteRecord.syncStatus || (remoteRecord.driveFileId ? 'synced' : 'local-only'),
-        // Phase 32D root cause: this record did not come from a local file
-        // selection on this device — it was created purely from another
-        // device's state.json metadata, so this device has no local Blob for
-        // it (and never had one). The syncStatus field above is copied
-        // verbatim from the SENDING device's own (possibly still-in-flight,
-        // e.g. 'local-only'/'pending-upload'/'error') label and therefore
-        // cannot, by itself, be trusted to mean "this device needs to
-        // upload it" — that was the actual bug: needsUploadRecord() had no
-        // way to tell "genuinely local, needs upload" apart from "arrived
-        // via remote merge, never had a local Blob." `origin: 'remote'` is
-        // that missing signal, checked by needsUploadRecord() below
-        // independently of syncStatus/driveFileId so a remote attachment can
-        // never enter processPendingUploads() no matter what label it
-        // arrives with.
-        origin: 'remote'
+        syncStatus: remoteRecord.syncStatus || (remoteRecord.driveFileId ? 'synced' : 'local-only')
       });
       if (touchedTaskIds.indexOf(taskResolution.taskId) === -1) touchedTaskIds.push(taskResolution.taskId);
     }
@@ -4322,45 +4284,11 @@ function applyRemoteAttachments(remoteParsed) {
 // targeted per-task Task Card + Log Table + open-modal refresh this logic
 // always had, unchanged in behavior, just moved so the taskSyncId ->
 // local-task lookup it depends on always runs after that mapping exists.
-// Phase 32F STEP 14: last attachment-metadata-merge failure, read-only
-// diagnostic capture only — mirrors buildSyncFailureDiagnostic()'s existing
-// "never invents detail, never retries, never touches auth/network" posture
-// (Phase 22E) but scoped to this one merge step, since that stage has no
-// result-object shape of its own for locateSyncFailureStage() to inspect.
-// Never contains an OAuth token, Authorization header, or file contents —
-// applyRemoteAttachments() only ever touches already-downloaded local state,
-// so err.message here can never carry any of those. Cleared to null on the
-// next successful merge attempt so a stale failure never lingers as if it
-// were still current.
-let _lastAttachmentMetadataMergeDiagnostic = null;
-function getLastAttachmentMetadataMergeDiagnostic() {
-  return _lastAttachmentMetadataMergeDiagnostic;
-}
 function applyRemoteAttachmentsAndRefresh(remoteParsed) {
   let changed = false;
   try {
     changed = applyRemoteAttachments(remoteParsed);
-    // A clean pass (whether or not anything actually changed) supersedes
-    // any previously recorded failure — never leave a stale diagnostic
-    // pointing at a problem that no longer reproduces.
-    _lastAttachmentMetadataMergeDiagnostic = null;
-  } catch (e) {
-    // STEP 14: never swallow a real merge exception silently. Surface a
-    // diagnostic — logged (same tagged-console-object convention this file
-    // already uses for [SYNC-DEDUPE]/[SYNC-DELETE]/[SYNC-LOG-LINK]) and kept
-    // for inspection — WITHOUT retrying: this function is called exactly
-    // once per Sync pass by its one call site (completeBatchMerge()), same
-    // as before this fix, and returning `false` below simply means "no
-    // affected task ids to refresh," not "try again."
-    const diagnostic = {
-      stage: 'Attachment Metadata Merge',
-      reason: 'attachment-metadata-merge-failed',
-      error: (e && e.message) || String(e)
-    };
-    _lastAttachmentMetadataMergeDiagnostic = diagnostic;
-    console.error('[SYNC-ATTACHMENT-METADATA-MERGE-FAILED]', diagnostic);
-    changed = false;
-  }
+  } catch (e) {}
   if (changed) {
     saveState();
     const affectedTaskIds = Array.isArray(_lastAttachmentsTouchedTaskIds) ? _lastAttachmentsTouchedTaskIds : [];
@@ -6805,91 +6733,14 @@ const GoogleDriveWorkspace = (function () {
     }, { operation: 'files.create', purpose: purpose || ('create attachment file: ' + fileName) });
   }
 
-  function uploadAttachmentFileContent(attachmentId, fileId, fileName, blob, mimeType, purpose) {
-    // Phase 32E STEP 1 diagnostic: the last point in this module where the
-    // exact object about to become the fetch() request body can still be
-    // inspected, BEFORE any conversion below touches it. Safe metadata only
-    // (ids/name/constructor/size/type/method/URL-minus-token), same posture
-    // as DriveDiagnostics.recordCall() above — never the bytes themselves,
-    // never the Authorization header, never logged anywhere persisted.
+  function uploadAttachmentFileContent(fileId, blob, mimeType, purpose) {
     const url = GOOGLE_DRIVE_UPLOAD_ENDPOINT + '/' + encodeURIComponent(fileId)
       + '?uploadType=media&fields=' + encodeURIComponent('id,name,modifiedTime,size');
-    console.debug('[GoogleDriveWorkspace] uploadAttachmentFileContent: local Blob immediately before fetch()', {
-      attachmentId: attachmentId,
-      fileId: fileId,
-      fileName: fileName,
-      blobConstructor: blob && blob.constructor && blob.constructor.name,
-      blobIsBlob: (typeof Blob !== 'undefined') && (blob instanceof Blob),
-      blobSize: blob && blob.size,
-      blobType: blob && blob.type,
-      mimeType: mimeType,
-      httpMethod: 'PATCH',
-      uploadUrl: url // never contains the access token — that only ever goes in the Authorization header, added later by driveFetch()
-    });
-
-    // Phase 32E root-cause fix (STEP 4 of the brief): a Blob read back out
-    // of AttachmentBlobStore (IndexedDB) can report a correct, non-zero
-    // `.size` while its backing byte store is already gone — `.size` is
-    // cached Blob metadata, not proof the bytes are still readable. STEP 1's
-    // own local checks above (and AttachmentManager's pre-upload guard)
-    // only ever compare this cached `.size` number, so they cannot catch
-    // that case; passing such a Blob straight through as a PATCH body
-    // (the prior Phase 32B behavior) reproduces exactly brief's failure —
-    // a well-formed request Drive 200s, but with zero bytes actually
-    // transmitted, on both devices, every time.
-    //
-    // blob.arrayBuffer() forces the browser to materialize the actual
-    // bytes NOW, synchronously with this upload attempt, instead of
-    // deferring that read into fetch()'s own internal Blob body
-    // serialization. That surfaces a truly-empty/short backing store HERE,
-    // before any Drive call is made (STEP 7: never commit driveFileId/
-    // syncStatus on a bad upload), and — per the brief's own decision
-    // tree — if the ArrayBuffer instead comes back the full, correct
-    // length, sending THAT as the fetch body is "the smallest safe
-    // binary-body representation that fetch reliably sends" for this
-    // environment, exactly as STEP 4 specifies. No text conversion, no
-    // base64, no change to MIME type/Content-Type, no extra Drive call,
-    // and no manually-set Content-Length (STEP 5) — fetch still sets that
-    // itself from the ArrayBuffer's byte length.
-    return blob.arrayBuffer().then(function (arrayBuffer) {
-      console.debug('[GoogleDriveWorkspace] uploadAttachmentFileContent: blob materialized as ArrayBuffer', {
-        attachmentId: attachmentId,
-        fileName: fileName,
-        arrayBufferByteLength: arrayBuffer && arrayBuffer.byteLength,
-        expectedBlobSize: blob && blob.size
-      });
-      if (!arrayBuffer || typeof blob.size !== 'number' || arrayBuffer.byteLength !== blob.size) {
-        // Local read-back failure — never send a short/empty body to Drive
-        // at all. This fails BEFORE the files.create metadata call's Drive
-        // file has content written to it, so the caller's existing
-        // integrity-failure cleanup path (uploadedSizeMatches() below)
-        // still applies unchanged for every failure that reaches Drive.
-        const err = new Error(
-          'Local attachment blob for "' + fileName + '" could not be read back intact before upload ' +
-          '(expected ' + blob.size + ' bytes, got ' + (arrayBuffer ? arrayBuffer.byteLength : 'none') + ').'
-        );
-        err.code = 'local-blob-read-failure';
-        throw err;
-      }
-      const options = {
-        method: 'PATCH',
-        headers: { 'Content-Type': mimeType || 'application/octet-stream' },
-        body: arrayBuffer
-      };
-      // STEP 2 diagnostic: the exact options object, with the exact body,
-      // that is about to be passed to driveFetch()/fetch() — confirms
-      // nothing between this point and fetch() replaces or empties it.
-      console.debug('[GoogleDriveWorkspace] uploadAttachmentFileContent: options.body immediately before fetch()', {
-        attachmentId: attachmentId,
-        bodyExists: !!options.body,
-        bodyConstructor: options.body && options.body.constructor && options.body.constructor.name,
-        bodyByteLength: options.body && options.body.byteLength
-      });
-      // driveFetch() (see its definition above) only ever reads/assigns
-      // `options.headers` — it never touches `options.body` — so this
-      // ArrayBuffer reaches fetch() completely unchanged.
-      return driveFetch(url, options, { operation: 'files.update', purpose: purpose || 'upload attachment content' });
-    });
+    return driveFetch(url, {
+      method: 'PATCH',
+      headers: { 'Content-Type': mimeType || 'application/octet-stream' },
+      body: blob
+    }, { operation: 'files.update', purpose: purpose || 'upload attachment content' });
   }
 
   // Phase 32A-2 root-cause fix: the ONLY byte-integrity check that existed
@@ -6936,10 +6787,10 @@ const GoogleDriveWorkspace = (function () {
   // (brief: never automatic retry, always the user's own next Sync press), so a
   // caught upload-integrity failure here self-heals via the EXACT same path a
   // network failure already does, with no new retry mechanism introduced.
-  function uploadAttachmentToDrive(attachmentId, fileName, mimeType, blob, folderId, purpose) {
+  function uploadAttachmentToDrive(fileName, mimeType, blob, folderId, purpose) {
     return createAttachmentFileMetadata(fileName, mimeType, folderId, purpose).then(created => {
       if (!created || !created.id) throw new Error('Attachment file metadata create could not be confirmed.');
-      return uploadAttachmentFileContent(attachmentId, created.id, fileName, blob, mimeType, purpose).then(confirmed => {
+      return uploadAttachmentFileContent(created.id, blob, mimeType, purpose).then(confirmed => {
         if (!confirmed || !confirmed.id) throw new Error('Attachment content upload could not be confirmed.');
         if (!uploadedSizeMatches(confirmed, blob)) {
           // The Drive file DOES exist (files.create succeeded) but its
@@ -7604,25 +7455,8 @@ const AttachmentManager = (function () {
   // here — this is also this module's whole duplicate-upload defense
   // (Phase 29 §12): a record can only be in this candidate set if it does
   // NOT already carry a confirmed driveFileId.
-  // Phase 32D: driveFileId absence and a "needs upload" syncStatus are
-  // necessary but NOT sufficient — both are just labels, and a record that
-  // arrived purely via applyRemoteAttachments() (another device's
-  // state.json) can carry either one without this device ever having had a
-  // local Blob for it (root cause of the Device B "attachment-upload-failed:
-  // blob-missing" symptom). `origin` is this device's own record of WHERE
-  // the record came from — 'remote' means "merged in from another device's
-  // metadata, no local Blob was ever written here" and is never eligible,
-  // full stop, regardless of syncStatus/driveFileId. A record with no
-  // `origin` at all predates this fix and was necessarily created by THIS
-  // device's own createAttachmentMetadata() (the only place records were
-  // ever created before Phase 32), so it is treated as 'local' — the
-  // existing, already-correct behavior for that legacy data.
-  // This is the single authoritative upload-candidate predicate (see the
-  // module header) — every other caller in this file (hasPendingUploadWork()
-  // just below, processPendingUploads() further down) filters through this
-  // one function rather than re-deriving the condition.
   function needsUploadRecord(a) {
-    return !!a && !a.driveFileId && a.origin !== 'remote'
+    return !!a && !a.driveFileId
       && (a.syncStatus === 'local-only' || a.syncStatus === 'pending-upload' || a.syncStatus === 'error');
   }
 
@@ -7696,51 +7530,15 @@ const AttachmentManager = (function () {
             results.push({ ok: false, attachmentId: record.attachmentId, reason: 'blob-missing' });
             return;
           }
-          // Phase 32B root-cause fix: `blob` being truthy (a real Blob/File
-          // object) is NOT the same guarantee as it holding the original
-          // bytes — `if (!blob)` above only catches getBlob() returning
-          // null/undefined, never a Blob instance whose OWN size is 0 (a
-          // zero-byte Blob is still truthy in JS). Before this fix, a blob
-          // that survived IndexedDB retrieval as a valid-but-empty Blob
-          // (e.g. a stored-then-read-back Blob whose backing bytes were
-          // never actually persisted) sailed straight past every existing
-          // check and into a REAL Drive files.create + PATCH uploadType=media
-          // call — Drive faithfully stores exactly the (empty) bytes it was
-          // given, so it correctly reports back `size: 0`, and the existing
-          // upload-side integrity check (Phase 32A-2, uploadedSizeMatches())
-          // catches the mismatch — but only AFTER an avoidable Drive
-          // round-trip and an orphan-file cleanup delete already happened.
-          // This guard fails fast, locally, before any Drive call, whenever
-          // the retrieved blob's own size doesn't match what was captured
-          // at selection time (record.size, from the original File object —
-          // Phase 28), which is the earliest point in this exact path where
-          // an already-corrupted/emptied blob can be detected.
-          if (typeof blob.size !== 'number' || blob.size === 0 || (record.size > 0 && blob.size !== record.size)) {
-            console.warn('[AttachmentManager] Retrieved blob failed local integrity check before upload — refusing to call Drive.', {
-              attachmentId: record.attachmentId,
-              fileName: record.fileName,
-              blobConstructor: blob && blob.constructor && blob.constructor.name,
-              blobIsBlob: (typeof Blob !== 'undefined') && (blob instanceof Blob),
-              blobSize: blob && blob.size,
-              blobType: blob && blob.type,
-              expectedSize: record.size
-            });
-            markError(record, 'local-blob-corrupt');
-            failed++;
-            results.push({ ok: false, attachmentId: record.attachmentId, reason: 'blob-empty-or-mismatched' });
-            return;
-          }
           const purpose = 'sync: upload attachment "' + record.fileName + '" for task ' + record.taskId;
-          return GoogleDriveWorkspace.uploadAttachmentToDrive(record.attachmentId, record.fileName, record.mimeType, blob, folderId, purpose)
+          return GoogleDriveWorkspace.uploadAttachmentToDrive(record.fileName, record.mimeType, blob, folderId, purpose)
             .then(uploadResult => {
               markSynced(record, uploadResult);
               completed++;
               results.push({ ok: true, attachmentId: record.attachmentId, fileId: uploadResult.fileId });
             })
             .catch(err => {
-              const reason = (err && err.code === 'local-blob-read-failure')
-                ? 'local-blob-corrupt'
-                : (err && err.code === 'upload-integrity-failure')
+              const reason = (err && err.code === 'upload-integrity-failure')
                 ? ((ATTACHMENT_ERROR_STATES && ATTACHMENT_ERROR_STATES.UPLOAD_INTEGRITY_FAILURE) || 'upload-integrity-failure')
                 : (err && err.httpStatus === 403)
                 ? ((ATTACHMENT_ERROR_STATES && ATTACHMENT_ERROR_STATES.PERMISSION_FAILURE) || 'permission-failure')
