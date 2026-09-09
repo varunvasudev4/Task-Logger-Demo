@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Daily Summary</title>
+<link rel="icon" href="./favicon.ico" type="image/x-icon">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+/* ────────────────────────────────────────────────────────────────
+   Daily Summary — standalone stylesheet.
+   All selectors are prefixed with `.ds-` (or scoped under #ds-page)
+   so nothing here can collide with tasklogger.html's own CSS if the
+   two files are ever open in frames together. Color/font tokens are
+   copied from tasklogger.html's :root so the two pages look related.
+   ──────────────────────────────────────────────────────────────── */
+
+:root {
+  --ds-bg: #fffdf8;
+  --ds-bg-secondary: #f7f0dd;
+  --ds-bg-tertiary: #ede1c3;
+  --ds-text-primary: #26211a;
+  --ds-text-secondary: #5a4f3c;
+  --ds-text-tertiary: #8a7f68;
+  --ds-border: rgba(38,33,26,0.16);
+  --ds-border-md: rgba(38,33,26,0.30);
+  --ds-radius-md: 6px;
+  --ds-radius-lg: 10px;
+  --ds-blue-bg: #fbe2d3;
+  --ds-blue-mid: #c94f1f;
+  --ds-blue-dark: #9c3c15;
+  --ds-green-bg: #dcefe8;
+  --ds-green-mid: #2f8f76;
+  --ds-green-dark: #1f6350;
+  --ds-font-ui: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --ds-font-head: 'Space Grotesk', 'IBM Plex Sans', sans-serif;
+  --ds-font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ds-bg: #1c2230; --ds-bg-secondary: #232a3d; --ds-bg-tertiary: #0c0e13;
+    --ds-text-primary: #edeff4; --ds-text-secondary: #8b93a7; --ds-text-tertiary: #5b6478;
+    --ds-border: #2e3549; --ds-border-md: #454f6b;
+    --ds-blue-bg: #3a2a20; --ds-blue-mid: #e8622c; --ds-blue-dark: #ff8f5c;
+    --ds-green-bg: #1c332e; --ds-green-mid: #3fab8f; --ds-green-dark: #7fd4bc;
+  }
+}
+
+html, body { max-width: 100%; overflow-x: hidden; }
+
+body {
+  font-family: var(--ds-font-ui);
+  background: var(--ds-bg-tertiary); color: var(--ds-text-primary);
+  min-height: 100vh; padding: 2rem 1rem 4rem; line-height: 1.6;
+  margin: 0;
+}
+
+#ds-page { width: 100%; max-width: 1100px; margin: 0 auto; }
+
+/* ── Header ── */
+.ds-header {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  margin-bottom: 1.5rem; gap: 12px; min-width: 0; flex-wrap: wrap;
+}
+.ds-header-titlebar { min-width: 0; flex: 1 1 auto; }
+.ds-title {
+  font-family: var(--ds-font-head); font-size: 24px; font-weight: 700; letter-spacing: -0.3px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;
+}
+.ds-subtitle {
+  font-family: var(--ds-font-mono); font-size: 12px; color: var(--ds-text-tertiary);
+  margin-top: 5px; letter-spacing: 0.02em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;
+}
+.ds-header-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* ── Buttons (matches tasklogger.html's .btn conventions) ── */
+.ds-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 14px; border: 1px solid var(--ds-border-md);
+  border-radius: var(--ds-radius-md); background: var(--ds-bg);
+  color: var(--ds-text-primary); font-size: 12.5px; font-weight: 500;
+  cursor: pointer; transition: border-color 0.15s, background 0.15s; white-space: nowrap;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.06); font-family: var(--ds-font-mono); letter-spacing: 0.02em;
+  text-decoration: none; min-height: 44px;
+}
+.ds-btn:hover { background: var(--ds-bg-secondary); border-color: var(--ds-text-tertiary); }
+.ds-btn i { font-size: 15px; }
+
+/* ── Toolbar row: date display + project filter placeholders ── */
+.ds-toolbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px; border-bottom: 1px solid var(--ds-border);
+  background: var(--ds-bg-secondary); gap: 10px; flex-wrap: wrap;
+  border-radius: var(--ds-radius-lg) var(--ds-radius-lg) 0 0;
+}
+.ds-toolbar-group { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ds-date-display {
+  display: flex; align-items: center; gap: 7px;
+  font-family: var(--ds-font-head); font-size: 13px; font-weight: 600; color: var(--ds-text-primary);
+  padding: 7px 12px; border: 1px solid var(--ds-border-md); border-radius: var(--ds-radius-md);
+  background: var(--ds-bg);
+}
+.ds-date-display i { color: var(--ds-text-tertiary); font-size: 14px; }
+.ds-project-filter-placeholder {
+  display: flex; align-items: center; gap: 7px;
+  font-family: var(--ds-font-mono); font-size: 11.5px; color: var(--ds-text-tertiary);
+  padding: 7px 12px; border: 1px dashed var(--ds-border-md); border-radius: var(--ds-radius-md);
+}
+.ds-project-filter-placeholder i { font-size: 14px; }
+
+/* ── Card / panel shell that will eventually hold the summary content ── */
+.ds-panel {
+  background: var(--ds-bg); border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-lg); overflow: hidden;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+}
+.ds-content {
+  padding: 18px;
+  min-height: 160px;
+}
+
+/* ── Empty state ── */
+.ds-empty-state {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center; gap: 10px;
+  padding: 48px 20px; color: var(--ds-text-tertiary);
+}
+.ds-empty-state i { font-size: 32px; color: var(--ds-text-tertiary); }
+.ds-empty-state-title {
+  font-family: var(--ds-font-head); font-size: 14px; font-weight: 600; color: var(--ds-text-secondary);
+}
+.ds-empty-state-sub {
+  font-family: var(--ds-font-mono); font-size: 11.5px; color: var(--ds-text-tertiary);
+  max-width: 360px;
+}
+
+/* ── Footer nav (Back to Task Logger) ── */
+.ds-footer-nav { margin-top: 18px; display: flex; }
+
+/* ── Responsive: phone breakpoint, mirrors tasklogger.html's 640px rule ── */
+@media (max-width: 640px) {
+  body { padding: 1rem 0.75rem 4rem; }
+  .ds-header { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .ds-header-actions { width: 100%; }
+  .ds-header-actions .ds-btn { flex: 1; justify-content: center; }
+  .ds-toolbar { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .ds-toolbar-group { width: 100%; flex-wrap: wrap; }
+  .ds-date-display, .ds-project-filter-placeholder { flex: 1 1 auto; justify-content: center; }
+}
+</style>
+</head>
+<body>
+
+<div id="ds-page">
+
+  <div class="ds-header">
+    <div class="ds-header-titlebar">
+      <div class="ds-title">Daily Summary</div>
+      <div class="ds-subtitle">Read-only overview · generated from Task Logger data</div>
+    </div>
+    <div class="ds-header-actions">
+      <a class="ds-btn" id="ds-back-btn" href="tasklogger.html" aria-label="Back to Task Logger" title="Back to Task Logger">
+        <i class="ti ti-arrow-left"></i> <span>Back to Task Logger</span>
+      </a>
+    </div>
+  </div>
+
+  <div class="ds-panel">
+
+    <!-- Date display placeholder + project filter placeholder.
+         No date/data logic yet — Stage 1 is shell-only. -->
+    <div class="ds-toolbar">
+      <div class="ds-toolbar-group">
+        <div class="ds-date-display" id="ds-date-display">
+          <i class="ti ti-calendar"></i>
+          <span id="ds-date-display-value">— select a date —</span>
+        </div>
+      </div>
+      <div class="ds-toolbar-group">
+        <div class="ds-project-filter-placeholder" id="ds-project-filter">
+          <i class="ti ti-filter"></i>
+          <span>Project filter — coming soon</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Summary content container. Populated in a later stage. -->
+    <div class="ds-content" id="ds-summary-content">
+      <div class="ds-empty-state" id="ds-empty-state">
+        <i class="ti ti-report"></i>
+        <div class="ds-empty-state-title">No summary data yet</div>
+        <div class="ds-empty-state-sub">
+          This page is a shell. Task data, date filtering, and totals will be added in a later stage.
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="ds-footer-nav">
+    <a class="ds-btn" href="tasklogger.html">
+      <i class="ti ti-arrow-left"></i> <span>Back to Task Logger</span>
+    </a>
+  </div>
+
+</div>
+
+</body>
+</html>

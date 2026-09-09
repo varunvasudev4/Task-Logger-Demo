@@ -1494,6 +1494,7 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
       <div class="log-header-actions">
         <button class="btn" onclick="copyLog()" id="copy-btn"><i class="ti ti-clipboard-copy"></i> Copy</button>
         <button class="btn" onclick="openMailModal()" id="mail-btn" title="Send log via email"><i class="ti ti-mail"></i> Email</button>
+        <button class="btn" onclick="openDailySummary()" id="summary-btn" title="Open Daily Summary"><i class="ti ti-report"></i> Summary</button>
         <button class="btn" onclick="clearLog()"><i class="ti ti-trash"></i> Clear log</button>
         <button class="btn btn-primary" onclick="exportXLSX()"><i class="ti ti-file-spreadsheet"></i> Download XLSX</button>
         <button
@@ -12892,6 +12893,10 @@ function clearLog() {
     if (typeof recordSyncChange === 'function') recordSyncChange('logEntries', selDate, 'delete');
     saveState(); updateLogPanel();
   }, 'Clear');
+}
+
+function openDailySummary() {
+  window.location.href = 'daily-summary.html';
 }
 
 // ── Masters modal ─────────────────────────────────────────────────────────────
