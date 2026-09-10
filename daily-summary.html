@@ -201,6 +201,35 @@ body { padding-bottom: 84px; }
   overflow-wrap: anywhere; word-break: break-word;
 }
 
+/* ── Stage 7: complete task details (module/nature/effort, ticket,
+   description, remarks) ── Daily Summary-specific classes only; nothing
+   here touches tasklogger.html's own CSS. Read-only display — no inputs. */
+.daily-summary-task-meta {
+  font-family: var(--ds-font-mono); font-size: 11px; color: var(--ds-text-secondary);
+  margin-top: 4px;
+  overflow-wrap: anywhere; word-break: break-word;
+}
+.daily-summary-task-ticket {
+  font-family: var(--ds-font-mono); font-size: 11px;
+  margin-top: 4px;
+  overflow-wrap: anywhere; word-break: break-word;
+}
+.daily-summary-task-ticket a {
+  color: var(--ds-blue-mid); text-decoration: underline;
+}
+.daily-summary-task-block {
+  margin-top: 6px;
+}
+.daily-summary-task-block-label {
+  font-family: var(--ds-font-mono); font-size: 10.5px; font-weight: 600;
+  color: var(--ds-text-tertiary); text-transform: uppercase; letter-spacing: 0.04em;
+  margin-bottom: 2px;
+}
+.daily-summary-task-block-value {
+  font-family: var(--ds-font-ui); font-size: 12.5px; color: var(--ds-text-primary);
+  white-space: pre-line; overflow-wrap: anywhere; word-break: break-word;
+}
+
 /* ── Responsive: phone breakpoint, mirrors tasklogger.html's 640px rule ── */
 @media (max-width: 640px) {
   body { padding: 1rem 0.75rem calc(4rem + 68px); }
@@ -485,6 +514,93 @@ function buildDailySummaryData() {
 // to ttl_tasks/ttl_log or any Task Logger save/sync function.
 const dailySummaryProjectData = buildDailySummaryData();
 
+// ── Stage 7: complete task details (read-only helpers) ──────────────────────
+// Namespaced (ds-prefixed) copies of the exact logic tasklogger.html already
+// uses for these same values (DAILY_SUMMARY_BASELINE.md) — daily-summary.html
+// has no access to tasklogger.html's JS scope (see Stage 3), so a small
+// duplicate is unavoidable, but no new selection/calculation rule is
+// invented here.
+
+// Direct copy of tasklogger.html's rteLooksLikeHtml(v): a value only gets
+// treated as rich-text HTML if it actually contains one of the tags the
+// app's own rich-text editor produces — a plain-text value (the common
+// case) passes straight through untouched.
+function dsRteLooksLikeHtml(v) {
+  return /<\/?(p|div|br|ul|ol|li|b|strong|i|em)(\s[^>]*)?>/i.test(v);
+}
+
+// Direct copy of tasklogger.html's richTextToPlain(html): flattens an old
+// rich-HTML description/remark down to plain text (list items get "• ",
+// block/line boundaries become real newlines, every tag is otherwise
+// dropped but its text content kept). Plain-text values pass through
+// unchanged. Never uses innerHTML on the *output* — only builds a detached,
+// throwaway element to read textContent back out of, so no user-entered
+// markup is ever attached to the live page.
+function dsRichTextToPlain(html) {
+  const v = html == null ? '' : String(html);
+  if (!v || !dsRteLooksLikeHtml(v)) return v;
+  const root = document.createElement('div');
+  root.innerHTML = v;
+  root.querySelectorAll('li').forEach(function (li) {
+    li.insertAdjacentText('afterbegin', '• ');
+    li.insertAdjacentText('beforeend', '\n');
+  });
+  root.querySelectorAll('p, div, br').forEach(function (el) {
+    el.insertAdjacentText('afterend', '\n');
+  });
+  return (root.textContent || '').replace(/\n{3,}/g, '\n\n').replace(/[ \t]+\n/g, '\n').trim();
+}
+
+// Direct copy of tasklogger.html's liveElapsedMs(task)/liveElapsedSecs(task)
+// (DAILY_SUMMARY_BASELINE.md §5) — needed here only to read a running task's
+// current elapsed time, never to write it back.
+function dsLiveElapsedMs(task) {
+  if (task.status === 'running' && task.segmentStart !== null)
+    return task.accumulatedMs + (Date.now() - task.segmentStart);
+  return task.accumulatedMs;
+}
+function dsLiveElapsedSecs(task) { return Math.floor(dsLiveElapsedMs(task) / 1000); }
+
+// Same "which entry counts as last" rule tasklogger.html's own
+// openCompleteModal() already uses to re-populate description/remark when
+// reopening a task: prefer the most recent *completed* entry (endTs set),
+// falling back to the most recent entry overall. Scoped to this task's
+// entries for the selected day (task.entries, from Stage 5) — the existing
+// chronological array order used throughout Stage 4-6. Read-only: returns a
+// reference, never mutates.
+function dsGetLastEntryForTask(task) {
+  const reversed = task.entries.slice().reverse();
+  return reversed.find(function (e) { return e.endTs !== null; }) || reversed[0] || null;
+}
+
+// Effort in minutes for a task's entries on the selected day. Mirrors
+// getEntryValueForColumn's existing 'effort' case exactly per entry — secs =
+// entry.durationSecs if set, else the task's live elapsed seconds if it's
+// still running (DAILY_SUMMARY_BASELINE.md §5) — summed across this task's
+// entries for the day, then converted to minutes once (Math.ceil), matching
+// the app's own rounding. Never touches durationSecs/accumulatedMs and never
+// writes anything back to storage.
+function dsGetTaskEffortMinutes(task) {
+  let totalSecs = 0;
+  task.entries.forEach(function (entry) {
+    if (entry.durationSecs != null) {
+      totalSecs += entry.durationSecs;
+    } else if (task.task) {
+      totalSecs += dsLiveElapsedSecs(task.task);
+    }
+  });
+  return Math.ceil(totalSecs / 60);
+}
+
+// Safe-display check for the ticket field (currently a free-typed text
+// column in tasklogger.html — DAILY_SUMMARY_BASELINE.md — not guaranteed to
+// be a URL). Only values that are actually well-formed http(s) links are
+// rendered as a clickable link; everything else renders as plain text. No
+// advanced ticket-system formatting beyond that, per this stage's scope.
+function dsIsHttpUrl(v) {
+  return /^https?:\/\/\S+$/i.test(v);
+}
+
 // ── Stage 6: project group + task rendering ─────────────────────────────────
 // Consumes the existing Stage 5 structure (dailySummaryProjectData) as-is —
 // no re-filtering, no re-grouping happens here. Identity-only task rendering
@@ -497,20 +613,97 @@ const dailySummaryProjectData = buildDailySummaryData();
 // innerHTML — so nothing here can introduce unsafe HTML injection from
 // user-entered log data.
 
-// Renders a single task's identity-only card: name + project relationship.
+// Renders a single task's full detail card: name, project relationship
+// (Stage 6), then module/nature/effort, ticket, last description, and
+// remarks (Stage 7). Task-name fallback (missing name / name === description
+// → first 100 chars) is explicitly NOT implemented here — that's Stage 8.
+// Every dynamic value is set via textContent (or, for the ticket link, a
+// safety-checked href) — never innerHTML with interpolated data — so no
+// user-entered log/task text is ever parsed as markup.
 function renderDailySummaryTask(task) {
   const taskEl = document.createElement('div');
   taskEl.className = 'daily-summary-task';
 
+  // Line 1: task name (unchanged from Stage 6 — no fallback logic yet).
   const nameEl = document.createElement('div');
   nameEl.className = 'daily-summary-task-name';
   nameEl.textContent = task.name || '';
   taskEl.appendChild(nameEl);
 
+  // Project relationship line (unchanged from Stage 6).
   const projectEl = document.createElement('div');
   projectEl.className = 'daily-summary-task-project';
   projectEl.textContent = 'Project: ' + (task.project || '—');
   taskEl.appendChild(projectEl);
+
+  // Line 2: Module • Nature • N min — only the parts that are actually
+  // available are shown (no invented placeholder for a missing module or
+  // nature); effort is always shown since it reflects logged/running time.
+  const metaParts = [];
+  if (task.module) metaParts.push(task.module);
+  if (task.nature) metaParts.push(task.nature);
+  metaParts.push(dsGetTaskEffortMinutes(task) + ' min');
+  const metaEl = document.createElement('div');
+  metaEl.className = 'daily-summary-task-meta';
+  metaEl.textContent = metaParts.join(' • ');
+  taskEl.appendChild(metaEl);
+
+  // Line 3: ticket, when available. Rendered as a real link only when it's
+  // a well-formed http(s) URL (dsIsHttpUrl) — otherwise shown as plain
+  // text. href is only ever set to a value that already passed that check.
+  if (task.ticket) {
+    const ticketEl = document.createElement('div');
+    ticketEl.className = 'daily-summary-task-ticket';
+    if (dsIsHttpUrl(task.ticket)) {
+      const link = document.createElement('a');
+      link.href = task.ticket;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.textContent = task.ticket;
+      ticketEl.appendChild(link);
+    } else {
+      ticketEl.textContent = task.ticket;
+    }
+    taskEl.appendChild(ticketEl);
+  }
+
+  // Description: the task's *last* description for the day (per the same
+  // "prefer last completed, else last overall" rule tasklogger.html's own
+  // openCompleteModal() uses — dsGetLastEntryForTask), flattened to plain
+  // text via dsRichTextToPlain. Omitted entirely when there's nothing to
+  // show, rather than rendering an empty/misleading block.
+  const lastEntry = dsGetLastEntryForTask(task);
+  const descriptionText = lastEntry ? dsRichTextToPlain(lastEntry.description || '') : '';
+  if (descriptionText) {
+    const descBlock = document.createElement('div');
+    descBlock.className = 'daily-summary-task-block';
+    const descLabel = document.createElement('div');
+    descLabel.className = 'daily-summary-task-block-label';
+    descLabel.textContent = 'Description';
+    descBlock.appendChild(descLabel);
+    const descValue = document.createElement('div');
+    descValue.className = 'daily-summary-task-block-value';
+    descValue.textContent = descriptionText;
+    descBlock.appendChild(descValue);
+    taskEl.appendChild(descBlock);
+  }
+
+  // Remarks: same last-entry rule, remark field. No remark → no block, no
+  // placeholder text (per this stage's explicit instruction).
+  const remarkText = lastEntry ? dsRichTextToPlain(lastEntry.remark || '') : '';
+  if (remarkText) {
+    const remarkBlock = document.createElement('div');
+    remarkBlock.className = 'daily-summary-task-block';
+    const remarkLabel = document.createElement('div');
+    remarkLabel.className = 'daily-summary-task-block-label';
+    remarkLabel.textContent = 'Remarks';
+    remarkBlock.appendChild(remarkLabel);
+    const remarkValue = document.createElement('div');
+    remarkValue.className = 'daily-summary-task-block-value';
+    remarkValue.textContent = remarkText;
+    remarkBlock.appendChild(remarkValue);
+    taskEl.appendChild(remarkBlock);
+  }
 
   return taskEl;
 }
