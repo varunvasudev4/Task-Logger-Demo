@@ -89,6 +89,7 @@ body {
   text-decoration: none; min-height: 44px;
 }
 .ds-btn:hover { background: var(--ds-bg-secondary); border-color: var(--ds-text-tertiary); }
+.ds-btn:focus-visible { outline: 2px solid var(--ds-blue-mid); outline-offset: 2px; }
 .ds-btn i { font-size: 15px; }
 
 /* ── Toolbar row: date display + project filter placeholders ── */
@@ -122,6 +123,7 @@ body {
   padding: 7px 12px; letter-spacing: 0.02em;
 }
 .msdd-trigger:hover { background: var(--ds-bg-secondary); }
+.msdd-trigger:focus-visible { outline: 2px solid var(--ds-blue-mid); outline-offset: -2px; }
 .msdd-trigger i { font-size: 14px; color: var(--ds-text-tertiary); }
 .msdd-panel {
   position: absolute; top: calc(100% + 4px); right: 0; z-index: 60;
@@ -131,12 +133,15 @@ body {
 }
 .msdd-panel.hidden { display: none; }
 .msdd-option {
-  display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+  display: flex; align-items: center; gap: 8px; padding: 8px;
   font-family: var(--ds-font-ui); font-size: 12.5px; color: var(--ds-text-primary);
-  cursor: pointer; border-radius: 6px; white-space: nowrap;
+  cursor: pointer; border-radius: 6px;
+  min-height: 36px; box-sizing: border-box;
 }
+.msdd-option span { overflow-wrap: anywhere; word-break: break-word; }
 .msdd-option:hover { background: var(--ds-bg-secondary); }
-.msdd-option input[type="checkbox"] { cursor: pointer; }
+.msdd-option:focus-within { outline: 2px solid var(--ds-blue-mid); outline-offset: -2px; background: var(--ds-bg-secondary); }
+.msdd-option input[type="checkbox"] { cursor: pointer; flex-shrink: 0; }
 .msdd-empty { font-size: 12px; color: var(--ds-text-tertiary); padding: 6px 8px; }
 
 /* ── Stage 11: compact summary information bar (date + visible
@@ -320,7 +325,7 @@ body { padding-bottom: 84px; }
     <div class="ds-toolbar">
       <div class="ds-toolbar-group">
         <div class="ds-date-display" id="ds-date-display">
-          <i class="ti ti-calendar"></i>
+          <i class="ti ti-calendar" aria-hidden="true"></i>
           <span id="ds-date-display-value">— select a date —</span>
         </div>
       </div>
@@ -333,10 +338,10 @@ body { padding-bottom: 84px; }
              own dsMsdd*/dsProjectFilter* functions below. Options are
              populated dynamically from dailySummaryProjectData (Stage 5). -->
         <div class="msdd" id="ds-project-filter">
-          <button type="button" class="msdd-trigger" id="ds-project-filter-trigger" onclick="dsMsddToggle()">
-            <i class="ti ti-filter"></i> <span id="ds-project-filter-label">Projects</span>
+          <button type="button" class="msdd-trigger" id="ds-project-filter-trigger" onclick="dsMsddToggle()" aria-haspopup="true" aria-expanded="false" aria-controls="ds-project-filter-panel">
+            <i class="ti ti-filter" aria-hidden="true"></i> <span id="ds-project-filter-label">Projects</span>
           </button>
-          <div class="msdd-panel hidden" id="ds-project-filter-panel">
+          <div class="msdd-panel hidden" id="ds-project-filter-panel" role="group" aria-label="Filter by project">
             <div class="msdd-empty">No projects</div>
           </div>
         </div>
@@ -361,7 +366,7 @@ body { padding-bottom: 84px; }
          date. Project grouping/task rendering itself is Stage 5+. -->
     <div class="ds-content" id="ds-summary-content">
       <div class="ds-empty-state" id="ds-empty-state">
-        <i class="ti ti-report"></i>
+        <i class="ti ti-report" aria-hidden="true"></i>
         <div class="ds-empty-state-title" id="ds-empty-state-title">No summary data yet</div>
         <div class="ds-empty-state-sub" id="ds-empty-state-sub">
           This page is a shell. Task data, date filtering, and totals will be added in a later stage.
@@ -382,7 +387,7 @@ body { padding-bottom: 84px; }
      of the screen, using a Daily Summary-specific class so nothing here
      can affect tasklogger.html. -->
 <a class="ds-btn ds-back-fixed" id="ds-back-btn" href="tasklogger.html" aria-label="Back to Task Logger" title="Back to Task Logger">
-  <span>Back to TTL</span> <i class="ti ti-arrow-right"></i>
+  <span>Back to TTL</span> <i class="ti ti-arrow-right" aria-hidden="true"></i>
 </a>
 
 <script>
@@ -493,6 +498,7 @@ function showDailySummaryEmptyState(reason) {
 
   const icon = document.createElement('i');
   icon.className = 'ti ti-report';
+  icon.setAttribute('aria-hidden', 'true');
   wrap.appendChild(icon);
 
   const title = document.createElement('div');
@@ -705,6 +711,19 @@ function dsProjectFilterCheckChange(project, isChecked) {
   renderDailySummary();
 }
 
+// Sets the filter panel's open/closed state and keeps the trigger's
+// aria-expanded in sync with it, in one place — so every path that can open
+// or close the panel (click-to-toggle, outside click, Escape) reports the
+// same state to assistive tech as it shows visually. Does not change what
+// the panel contains or how filtering works.
+function dsSetFilterPanelOpen(isOpen) {
+  const panel = document.getElementById('ds-project-filter-panel');
+  const trigger = document.getElementById('ds-project-filter-trigger');
+  if (!panel || !trigger) return;
+  panel.classList.toggle('hidden', !isOpen);
+  trigger.setAttribute('aria-expanded', String(isOpen));
+}
+
 // Opens/closes the project filter's dropdown panel, matching tasklogger.html's
 // own msddToggle() behavior (close any other open .msdd-panel first).
 function dsMsddToggle() {
@@ -712,14 +731,28 @@ function dsMsddToggle() {
   if (!panel) return;
   const isOpen = !panel.classList.contains('hidden');
   document.querySelectorAll('.msdd-panel').forEach(function (p) { p.classList.add('hidden'); });
-  if (!isOpen) panel.classList.remove('hidden');
+  dsSetFilterPanelOpen(!isOpen);
 }
 
 // Close the open dropdown panel when clicking outside of it — same pattern
 // as tasklogger.html's own document-level click listener for .msdd.
 document.addEventListener('click', function (e) {
   if (!e.target.closest('.msdd')) {
-    document.querySelectorAll('.msdd-panel').forEach(function (p) { p.classList.add('hidden'); });
+    dsSetFilterPanelOpen(false);
+  }
+});
+
+// Escape closes the open filter panel and returns focus to its trigger, the
+// standard keyboard expectation for a dropdown — matching the "keyboard
+// interaction works where practical" requirement without altering the
+// filter's architecture or selection behavior.
+document.addEventListener('keydown', function (e) {
+  if (e.key !== 'Escape') return;
+  const panel = document.getElementById('ds-project-filter-panel');
+  if (panel && !panel.classList.contains('hidden')) {
+    dsSetFilterPanelOpen(false);
+    const trigger = document.getElementById('ds-project-filter-trigger');
+    if (trigger) trigger.focus();
   }
 });
 
@@ -967,12 +1000,13 @@ function renderDailySummaryTask(task) {
 // position/index, so it's unaffected by however many projects are currently
 // visible or in what order. A project not yet present in
 // dailySummaryCollapsedProjects renders expanded (the default).
-function renderDailySummaryProject(projectGroup) {
+function renderDailySummaryProject(projectGroup, idx) {
   const sectionEl = document.createElement('div');
   sectionEl.className = 'daily-summary-project';
 
   const isCollapsed = dailySummaryCollapsedProjects.has(projectGroup.project);
   const displayName = projectGroup.project || '(No project)';
+  const tasksElId = 'ds-project-tasks-' + idx;
 
   const headerEl = document.createElement('div');
   headerEl.className = 'daily-summary-project-header';
@@ -983,6 +1017,7 @@ function renderDailySummaryProject(projectGroup) {
   headerEl.setAttribute('role', 'button');
   headerEl.setAttribute('tabindex', '0');
   headerEl.setAttribute('aria-expanded', String(!isCollapsed));
+  headerEl.setAttribute('aria-controls', tasksElId);
   headerEl.setAttribute('aria-label', displayName + (isCollapsed ? ', collapsed' : ', expanded'));
   headerEl.addEventListener('click', function () {
     toggleDailySummaryProject(projectGroup.project);
@@ -994,8 +1029,12 @@ function renderDailySummaryProject(projectGroup) {
     }
   });
 
+  // Icon and chevron are purely decorative — the header's aria-label already
+  // states the project name and its expanded/collapsed state, so both are
+  // hidden from assistive tech to avoid redundant/garbled announcements.
   const headerIcon = document.createElement('i');
   headerIcon.className = 'ti ti-folder';
+  headerIcon.setAttribute('aria-hidden', 'true');
   headerEl.appendChild(headerIcon);
 
   const headerLabel = document.createElement('span');
@@ -1006,11 +1045,13 @@ function renderDailySummaryProject(projectGroup) {
   // Expand/collapse indicator — a chevron that rotates based on state.
   const chevronEl = document.createElement('i');
   chevronEl.className = 'ti ti-chevron-down daily-summary-project-chevron' + (isCollapsed ? ' collapsed' : '');
+  chevronEl.setAttribute('aria-hidden', 'true');
   headerEl.appendChild(chevronEl);
 
   sectionEl.appendChild(headerEl);
 
   const tasksEl = document.createElement('div');
+  tasksEl.id = tasksElId;
   tasksEl.className = 'daily-summary-project-tasks';
   if (isCollapsed) tasksEl.style.display = 'none';
   projectGroup.tasks.forEach(function (task) {
@@ -1102,8 +1143,8 @@ function renderDailySummary() {
   }
 
   contentEl.innerHTML = '';
-  visibleGroups.forEach(function (projectGroup) {
-    contentEl.appendChild(renderDailySummaryProject(projectGroup));
+  visibleGroups.forEach(function (projectGroup, idx) {
+    contentEl.appendChild(renderDailySummaryProject(projectGroup, idx));
   });
 }
 
