@@ -9762,6 +9762,7 @@ function renderAll() {
   restoreIntervals();
   updateLogPanel();
   updateTaskVisibility();
+  updateSummaryButtonVisibility();
   renderBreakWidget();
   renderWorkWidget();
   if (typeof renderMastersContent === 'function') renderMastersContent();
@@ -12896,7 +12897,12 @@ function clearLog() {
 }
 
 function openDailySummary() {
-  window.location.href = 'daily-summary.html';
+  // Hand off the date Task Logger is currently showing so Daily Summary can
+  // default to the same day (see DAILY_SUMMARY_BASELINE.md §9). Falls back to
+  // today's date if getSelectedDate()/todayStr() are unavailable for any reason.
+  const d = (typeof getSelectedDate === 'function') ? getSelectedDate()
+          : (typeof todayStr === 'function') ? todayStr() : '';
+  window.location.href = d ? ('daily-summary.html?date=' + encodeURIComponent(d)) : 'daily-summary.html';
 }
 
 // ── Masters modal ─────────────────────────────────────────────────────────────
@@ -16380,6 +16386,7 @@ function onDateChange() {
   materializeRecurringTasksUpTo(getSelectedDate());
   updateTodayBadge();
   updateTaskVisibility();
+  updateSummaryButtonVisibility();
   renderList(); // refresh task cards for the newly selected date
   // Reset collapse state: today collapses by default, past dates show
   logTableExpanded = false;
@@ -16448,6 +16455,20 @@ function updateTaskVisibility() {
   // No-op on desktop/tablet, where .header-row-1 is `display:contents`.
   const row1 = document.querySelector('.header-row-1');
   if (row1) row1.classList.toggle('header-row-1--no-add-task', !showAddBtn);
+}
+
+// Stage 13: the Summary button only makes sense for a day that has already
+// happened (or is happening now) — there's nothing to summarize for a future
+// date. Uses the same existing date helpers (getSelectedDate()/todayStr()) as
+// updateTaskVisibility() above; no second date system is introduced. Setting
+// display:none (rather than leaving an empty slot) lets the existing
+// .log-header-actions flex-wrap layout naturally reflow the remaining
+// buttons into its place, on both desktop and the phone breakpoint.
+function updateSummaryButtonVisibility() {
+  const btn = document.getElementById('summary-btn');
+  if (!btn) return;
+  const showSummaryBtn = getSelectedDate() <= todayStr();
+  btn.style.display = showSummaryBtn ? '' : 'none';
 }
 
 
@@ -17339,6 +17360,7 @@ renderList();
 restoreIntervals();
 updateLogPanel();
 updateTaskVisibility();
+updateSummaryButtonVisibility();
 initBreakTimer();
 if (!tasks.some(t => !isTaskDeleted(t))) addTask();
 
