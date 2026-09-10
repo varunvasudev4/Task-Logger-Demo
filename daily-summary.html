@@ -139,6 +139,19 @@ body {
 .msdd-option input[type="checkbox"] { cursor: pointer; }
 .msdd-empty { font-size: 12px; color: var(--ds-text-tertiary); padding: 6px 8px; }
 
+/* ── Stage 11: compact summary information bar (date + visible
+   project/task/effort counts) ── Daily Summary-specific, read-only. ── */
+.ds-summary-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; flex-wrap: wrap;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--ds-border);
+  background: var(--ds-bg);
+  font-family: var(--ds-font-mono); font-size: 12px; letter-spacing: 0.02em;
+}
+.ds-summary-bar-date { font-weight: 600; color: var(--ds-text-primary); }
+.ds-summary-bar-stats { color: var(--ds-text-secondary); }
+
 /* ── Card / panel shell that will eventually hold the summary content ── */
 .ds-panel {
   background: var(--ds-bg); border: 1px solid var(--ds-border);
@@ -221,28 +234,25 @@ body { padding-bottom: 84px; }
   transition: transform 0.15s ease;
 }
 .daily-summary-project-chevron.collapsed { transform: rotate(-90deg); }
+/* Stage 12: flat, standup-scannable task list. The project card (above) is
+   the only bordered/background container — individual tasks are NOT cards.
+   A subtle top border between consecutive tasks (not a box around each one)
+   provides the visual separation instead. */
 .daily-summary-project-tasks {
   display: flex; flex-direction: column;
-  padding: 10px 14px;
-  gap: 8px;
+  padding: 4px 14px 8px;
 }
 .daily-summary-task {
-  border: 1px solid var(--ds-border);
-  border-radius: var(--ds-radius-md);
-  padding: 10px 12px;
-  background: var(--ds-bg-secondary);
+  padding: 10px 0;
+}
+.daily-summary-task + .daily-summary-task {
+  border-top: 1px solid var(--ds-border);
 }
 .daily-summary-task-name {
-  font-family: var(--ds-font-ui); font-size: 13.5px; font-weight: 600;
+  font-family: var(--ds-font-ui); font-size: 14px; font-weight: 600;
   color: var(--ds-text-primary);
   overflow-wrap: anywhere; word-break: break-word;
 }
-.daily-summary-task-project {
-  font-family: var(--ds-font-mono); font-size: 11px; color: var(--ds-text-tertiary);
-  margin-top: 2px;
-  overflow-wrap: anywhere; word-break: break-word;
-}
-
 /* ── Stage 7: complete task details (module/nature/effort, ticket,
    description, remarks) ── Daily Summary-specific classes only; nothing
    here touches tasklogger.html's own CSS. Read-only display — no inputs. */
@@ -280,11 +290,16 @@ body { padding-bottom: 84px; }
   .ds-header-actions .ds-btn { flex: 1; justify-content: center; }
   .ds-toolbar { flex-direction: column; align-items: flex-start; gap: 10px; }
   .ds-toolbar-group { width: 100%; flex-wrap: wrap; }
+  .ds-summary-bar { flex-direction: column; align-items: flex-start; gap: 4px; }
   .ds-date-display { flex: 1 1 auto; justify-content: center; }
   .msdd { width: 100%; }
   .msdd-trigger { width: 100%; justify-content: center; }
   .msdd-panel { left: 0; right: 0; min-width: 0; width: 100%; }
   .ds-back-fixed { right: 12px; bottom: 12px; }
+  /* Stage 12: reclaim horizontal space on narrow screens — less side padding
+     around the project header/task list, no change to content or logic. */
+  .daily-summary-project-header { padding: 10px 12px; }
+  .daily-summary-project-tasks { padding: 4px 12px 8px; }
 }
 </style>
 </head>
@@ -326,6 +341,18 @@ body { padding-bottom: 84px; }
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- Stage 11: compact summary information bar — selected date plus
+         visible project/task/effort counts. Read-only display, kept in sync
+         with the existing renderDailySummary() flow (including the Stage 9
+         project filter) by updateDailySummaryInfoBar(). No independent date
+         or filtering system is introduced — the date reuses
+         selectedSummaryDate (Stage 3/4) and the counts are derived from
+         whatever renderDailySummary() already determined to be visible. -->
+    <div class="ds-summary-bar" id="ds-summary-bar">
+      <span class="ds-summary-bar-date" id="ds-summary-bar-date"></span>
+      <span class="ds-summary-bar-stats" id="ds-summary-bar-stats"></span>
     </div>
 
     <!-- Summary content container. Stage 4: holds either the (still
@@ -438,14 +465,22 @@ function getDailySummaryEntries() {
 // passed to any Task Logger save/sync function.
 const dailySummaryEntries = getDailySummaryEntries();
 
+// Shared, single formatting of selectedSummaryDate (Stage 3/4) — reused by
+// both the existing toolbar date display and the new Stage 11 summary info
+// bar, so there is exactly one date-display format in the page rather than
+// two independent ones.
+function dsFormatSelectedDate() {
+  const d = new Date(selectedSummaryDate + 'T00:00:00');
+  return d.toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' });
+}
+
 // Reflect the selected date in the toolbar, and show either the empty state
 // or a placeholder acknowledging entries were found (Part D: real summary
 // rendering is a later stage — this just proves filtering is wired up).
 (function renderSelectedDateDisplay() {
   const el = document.getElementById('ds-date-display-value');
   if (!el) return;
-  const d = new Date(selectedSummaryDate + 'T00:00:00');
-  el.textContent = d.toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' });
+  el.textContent = dsFormatSelectedDate();
 })();
 
 function showDailySummaryEmptyState(reason) {
@@ -844,11 +879,12 @@ function renderDailySummaryTask(task) {
   nameEl.textContent = getSummaryTaskName(task);
   taskEl.appendChild(nameEl);
 
-  // Project relationship line (unchanged from Stage 6).
-  const projectEl = document.createElement('div');
-  projectEl.className = 'daily-summary-task-project';
-  projectEl.textContent = 'Project: ' + (task.project || '—');
-  taskEl.appendChild(projectEl);
+  // Stage 11: the project relationship line was removed from here — the
+  // project is already shown once, as this task's project group header
+  // (renderDailySummaryProject), so repeating it inside every task card was
+  // a duplicate display only. task.project itself is untouched and remains
+  // available internally (grouping in buildDailySummaryData, filtering in
+  // dsSelectedProjects/renderDailySummary) — only this display line is gone.
 
   // Line 2: Module • Nature • N min — only the parts that are actually
   // available are shown (no invented placeholder for a missing module or
@@ -985,6 +1021,50 @@ function renderDailySummaryProject(projectGroup) {
   return sectionEl;
 }
 
+// ── Stage 11: summary information bar (date + visible totals) ──────────────
+// Display-only. Reuses dsGetTaskEffortMinutes (Stage 7) for each visible
+// task's effort — no new effort calculation is introduced, and nothing here
+// writes to a task/entry object, dailySummaryProjectData, or localStorage.
+
+// Formats a whole number of minutes as "Xh Ym" / "Xh" / "Ym", matching the
+// example format ("6h 25m"). 0 minutes renders as "0m" rather than an empty
+// string, so the bar never goes blank.
+function dsFormatEffortDuration(totalMinutes) {
+  const mins = Math.max(0, Math.round(totalMinutes));
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  if (h > 0 && m > 0) return h + 'h ' + m + 'm';
+  if (h > 0) return h + 'h';
+  return m + 'm';
+}
+
+// Recomputes and displays the project/task/effort counts for exactly the
+// project groups the caller says are currently visible (i.e. already run
+// through the Stage 9 project filter, if any) — this function never decides
+// visibility itself, only summarizes what it's given, so it can never drift
+// from what renderDailySummary() is actually showing.
+function updateDailySummaryInfoBar(visibleGroups) {
+  const dateEl = document.getElementById('ds-summary-bar-date');
+  if (dateEl) dateEl.textContent = dsFormatSelectedDate();
+
+  const statsEl = document.getElementById('ds-summary-bar-stats');
+  if (!statsEl) return;
+
+  const groups = visibleGroups || [];
+  let taskCount = 0;
+  let effortMinutes = 0;
+  groups.forEach(function (projectGroup) {
+    projectGroup.tasks.forEach(function (task) {
+      taskCount++;
+      effortMinutes += dsGetTaskEffortMinutes(task);
+    });
+  });
+
+  statsEl.textContent = 'Projects: ' + groups.length +
+    '    Tasks: ' + taskCount +
+    '    Effort: ' + dsFormatEffortDuration(effortMinutes);
+}
+
 // Top-level render entry point: clears the summary content container and
 // renders each *visible* project group in order, or falls back to the
 // existing empty state when there's nothing to show. Reads only
@@ -995,11 +1075,17 @@ function renderDailySummaryProject(projectGroup) {
 // in-memory dsSelectedProjects only — an empty selection means no filter is
 // applied (show every project); a non-empty selection shows only the chosen
 // projects. dailySummaryProjectData is read, never modified either way.
+//
+// Stage 11: visibleGroups (however it was computed above) is also handed to
+// updateDailySummaryInfoBar() so the summary bar's counts always match
+// exactly what's rendered below it — including the "no entries for the day"
+// and "filter matches nothing" cases, where the bar correctly shows 0/0/0m.
 function renderDailySummary() {
   const contentEl = document.getElementById('ds-summary-content');
   if (!contentEl) return;
 
   if (!dailySummaryProjectData || dailySummaryProjectData.length === 0) {
+    updateDailySummaryInfoBar([]);
     showDailySummaryEmptyState();
     return;
   }
@@ -1007,6 +1093,8 @@ function renderDailySummary() {
   const visibleGroups = dsSelectedProjects.size === 0
     ? dailySummaryProjectData
     : dailySummaryProjectData.filter(function (g) { return dsSelectedProjects.has(g.project); });
+
+  updateDailySummaryInfoBar(visibleGroups);
 
   if (visibleGroups.length === 0) {
     showDailySummaryEmptyState('filtered');
