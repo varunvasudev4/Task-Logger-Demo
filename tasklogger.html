@@ -10510,10 +10510,15 @@ function openCompleteModal(id) {
 
   document.getElementById('cm-timer').textContent = fmt(liveElapsedSecs(task));
 
-  // Pull the most recent log entry for this task (completed or reopened) so that
-  // reopening a completed task and marking it complete again re-populates every
-  // field exactly as it was last saved, not just description/remark.
+  // Pull the log entry to pre-fill Complete from. Bug 2 fix: prefer the entry that's actually
+  // OPEN (endTs === null) — Complete is only ever reachable for a running/paused task, which
+  // by construction always has one — since that's the entry startTask/updateTaskCustomField
+  // have been live-mirroring the task card's current values into. The old priority order
+  // (most recent *completed* entry first) could surface a stale finished entry instead of the
+  // one actually being edited. Falling back to "most recent completed" then "any" preserves
+  // the original reopen-repopulation behavior for edge cases with no open entry.
   const lastEntry =
+    [...logEntries].reverse().find(e => e.taskId === id && e.endTs === null) ||
     [...logEntries].reverse().find(e => e.taskId === id && e.endTs !== null) ||
     [...logEntries].reverse().find(e => e.taskId === id);
 
@@ -10542,10 +10547,13 @@ function openCompleteModal(id) {
   // of what was saved last time
   renderCmField('status', 'Completed');
 
-  const descVal0 = (lastEntry && lastEntry.description) || '';
+  // Bug 2 fix: fall back to the task-card's current draft (task.customFields) when the entry
+  // itself has no value yet — same fallback pattern already used below for custom columns.
+  // Covers e.g. a description typed on the card after the entry was seeded/last synced.
+  const descVal0 = (lastEntry && lastEntry.description) || (task.customFields && task.customFields.description) || '';
   renderCmField('description', descVal0, { placeholder: 'Describe what was done…', multiline: true });
 
-  const remarkVal0 = (lastEntry && lastEntry.remark) || '';
+  const remarkVal0 = (lastEntry && lastEntry.remark) || (task.customFields && task.customFields.remark) || '';
   renderCmField('remark', remarkVal0, { placeholder: 'Optional remark or note…', multiline: true });
 
   // Apply dynamic labels + show/hide for configurable built-in columns
@@ -11878,17 +11886,52 @@ function rteLooksLikeHtml(v) {
 function rtePlainToHtml(v) {
   return esc(v).replace(/\r\n|\r|\n/g, '<br>');
 }
+// Decode HTML/XML character references (&nbsp; &amp; &lt; &gt; &quot; &#39; etc.) into their
+// real Unicode characters. A <textarea> (not a <div>) is used deliberately: a textarea's
+// content is parsed as raw text, so every named/numeric entity is decoded correctly (via the
+// browser's own parser — no hardcoded find/replace list to maintain or get wrong) while a
+// stray '<' or '>' already in the text is never re-interpreted as markup. Nothing here is
+// ever inserted into the live document, so this carries no unsafe-rendering risk. Idempotent
+// on already-plain text: an isolated '&' with no valid entity after it (e.g. "R&D") is left
+// untouched by the browser's parser, so running this twice — or on text that never had
+// entities — is a safe no-op rather than a source of corruption.
+function rteDecodeEntities(str) {
+  const v = str == null ? '' : String(str);
+  if (!v || v.indexOf('&') === -1) return v; // fast path: nothing that could be an entity
+  const ta = document.createElement('textarea');
+  ta.innerHTML = v;
+  return ta.value;
+}
+// Normalize non-breaking spaces (U+00A0) — whether pasted in directly or produced by decoding
+// a legacy &nbsp; entity above — down to a normal space. NBSP has no intentional meaning in
+// this plain-text editor; left alone it's visually indistinguishable from a space but breaks
+// things like trim()/whitespace comparisons downstream. Line breaks are untouched.
+function rteNormalizeNbsp(str) {
+  const v = str == null ? '' : String(str);
+  return v.replace(/\u00A0/g, ' ');
+}
 // One-way flatten of an old rich-HTML fragment down to plain text: list items get a "• "
 // prefix, block/line boundaries become real newlines, every tag is otherwise dropped (its
-// text content kept). Plain-text values pass through unchanged.
+// text content kept). Plain-text values pass through unchanged (aside from entity/NBSP
+// normalization above).
 function richTextToPlain(html) {
   const v = html == null ? '' : String(html);
-  if (!v || !rteLooksLikeHtml(v)) return v;
+  if (!v) return v;
+  if (!rteLooksLikeHtml(v)) {
+    // No recognizable HTML tags — but legacy/imported plain text can still carry leftover
+    // entities (e.g. &nbsp; typed/pasted from a source that HTML-escaped it). Decode those
+    // and normalize NBSP; everything else (real line breaks, a genuine '<' or '>' character)
+    // passes through unchanged. This is Bug 1's root-cause fix: previously entity decoding
+    // only ran when rteLooksLikeHtml matched a tag, so entity-only legacy text skipped
+    // decoding entirely and was then re-escaped by esc() into double-encoded garbage on display.
+    return rteNormalizeNbsp(rteDecodeEntities(v));
+  }
   const root = document.createElement('div');
   root.innerHTML = v;
   root.querySelectorAll('li').forEach(li => { li.insertAdjacentText('afterbegin', '• '); li.insertAdjacentText('beforeend', '\n'); });
   root.querySelectorAll('p, div, br').forEach(el => el.insertAdjacentText('afterend', '\n'));
-  return (root.textContent || '').replace(/\n{3,}/g, '\n\n').replace(/[ \t]+\n/g, '\n').trim();
+  const text = (root.textContent || '').replace(/\n{3,}/g, '\n\n').replace(/[ \t]+\n/g, '\n').trim();
+  return rteNormalizeNbsp(text);
 }
 // Compute the editor's initial inner HTML from a stored value: always plain text, always
 // rendered through rtePlainToHtml. A value from the old rich editor is flattened first via
@@ -11905,7 +11948,15 @@ function buildRichTextInput(col, idAttr, value, onChangeExpr, disabledAttr, plac
   try { document.execCommand('defaultParagraphSeparator', false, 'br'); } catch (e) {}
   const isDisabled = !!(disabledAttr && String(disabledAttr).trim());
   const editorId = idAttr + '-trigger';
-  const initialHtml = rteInitialContent(value);
+  // Normalize the incoming value ONCE — via richTextToPlain, same function used everywhere
+  // else this content is displayed — and seed both the hidden canonical input and the visible
+  // editor from that single normalized value. Previously the hidden input's initial value was
+  // the raw, un-normalized `value`, so a Save with no edits to this field (blur/input never
+  // fired) persisted the original un-decoded legacy text right back, even though the editor
+  // itself displayed it correctly. Bug 1 fix, second half: decoding on display isn't enough
+  // if the canonical save path never picks up the decoded value.
+  const plainValue = richTextToPlain(value);
+  const initialHtml = rtePlainToHtml(plainValue);
   // Rows comes from Master Field Configuration (col.rows); DEFAULT_TEXTAREA_ROWS covers
   // columns/older saved configs created before the Rows setting existed. No hardcoded
   // height here — the actual pixel height is computed by the .rte-editor CSS rule from
@@ -11913,7 +11964,7 @@ function buildRichTextInput(col, idAttr, value, onChangeExpr, disabledAttr, plac
   const rows = (col && col.rows > 0) ? col.rows : DEFAULT_TEXTAREA_ROWS;
   const changeExpr = (onChangeExpr || '').replace(/this\.value/g, `document.getElementById('${idAttr}').value`);
   return `<div class="rte-wrap">
-    <input type="hidden" id="${idAttr}" value="${esc(value || '')}" />
+    <input type="hidden" id="${idAttr}" value="${esc(plainValue)}" />
     <div id="${editorId}" class="rte-editor" contenteditable="${isDisabled ? 'false' : 'true'}"
       style="--rte-rows:${rows}"
       data-placeholder="${esc(placeholder || '')}"
