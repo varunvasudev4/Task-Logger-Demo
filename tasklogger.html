@@ -187,6 +187,7 @@ body {
 .header-row { display: contents; }
 .header-actions .btn-highlight      { order: 1; } /* Dashboard */
 .header-actions .sync-btn           { order: 2; } /* Sync */
+.header-actions .pending-tasks-btn  { order: 2; } /* Pending (ties with Sync; DOM order keeps it right after) */
 .header-actions .search-btn         { order: 3; } /* Search (touch only) */
 .header-actions .more-menu-wrap     { order: 4; } /* More */
 .header-actions .date-picker-wrap   { order: 5; } /* Date */
@@ -283,6 +284,39 @@ html.is-touch .search-btn { display: inline-flex; }
 .task-card.paused  { border-color: var(--amber-mid); }
 .task-card.done    { opacity: 0.7; }
 .task-card.dragging { opacity: 0.35; }
+
+/* Pending task cards (Pending Tasks popup) */
+.pending-card {
+  position: relative; background: var(--bg); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); padding: 12px 40px 12px 14px;
+  margin-bottom: 10px;
+}
+.pending-card-name { font-weight: 600; font-size: 13.5px; color: var(--text-primary); margin-bottom: 4px; }
+.pending-card-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.pending-card-chip {
+  font-size: 11px; padding: 2px 7px; border-radius: 999px;
+  background: var(--bg-secondary); color: var(--text-secondary); font-family: var(--font-mono);
+}
+.pending-card-desc { font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
+.pending-history-btn {
+  position: absolute; top: 10px; right: 10px; width: 26px; height: 26px;
+  display: flex; align-items: center; justify-content: center; border-radius: 6px;
+  color: var(--text-tertiary); cursor: pointer; opacity: 0; transition: opacity 0.15s, color 0.15s, background 0.15s;
+}
+.pending-card:hover .pending-history-btn { opacity: 1; }
+html.is-touch .pending-history-btn { opacity: 1; }
+.pending-history-btn:hover, .pending-history-btn.active { color: var(--blue-mid); background: var(--bg-secondary); }
+.pending-history-panel {
+  display: none; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border);
+}
+.pending-history-panel.open { display: block; }
+html:not(.is-touch) .pending-card:hover .pending-history-panel { display: block; }
+.pending-history-entry { padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+.pending-history-entry:last-child { border-bottom: none; }
+.pending-history-entry-top { display: flex; justify-content: space-between; gap: 8px; font-weight: 600; color: var(--text-primary); }
+.pending-history-entry-desc { color: var(--text-secondary); margin-top: 2px; }
+.pending-history-entry-remark { color: var(--text-tertiary); margin-top: 2px; font-style: italic; }
+.pending-empty { font-size: 13px; color: var(--text-tertiary); padding: 12px 4px; }
 
 .task-drag-handle {
   display: flex; align-items: center; justify-content: center;
@@ -1168,7 +1202,7 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
   }
   .header-row { display: grid; gap: 6px; width: 100%; min-width: 0; }
   .header-row-1 { grid-template-columns: 23fr 54fr 23fr; }
-  .header-row-2 { grid-template-columns: 3fr 1fr 1fr 1fr; }
+  .header-row-2 { grid-template-columns: 2fr 1fr 1fr 1fr 1fr; }
   /* Phase 25B: past dates hide Add task (see updateTaskVisibility()) —
      when it's hidden, Date takes the freed 23% too (23fr 77fr) instead of
      leaving an empty third column where Add task used to sit. The class
@@ -1183,6 +1217,7 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
   .header-row-1 .date-picker-wrap   { order: 2; } /* Date */
   .header-row-1 .btn-primary        { order: 3; } /* Add task */
   .header-row-2 .sync-btn           { order: 1; } /* Sync */
+  .header-row-2 .pending-tasks-btn  { order: 1; } /* Pending (ties with Sync; DOM order keeps it right after) */
   .header-row-2 .header-masters-btn { order: 2; } /* Masters */
   .header-row-2 .search-btn         { order: 3; } /* Search (touch only) */
   .header-row-2 .more-menu-wrap     { order: 4; } /* More */
@@ -1209,6 +1244,7 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
   .header-row-1 .btn-highlight span,
   .header-row-1 .btn-primary span,
   .header-row-2 .header-masters-btn span,
+  .header-row-2 .pending-tasks-btn span,
   .header-row-2 .search-btn span,
   #more-menu-btn > span,
   .more-menu-chevron {
@@ -1455,6 +1491,7 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
           <i class="ti ti-refresh"></i> <span id="top-sync-label">Sync</span> <span class="sync-dot sync-neutral" id="top-sync-dot"></span>
         </button>
         <button class="btn header-masters-btn" onclick="openMasters()" aria-label="Masters" title="Masters"><i class="ti ti-list-details"></i> <span>Masters</span></button>
+        <button class="btn pending-tasks-btn" id="pending-tasks-btn" onclick="openPendingTasksModal()" aria-label="Pending tasks" title="Pending tasks"><i class="ti ti-clock-exclamation"></i> <span>Pending</span></button>
         <!-- Phase 25: touch-only entry point into the existing search overlay/
              openSearch() — hidden on non-touch devices via html.is-touch (see
              <head>); desktop keyboard users keep using Ctrl+Shift+F. -->
@@ -1727,10 +1764,27 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
         <input type="checkbox" id="mr-include-weekends" />
         Also appear on weekends (otherwise it only appears on working days)
       </label>
+      <div class="complete-field" style="margin-top:12px">
+        <label class="complete-label">Start time (optional)</label>
+        <input class="complete-input" id="mr-start-time" type="time" step="60" style="width:100%" />
+        <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">If set, each generated instance stays hidden until this time on its day.</div>
+      </div>
     </div>
     <div class="modal-footer">
       <button class="btn" onclick="closeMakeRecurringModal()">Cancel</button>
       <button class="btn btn-primary" id="mr-confirm-btn" onclick="confirmMakeRecurring()"><i class="ti ti-check"></i> Make Recurring</button>
+    </div>
+  </div>
+</div>
+
+<!-- Pending Tasks modal -->
+<div class="modal-overlay hidden" id="pending-tasks-modal">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-header">
+      <div class="modal-title"><i class="ti ti-clock-exclamation" style="vertical-align:-2px;margin-right:6px;color:var(--amber-mid)"></i>Pending Tasks</div>
+      <button class="btn-icon" onclick="closePendingTasksModal()"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="modal-body" id="pending-tasks-list">
     </div>
   </div>
 </div>
@@ -11242,6 +11296,7 @@ function openMakeRecurringModal(taskId) {
   document.getElementById('mr-end-date').min = start;
   document.getElementById('mr-no-end-date').checked = true;
   document.getElementById('mr-include-weekends').checked = false;
+  document.getElementById('mr-start-time').value = '';
 
   document.getElementById('make-recurring-modal').classList.remove('hidden');
 }
@@ -11295,6 +11350,7 @@ function confirmMakeRecurring() {
   }
   document.getElementById('mr-end-date').classList.remove('invalid');
   const includeWeekends = document.getElementById('mr-include-weekends').checked;
+  const startTimeVal = document.getElementById('mr-start-time').value || null;
 
   const heading = (entry && entry.heading) || (task && task.heading) || '';
   // project/module/nature/ticket/customFields (incl. description/remark) are copied
@@ -11307,7 +11363,7 @@ function confirmMakeRecurring() {
   const plan = {
     id: planId, heading, project, nature, module, ticket, customFields,
     startDate, endDate, includeWeekends, active: true, disabledFromDate: null,
-    generatedDates: []
+    generatedDates: [], startTime: startTimeVal
   };
   recurringPlans.push(plan);
 
@@ -12326,7 +12382,8 @@ function renderList(onlyIds) {
       const task = tasks.find(t => t.id === id);
       const container = document.getElementById('row-' + id);
       const belongsHere = !!task && !isTaskDeleted(task) && task.status !== 'done' &&
-        (task.createdAt ? dateStrOf(task) === selDate : selDate === today);
+        (task.createdAt ? dateStrOf(task) === selDate : selDate === today) &&
+        !(selDate === today && task.recurringPlanId && task.createdAt && task.createdAt > Date.now());
       if (!belongsHere) {
         // No longer visible on the currently selected date — tombstoned,
         // completed, or created for a different date by the merge. Remove
@@ -12373,7 +12430,11 @@ function renderList(onlyIds) {
     if (!t.createdAt) return selDate === today; // legacy tasks without date — treat as today's
     const d = new Date(t.createdAt);
     const ds = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
-    return ds === selDate;
+    if (ds !== selDate) return false;
+    // Recurring tasks generated with a scheduled start time stay hidden on their own
+    // day until that time arrives (see materializeRecurringTasksUpTo()).
+    if (ds === today && t.recurringPlanId && t.createdAt > Date.now()) return false;
+    return true;
   });
 
   if (todayTasks.length === 0) {
@@ -16262,8 +16323,15 @@ function materializeRecurringTasksUpTo(throughDateStr) {
           planChanged = true;
         } else {
           const [y, m, d] = cursor.split('-').map(Number);
-          const w = (typeof getWorkHours === 'function') ? getWorkHours() : { startH: 9, startM: 30 };
-          const createdAt = new Date(y, m-1, d, w.startH, w.startM, 0, 0).getTime();
+          let startH, startM;
+          if (plan.startTime) {
+            const [hh, mm] = plan.startTime.split(':').map(Number);
+            startH = hh; startM = mm;
+          } else {
+            const w = (typeof getWorkHours === 'function') ? getWorkHours() : { startH: 9, startM: 30 };
+            startH = w.startH; startM = w.startM;
+          }
+          const createdAt = new Date(y, m-1, d, startH, startM, 0, 0).getTime();
           const newId = ++taskIdCounter;
           const generatedTask = {
             id: newId,
@@ -17396,6 +17464,94 @@ function shutdownSyncInfrastructure() {
 // End Synchronization Infrastructure
 // ════════════════════════════════════════════════════════════════════════════
 
+// ── Pending Tasks popup ───────────────────────────────────────────────────────
+// Groups every log entry whose Status is "Pending" by task identity (recurring
+// plan id when available, otherwise heading+project+module+ticket), keeping the
+// full chronological history per group so the card's hover/tap icon can show a
+// timeline of every past entry for that same task.
+function pendingTaskGroupKey(entry) {
+  const task = tasks.find(t => t.id === entry.taskId);
+  if (task && task.recurringPlanId) return 'rp:' + task.recurringPlanId;
+  if (entry.taskSyncId) {
+    const linked = tasks.find(t => t._sync && t._sync.syncId === entry.taskSyncId);
+    if (linked && linked.recurringPlanId) return 'rp:' + linked.recurringPlanId;
+  }
+  return 'k:' + (entry.heading || '') + '|' + (entry.project || '') + '|' +
+    (entry.module || '') + '|' + (entry.ticket || '');
+}
+
+function getPendingTaskGroups() {
+  const groups = {};
+  logEntries.forEach(entry => {
+    if (!entry.endTs) return; // only completed entries carry a final Status
+    const key = pendingTaskGroupKey(entry);
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(entry);
+  });
+  const result = [];
+  Object.keys(groups).forEach(key => {
+    const history = groups[key].slice().sort((a, b) => (b.startTs || 0) - (a.startTs || 0));
+    const latest = history[0];
+    if (!latest || latest.taskStatus !== 'Pending') return; // only currently-pending tasks
+    result.push({ key, latest, history });
+  });
+  result.sort((a, b) => (b.latest.startTs || 0) - (a.latest.startTs || 0));
+  return result;
+}
+
+function openPendingTasksModal() {
+  renderPendingTasksList();
+  document.getElementById('pending-tasks-modal').classList.remove('hidden');
+}
+
+function closePendingTasksModal() {
+  document.getElementById('pending-tasks-modal').classList.add('hidden');
+}
+
+function renderPendingTasksList() {
+  const container = document.getElementById('pending-tasks-list');
+  const groups = getPendingTaskGroups();
+  if (groups.length === 0) {
+    container.innerHTML = '<div class="pending-empty">No pending tasks right now.</div>';
+    return;
+  }
+  container.innerHTML = groups.map(g => {
+    const e = g.latest;
+    const desc = e.description || '';
+    const name = (e.heading && e.heading.trim()) ? e.heading.trim() : desc.slice(0, 100);
+    const chips = [
+      e.project ? '<span class="pending-card-chip">' + esc(e.project) + '</span>' : '',
+      e.module ? '<span class="pending-card-chip">' + esc(e.module) + '</span>' : '',
+      e.ticket ? '<span class="pending-card-chip">' + esc(e.ticket) + '</span>' : ''
+    ].join('');
+    const historyHtml = g.history.map(h => {
+      const d = h.startTs ? new Date(h.startTs) : null;
+      const secs = h.durationSecs !== null && h.durationSecs !== undefined
+        ? h.durationSecs
+        : (h.endTs && h.startTs ? Math.floor((h.endTs - h.startTs) / 1000) : 0);
+      return '<div class="pending-history-entry">' +
+        '<div class="pending-history-entry-top"><span>' + (d ? esc(fmtDate(d)) : '—') + '</span>' +
+        '<span>' + esc(fmtDuration(secs)) + '</span></div>' +
+        (h.description ? '<div class="pending-history-entry-desc">' + esc(h.description) + '</div>' : '') +
+        (h.remark ? '<div class="pending-history-entry-remark">' + esc(h.remark) + '</div>' : '') +
+        '</div>';
+    }).join('');
+    return '<div class="pending-card">' +
+      '<div class="pending-card-name">' + esc(name || 'Untitled') + '</div>' +
+      (chips ? '<div class="pending-card-meta">' + chips + '</div>' : '') +
+      (desc ? '<div class="pending-card-desc">' + esc(desc.slice(0, 100)) + (desc.length > 100 ? '…' : '') + '</div>' : '') +
+      '<div class="pending-history-btn" title="History" onclick="togglePendingHistory(this)"><i class="ti ti-history"></i></div>' +
+      '<div class="pending-history-panel">' + historyHtml + '</div>' +
+      '</div>';
+  }).join('');
+}
+
+function togglePendingHistory(btn) {
+  btn.classList.toggle('active');
+  const panel = btn.parentElement.querySelector('.pending-history-panel');
+  if (panel) panel.classList.toggle('open');
+}
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 loadState();
 initTheme();
@@ -17414,6 +17570,12 @@ updateTaskVisibility();
 updateSummaryButtonVisibility();
 initBreakTimer();
 if (!tasks.some(t => !isTaskDeleted(t))) addTask();
+
+// Scheduled recurring tasks (plan.startTime) are hidden until their time
+// arrives — re-check once a minute so they appear without a manual refresh.
+setInterval(() => {
+  if (getSelectedDate() === todayStr()) renderList();
+}, 60000);
 
 </script>
 </body>
