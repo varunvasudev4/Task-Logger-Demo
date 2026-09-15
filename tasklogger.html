@@ -297,6 +297,8 @@ html.is-touch .search-btn { display: inline-flex; }
   font-size: 11px; padding: 2px 7px; border-radius: 999px;
   background: var(--bg-secondary); color: var(--text-secondary); font-family: var(--font-mono);
 }
+.pending-card-chip.pending-card-status-pending { background: color-mix(in srgb, var(--amber-mid) 18%, transparent); color: var(--amber-mid); font-family: inherit; font-weight: 600; }
+.pending-card-chip.pending-card-status-blocked { background: color-mix(in srgb, var(--red-mid) 18%, transparent); color: var(--red-mid); font-family: inherit; font-weight: 600; }
 .pending-card-desc { font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
 .pending-history-btn {
   position: absolute; top: 10px; right: 10px; width: 26px; height: 26px;
@@ -12383,7 +12385,7 @@ function renderList(onlyIds) {
       const container = document.getElementById('row-' + id);
       const belongsHere = !!task && !isTaskDeleted(task) && task.status !== 'done' &&
         (task.createdAt ? dateStrOf(task) === selDate : selDate === today) &&
-        !(selDate === today && task.recurringPlanId && task.createdAt && task.createdAt > Date.now());
+        !(task.recurringPlanId && task.createdAt && task.createdAt > Date.now());
       if (!belongsHere) {
         // No longer visible on the currently selected date — tombstoned,
         // completed, or created for a different date by the merge. Remove
@@ -12431,9 +12433,10 @@ function renderList(onlyIds) {
     const d = new Date(t.createdAt);
     const ds = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
     if (ds !== selDate) return false;
-    // Recurring tasks generated with a scheduled start time stay hidden on their own
-    // day until that time arrives (see materializeRecurringTasksUpTo()).
-    if (ds === today && t.recurringPlanId && t.createdAt > Date.now()) return false;
+    // Recurring tasks generated with a scheduled start time stay hidden — even when
+    // browsing a future date — until that exact date+time actually arrives (see
+    // materializeRecurringTasksUpTo()).
+    if (t.recurringPlanId && t.createdAt > Date.now()) return false;
     return true;
   });
 
@@ -17465,19 +17468,16 @@ function shutdownSyncInfrastructure() {
 // ════════════════════════════════════════════════════════════════════════════
 
 // ── Pending Tasks popup ───────────────────────────────────────────────────────
-// Groups every log entry whose Status is "Pending" by task identity (recurring
-// plan id when available, otherwise heading+project+module+ticket), keeping the
-// full chronological history per group so the card's hover/tap icon can show a
-// timeline of every past entry for that same task.
+// Groups every log entry that is still open (Status is neither "Completed" nor
+// "Blocked") by task identity: primarily by ticket number, and only when no
+// ticket is present does it fall back to heading+project+module+nature. The
+// full chronological history per group is kept so the card's hover/tap icon can
+// show a timeline of every past entry for that same task.
 function pendingTaskGroupKey(entry) {
-  const task = tasks.find(t => t.id === entry.taskId);
-  if (task && task.recurringPlanId) return 'rp:' + task.recurringPlanId;
-  if (entry.taskSyncId) {
-    const linked = tasks.find(t => t._sync && t._sync.syncId === entry.taskSyncId);
-    if (linked && linked.recurringPlanId) return 'rp:' + linked.recurringPlanId;
-  }
+  const ticket = (entry.ticket || '').trim();
+  if (ticket) return 'tk:' + ticket.toLowerCase();
   return 'k:' + (entry.heading || '') + '|' + (entry.project || '') + '|' +
-    (entry.module || '') + '|' + (entry.ticket || '');
+    (entry.module || '') + '|' + (entry.nature || '');
 }
 
 function getPendingTaskGroups() {
@@ -17492,7 +17492,7 @@ function getPendingTaskGroups() {
   Object.keys(groups).forEach(key => {
     const history = groups[key].slice().sort((a, b) => (b.startTs || 0) - (a.startTs || 0));
     const latest = history[0];
-    if (!latest || latest.taskStatus !== 'Pending') return; // only currently-pending tasks
+    if (!latest || latest.taskStatus === 'Completed' || latest.taskStatus === 'Blocked') return;
     result.push({ key, latest, history });
   });
   result.sort((a, b) => (b.latest.startTs || 0) - (a.latest.startTs || 0));
@@ -17519,9 +17519,12 @@ function renderPendingTasksList() {
     const e = g.latest;
     const desc = e.description || '';
     const name = (e.heading && e.heading.trim()) ? e.heading.trim() : desc.slice(0, 100);
+    const statusClass = e.taskStatus === 'Blocked' ? 'pending-card-status-blocked' : 'pending-card-status-pending';
     const chips = [
+      '<span class="pending-card-chip ' + statusClass + '">' + esc(e.taskStatus || '') + '</span>',
       e.project ? '<span class="pending-card-chip">' + esc(e.project) + '</span>' : '',
       e.module ? '<span class="pending-card-chip">' + esc(e.module) + '</span>' : '',
+      (!e.ticket && e.nature) ? '<span class="pending-card-chip">' + esc(e.nature) + '</span>' : '',
       e.ticket ? '<span class="pending-card-chip">' + esc(e.ticket) + '</span>' : ''
     ].join('');
     const historyHtml = g.history.map(h => {
@@ -17571,11 +17574,10 @@ updateSummaryButtonVisibility();
 initBreakTimer();
 if (!tasks.some(t => !isTaskDeleted(t))) addTask();
 
-// Scheduled recurring tasks (plan.startTime) are hidden until their time
-// arrives — re-check once a minute so they appear without a manual refresh.
-setInterval(() => {
-  if (getSelectedDate() === todayStr()) renderList();
-}, 60000);
+// Scheduled recurring tasks (plan.startTime) are hidden until their exact
+// date+time arrives — re-check once a minute so they appear without a manual
+// refresh, whichever date is currently being viewed.
+setInterval(() => { renderList(); }, 60000);
 
 </script>
 </body>
