@@ -288,7 +288,7 @@ html.is-touch .search-btn { display: inline-flex; }
 /* Pending task cards (Pending Tasks popup) */
 .pending-card {
   position: relative; background: var(--bg); border: 1px solid var(--border);
-  border-radius: var(--radius-lg); padding: 12px 40px 12px 14px;
+  border-radius: var(--radius-lg); padding: 12px 70px 12px 14px;
   margin-bottom: 10px;
 }
 .pending-card-name {
@@ -303,14 +303,19 @@ html.is-touch .search-btn { display: inline-flex; }
 .pending-card-chip.pending-card-status-pending { background: color-mix(in srgb, var(--amber-mid) 18%, transparent); color: var(--amber-mid); font-family: inherit; font-weight: 600; }
 .pending-card-chip.pending-card-status-blocked { background: color-mix(in srgb, var(--red-mid) 18%, transparent); color: var(--red-mid); font-family: inherit; font-weight: 600; }
 .pending-card-desc { font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
-.pending-history-btn {
-  position: absolute; top: 10px; right: 10px; width: 26px; height: 26px;
-  display: flex; align-items: center; justify-content: center; border-radius: 6px;
-  color: var(--text-tertiary); cursor: pointer; opacity: 0; transition: opacity 0.15s, color 0.15s, background 0.15s;
+.pending-card-actions {
+  position: absolute; top: 8px; right: 8px; display: flex; gap: 2px;
+  opacity: 0; transition: opacity 0.15s;
 }
-.pending-card:hover .pending-history-btn { opacity: 1; }
-html.is-touch .pending-history-btn { opacity: 1; }
-.pending-history-btn:hover, .pending-history-btn.active { color: var(--blue-mid); background: var(--bg-secondary); }
+.pending-card:hover .pending-card-actions { opacity: 1; }
+html.is-touch .pending-card-actions { opacity: 1; }
+.pending-card-icon-btn {
+  width: 26px; height: 26px;
+  display: flex; align-items: center; justify-content: center; border-radius: 6px;
+  color: var(--text-tertiary); cursor: pointer; transition: color 0.15s, background 0.15s;
+}
+.pending-card-icon-btn:hover, .pending-card-icon-btn.active { color: var(--blue-mid); background: var(--bg-secondary); }
+
 .pending-history-panel {
   display: none; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border);
 }
@@ -12562,6 +12567,7 @@ const FS_PORTAL_IDS = [
   'task-search-overlay',   // Ctrl+Shift+F search
   'complete-modal',
   'carry-forward-modal',
+  'pending-tasks-modal',
   'make-recurring-modal',
   'manage-recurring-modal',
   'transfer-minutes-modal',
@@ -17680,7 +17686,10 @@ function renderPendingTasksList() {
       '<div class="pending-card-name" title="' + esc(name || 'Untitled') + '">' + highlight(name || 'Untitled') + '</div>' +
       (chips ? '<div class="pending-card-meta">' + chips + '</div>' : '') +
       (desc ? '<div class="pending-card-desc">' + highlight(desc.slice(0, 100)) + (desc.length > 100 ? '…' : '') + '</div>' : '') +
-      '<div class="pending-history-btn" title="History" onclick="togglePendingHistory(this)"><i class="ti ti-history"></i></div>' +
+      '<div class="pending-card-actions">' +
+        (e.taskId != null ? '<div class="pending-card-icon-btn" title="Carry forward…" onclick="carryForwardFromPending(' + e.taskId + ')"><i class="ti ti-calendar-plus"></i></div>' : '') +
+        '<div class="pending-card-icon-btn" title="History" onclick="togglePendingHistory(this)"><i class="ti ti-history"></i></div>' +
+      '</div>' +
       '<div class="pending-history-panel">' + historyHtml + '</div>' +
       '</div>';
   }).join('');
@@ -17688,8 +17697,17 @@ function renderPendingTasksList() {
 
 function togglePendingHistory(btn) {
   btn.classList.toggle('active');
-  const panel = btn.parentElement.querySelector('.pending-history-panel');
+  const card = btn.closest('.pending-card');
+  const panel = card ? card.querySelector('.pending-history-panel') : null;
   if (panel) panel.classList.toggle('open');
+}
+
+// Both Pending Tasks and Carry Forward are .modal-overlay elements sharing the
+// same z-index, so having both open stacks purely by DOM order — close Pending
+// first so the (reused) Carry Forward popup is the one left visible on top.
+function carryForwardFromPending(taskId) {
+  closePendingTasksModal();
+  continueTomorrow(taskId);
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
