@@ -322,6 +322,13 @@ html:not(.is-touch) .pending-card:hover .pending-history-panel { display: block;
 .pending-history-entry-desc { color: var(--text-secondary); margin-top: 2px; }
 .pending-history-entry-remark { color: var(--text-tertiary); margin-top: 2px; font-style: italic; }
 .pending-empty { font-size: 13px; color: var(--text-tertiary); padding: 12px 4px; }
+.pending-tasks-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 16px; height: 16px; padding: 0 4px; margin-left: 2px;
+  border-radius: 999px; background: var(--red-mid, #e5484d); color: #fff;
+  font-size: 10px; font-weight: 700; line-height: 1; font-family: var(--font-mono);
+}
+.pending-tasks-badge.hidden { display: none; }
 
 .task-drag-handle {
   display: flex; align-items: center; justify-content: center;
@@ -873,6 +880,13 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
   display: flex; align-items: center;
 }
 .search-chip button:hover { color: var(--red-mid); }
+/* Chip row that sits directly under a search input (used by global search and
+   the Pending Tasks search) instead of inline to the right of the input. */
+.search-chips-row {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  padding: 8px 12px; border-bottom: 1px solid var(--border-md);
+}
+.search-chips-row:empty { display: none; padding: 0; border-bottom: none; }
 .complete-row { display: flex; gap: 10px; }
 .complete-row .complete-field { flex: 1; }
 
@@ -1249,7 +1263,7 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
   .header-row-1 .btn-highlight span,
   .header-row-1 .btn-primary span,
   .header-row-2 .header-masters-btn span,
-  .header-row-2 .pending-tasks-btn span,
+  .header-row-2 .pending-tasks-btn > span:not(.pending-tasks-badge),
   .header-row-2 .search-btn span,
   #more-menu-btn > span,
   .more-menu-chevron {
@@ -1496,7 +1510,7 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
           <i class="ti ti-refresh"></i> <span id="top-sync-label">Sync</span> <span class="sync-dot sync-neutral" id="top-sync-dot"></span>
         </button>
         <button class="btn header-masters-btn" onclick="openMasters()" aria-label="Masters" title="Masters"><i class="ti ti-list-details"></i> <span>Masters</span></button>
-        <button class="btn pending-tasks-btn" id="pending-tasks-btn" onclick="openPendingTasksModal()" aria-label="Pending tasks" title="Pending tasks"><i class="ti ti-clock-exclamation"></i> <span>Pending</span></button>
+        <button class="btn pending-tasks-btn" id="pending-tasks-btn" onclick="openPendingTasksModal()" aria-label="Pending tasks" title="Pending tasks"><i class="ti ti-clock-exclamation"></i> <span>Pending</span><span id="pending-tasks-badge" class="pending-tasks-badge hidden">0</span></button>
         <!-- Phase 25: touch-only entry point into the existing search overlay/
              openSearch() — hidden on non-touch devices via html.is-touch (see
              <head>); desktop keyboard users keep using Ctrl+Shift+F. -->
@@ -1789,6 +1803,15 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
       <div class="modal-title"><i class="ti ti-clock-exclamation" style="vertical-align:-2px;margin-right:6px;color:var(--amber-mid)"></i>Pending Tasks</div>
       <button class="btn-icon" onclick="closePendingTasksModal()"><i class="ti ti-x"></i></button>
     </div>
+    <div id="pending-search-input-row" style="display:flex;align-items:center;gap:6px;padding:8px 12px;border-bottom:1px solid var(--border-md);min-height:44px">
+      <i class="ti ti-search" style="font-size:16px;color:var(--text-tertiary);flex-shrink:0"></i>
+      <input id="pending-search-input" type="text" placeholder="Search by ticket or keyword & press Enter…"
+        autocomplete="off" spellcheck="false"
+        oninput="renderPendingTasksList()"
+        onkeydown="pendingSearchKeyNav(event)"
+        style="border:none;outline:none;background:transparent;font-size:13px;color:var(--text-primary);font-family:inherit;min-width:120px;flex:1" />
+    </div>
+    <div id="pending-search-chips" class="search-chips-row"></div>
     <div class="modal-body" id="pending-tasks-list">
     </div>
   </div>
@@ -1885,9 +1908,8 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
 <div id="task-search-overlay-anchor" style="display:none"></div>
 <div id="task-search-overlay" class="hidden" onclick="if(event.target===this)closeSearch()">
   <div id="task-search-box">
-    <div id="task-search-input-row" style="display:flex;align-items:center;gap:6px;padding:8px 12px;border-bottom:1px solid var(--border-md);flex-wrap:wrap;min-height:44px">
+    <div id="task-search-input-row" style="display:flex;align-items:center;gap:6px;padding:8px 12px;border-bottom:1px solid var(--border-md);min-height:44px">
       <i class="ti ti-search" style="font-size:16px;color:var(--text-tertiary);flex-shrink:0"></i>
-      <div id="task-search-chips" style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;flex:1;min-width:0"></div>
       <input id="task-search-input" type="text" placeholder="Type & press Enter to add keyword…"
         autocomplete="off" spellcheck="false"
         oninput="renderSearchResults()"
@@ -1895,6 +1917,7 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
         style="border:none;outline:none;background:transparent;font-size:13px;color:var(--text-primary);font-family:inherit;min-width:160px;flex:1" />
       <span style="font-size:11px;color:var(--text-tertiary);white-space:nowrap">Esc to close</span>
     </div>
+    <div id="task-search-chips" class="search-chips-row"></div>
     <div id="task-search-results" style="overflow-y:auto;max-height:400px;flex:1;min-height:0"></div>
   </div>
 </div>
@@ -17502,22 +17525,133 @@ function getPendingTaskGroups() {
   return result;
 }
 
+// Keeps the header button's count badge in sync. Cheap enough to call from
+// renderList() (the app's common post-mutation refresh point) on every render.
+function updatePendingTasksBadge() {
+  const badge = document.getElementById('pending-tasks-badge');
+  if (!badge) return;
+  const count = getPendingTaskGroups().length;
+  badge.textContent = count > 99 ? '99+' : String(count);
+  badge.classList.toggle('hidden', count === 0);
+}
+
+// Wrap renderList() so the header badge count is refreshed on every call —
+// renderList() already runs after essentially every state-changing action in
+// the app, so this keeps the count accurate without touching that function's
+// large existing body.
+(function wrapRenderListForPendingBadge() {
+  const original = renderList;
+  renderList = function(onlyIds) {
+    original(onlyIds);
+    updatePendingTasksBadge();
+  };
+})();
+
+let _pendingSearchKeywords = [];
+
 function openPendingTasksModal() {
+  const inp = document.getElementById('pending-search-input');
+  inp.value = '';
+  _pendingSearchKeywords = [];
+  renderPendingSearchChips();
   renderPendingTasksList();
   document.getElementById('pending-tasks-modal').classList.remove('hidden');
+  setTimeout(() => inp.focus(), 30);
 }
 
 function closePendingTasksModal() {
   document.getElementById('pending-tasks-modal').classList.add('hidden');
 }
 
-function renderPendingTasksList() {
-  const container = document.getElementById('pending-tasks-list');
-  const groups = getPendingTaskGroups();
-  if (groups.length === 0) {
-    container.innerHTML = '<div class="pending-empty">No pending tasks right now.</div>';
+function addPendingSearchKeyword() {
+  const inp = document.getElementById('pending-search-input');
+  const kw = inp.value.trim();
+  if (kw && !_pendingSearchKeywords.includes(kw.toLowerCase())) {
+    _pendingSearchKeywords.push(kw.toLowerCase());
+  }
+  inp.value = '';
+  renderPendingSearchChips();
+  renderPendingTasksList();
+  inp.focus();
+}
+
+function removePendingSearchKeyword(idx) {
+  _pendingSearchKeywords.splice(idx, 1);
+  renderPendingSearchChips();
+  renderPendingTasksList();
+  document.getElementById('pending-search-input').focus();
+}
+
+function clearPendingSearchKeywords() {
+  _pendingSearchKeywords = [];
+  document.getElementById('pending-search-input').value = '';
+  renderPendingSearchChips();
+  renderPendingTasksList();
+  document.getElementById('pending-search-input').focus();
+}
+
+function renderPendingSearchChips() {
+  const container = document.getElementById('pending-search-chips');
+  container.innerHTML = _pendingSearchKeywords.map((kw, i) =>
+    `<span class="search-chip">${escHtml(kw)}<button onclick="removePendingSearchKeyword(${i})" title="Remove">×</button></span>`
+  ).join('');
+  const inp = document.getElementById('pending-search-input');
+  inp.placeholder = _pendingSearchKeywords.length ? 'Add another keyword…' : 'Search by ticket or keyword & press Enter…';
+}
+
+function pendingSearchKeyNav(e) {
+  if (e.key === 'Enter') {
+    const inp = document.getElementById('pending-search-input');
+    if (inp.value.trim()) { e.preventDefault(); addPendingSearchKeyword(); }
     return;
   }
+  if (e.key === 'Backspace') {
+    const inp = document.getElementById('pending-search-input');
+    if (!inp.value && _pendingSearchKeywords.length) {
+      e.preventDefault();
+      removePendingSearchKeyword(_pendingSearchKeywords.length - 1);
+    }
+    return;
+  }
+  if (e.key === 'Escape') { closePendingTasksModal(); }
+}
+
+function renderPendingTasksList() {
+  const container = document.getElementById('pending-tasks-list');
+  let groups = getPendingTaskGroups();
+
+  const inp = document.getElementById('pending-search-input');
+  const currentInput = (inp && inp.value || '').trim().toLowerCase();
+  const allKws = [..._pendingSearchKeywords, ...(currentInput ? [currentInput] : [])];
+
+  if (allKws.length) {
+    // A group matches if it contains ALL keywords (AND logic), searched across
+    // ticket, heading, project, module, nature and description.
+    const fieldsOf = e => [e.heading, e.project, e.nature, e.ticket, e.description, e.module]
+      .map(v => (v || '').toLowerCase()).join(' ');
+    groups = groups.filter(g => {
+      const text = fieldsOf(g.latest);
+      return allKws.every(kw => text.includes(kw));
+    });
+  }
+
+  if (groups.length === 0) {
+    container.innerHTML = allKws.length
+      ? '<div class="pending-empty">No pending tasks match ' + allKws.map(k => '<strong>' + esc(k) + '</strong>').join(' + ') + '.</div>'
+      : '<div class="pending-empty">No pending tasks right now.</div>';
+    return;
+  }
+
+  function highlight(str) {
+    if (!str) return '';
+    let s = esc(str);
+    allKws.forEach(kw => {
+      const re = new RegExp(kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+      s = s.replace(re, m => '<em>' + m + '</em>');
+    });
+    return s;
+  }
+
   container.innerHTML = groups.map(g => {
     const e = g.latest;
     const desc = e.description || '';
@@ -17525,10 +17659,10 @@ function renderPendingTasksList() {
     const statusClass = e.taskStatus === 'Blocked' ? 'pending-card-status-blocked' : 'pending-card-status-pending';
     const chips = [
       '<span class="pending-card-chip ' + statusClass + '">' + esc(e.taskStatus || '') + '</span>',
-      e.project ? '<span class="pending-card-chip">' + esc(e.project) + '</span>' : '',
-      e.module ? '<span class="pending-card-chip">' + esc(e.module) + '</span>' : '',
-      (!e.ticket && e.nature) ? '<span class="pending-card-chip">' + esc(e.nature) + '</span>' : '',
-      e.ticket ? '<span class="pending-card-chip">' + esc(e.ticket) + '</span>' : ''
+      e.project ? '<span class="pending-card-chip">' + highlight(e.project) + '</span>' : '',
+      e.module ? '<span class="pending-card-chip">' + highlight(e.module) + '</span>' : '',
+      (!e.ticket && e.nature) ? '<span class="pending-card-chip">' + highlight(e.nature) + '</span>' : '',
+      e.ticket ? '<span class="pending-card-chip">' + highlight(e.ticket) + '</span>' : ''
     ].join('');
     const historyHtml = g.history.map(h => {
       const d = h.startTs ? new Date(h.startTs) : null;
@@ -17543,9 +17677,9 @@ function renderPendingTasksList() {
         '</div>';
     }).join('');
     return '<div class="pending-card">' +
-      '<div class="pending-card-name" title="' + esc(name || 'Untitled') + '">' + esc(name || 'Untitled') + '</div>' +
+      '<div class="pending-card-name" title="' + esc(name || 'Untitled') + '">' + highlight(name || 'Untitled') + '</div>' +
       (chips ? '<div class="pending-card-meta">' + chips + '</div>' : '') +
-      (desc ? '<div class="pending-card-desc">' + esc(desc.slice(0, 100)) + (desc.length > 100 ? '…' : '') + '</div>' : '') +
+      (desc ? '<div class="pending-card-desc">' + highlight(desc.slice(0, 100)) + (desc.length > 100 ? '…' : '') + '</div>' : '') +
       '<div class="pending-history-btn" title="History" onclick="togglePendingHistory(this)"><i class="ti ti-history"></i></div>' +
       '<div class="pending-history-panel">' + historyHtml + '</div>' +
       '</div>';
