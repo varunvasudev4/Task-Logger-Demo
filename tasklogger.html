@@ -1743,7 +1743,7 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
       <button class="btn-icon" onclick="closeCarryForwardModal()"><i class="ti ti-x"></i></button>
     </div>
     <div class="modal-body">
-      <div id="cf-task-name" style="font-size:13px;font-weight:600;margin-bottom:12px;color:var(--text-primary)"></div>
+      <div id="cf-task-name" style="font-size:13px;font-weight:600;margin-bottom:12px;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
       <div class="complete-field">
         <label class="complete-label">Add task to date</label>
         <input class="complete-input" id="cf-date" type="date" style="width:100%" />
@@ -1765,7 +1765,7 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
       <button class="btn-icon" onclick="closeMakeRecurringModal()"><i class="ti ti-x"></i></button>
     </div>
     <div class="modal-body">
-      <div id="mr-task-name" style="font-size:13px;font-weight:600;margin-bottom:12px;color:var(--text-primary)"></div>
+      <div id="mr-task-name" style="font-size:13px;font-weight:600;margin-bottom:12px;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
       <div style="font-size:12px;color:var(--text-secondary);margin-bottom:14px">
         This will auto-create a fresh, Not Started copy of this task every working day as you navigate
         forward, like a daily checklist item.
@@ -1832,7 +1832,7 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
     <div class="modal-body">
       <div class="complete-field">
         <label class="complete-label">From</label>
-        <div id="tm-source-name" style="font-size:13px;font-weight:600;color:var(--text-primary)"></div>
+        <div id="tm-source-name" style="font-size:13px;font-weight:600;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
         <div style="font-size:11px;color:var(--text-tertiary);margin-top:2px">Currently logged: <span id="tm-source-mins"></span> min</div>
       </div>
       <div class="complete-field">
@@ -1861,7 +1861,7 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
       <button class="btn-icon" onclick="closeManageRecurringModal()"><i class="ti ti-x"></i></button>
     </div>
     <div class="modal-body">
-      <div id="rm-task-name" style="font-size:13px;font-weight:600;margin-bottom:6px;color:var(--text-primary)"></div>
+      <div id="rm-task-name" style="font-size:13px;font-weight:600;margin-bottom:6px;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
       <div id="rm-plan-summary" style="font-size:12px;color:var(--text-secondary);margin-bottom:16px"></div>
       <div style="border-top:1px solid var(--border);padding-top:14px">
         <label class="complete-label" style="display:block;margin-bottom:6px">Disable from date</label>
@@ -10381,6 +10381,21 @@ function buildCarriedFields(entry, task) {
   }
   return { project, module, nature, ticket, customFields };
 }
+// A task/entry's display name for popups (Carry Forward, Make Recurring, Manage
+// Recurring, Pending Tasks, Transfer Minutes): its heading when set, otherwise a
+// plain-text fallback built from its description, and finally 'Untitled' if
+// neither is available. `entry` is the most recent log entry for the source task
+// (may be null), `task` is the source task object itself (may be null), `plan`
+// is a recurring plan object (may be null) — pass whichever apply.
+function taskDisplayName(entry, task, plan) {
+  const heading = (entry && entry.heading) || (task && task.heading) || (plan && plan.heading) || '';
+  if (heading.trim()) return heading.trim();
+  const descSource = (entry && entry.description) ||
+    (task && task.customFields && task.customFields.description) ||
+    (plan && plan.customFields && plan.customFields.description) || '';
+  const plain = richTextToPlain(descSource).trim();
+  return plain || 'Untitled';
+}
 // Format a date value (ISO YYYY-MM-DD string) according to a column's chosen dateFormat.
 function formatCustomDate(isoStr, dateFormat) {
   if (!isoStr) return '';
@@ -11210,8 +11225,10 @@ function continueTomorrow(taskId) {
 
   pendingCarryForwardTaskId = taskId;
 
-  const heading = (entry && entry.heading) || (task && task.heading) || 'Untitled';
-  document.getElementById('cf-task-name').textContent = heading;
+  const displayName = taskDisplayName(entry, task);
+  const cfNameEl = document.getElementById('cf-task-name');
+  cfNameEl.textContent = displayName;
+  cfNameEl.title = displayName;
 
   // Default the date field to the day after the entry's own date — not real-world
   // today — so carrying forward a past day's entry defaults sensibly to the day
@@ -11318,8 +11335,10 @@ function openMakeRecurringModal(taskId) {
   if (!task && !entry) return;
 
   pendingRecurringTaskId = taskId;
-  const heading = (entry && entry.heading) || (task && task.heading) || 'Untitled';
-  document.getElementById('mr-task-name').textContent = heading;
+  const displayName = taskDisplayName(entry, task);
+  const mrNameEl = document.getElementById('mr-task-name');
+  mrNameEl.textContent = displayName;
+  mrNameEl.title = displayName;
 
   const start = todayStr();
   document.getElementById('mr-start-date').value = start;
@@ -11443,7 +11462,10 @@ function openManageRecurringModal(planId) {
   if (!plan) return;
   pendingManageRecurringPlanId = planId;
 
-  document.getElementById('rm-task-name').textContent = plan.heading || 'Untitled';
+  const displayName = taskDisplayName(null, null, plan);
+  const rmNameEl = document.getElementById('rm-task-name');
+  rmNameEl.textContent = displayName;
+  rmNameEl.title = displayName;
   const freq = plan.includeWeekends ? 'every day (including weekends)' : 'working days only';
   const range = plan.endDate
     ? ('from ' + plan.startDate + ' through ' + plan.endDate)
@@ -11645,7 +11667,9 @@ function openTransferMinutesModal(globalIdx) {
   const srcMins = Math.ceil(srcSecs / 60);
   const srcLabel = entry.heading || richTextToPlain(entry.description) || 'Untitled task';
 
-  document.getElementById('tm-source-name').textContent = srcLabel;
+  const tmSourceNameEl = document.getElementById('tm-source-name');
+  tmSourceNameEl.textContent = srcLabel;
+  tmSourceNameEl.title = srcLabel;
   document.getElementById('tm-source-mins').textContent = srcMins;
 
   const select = document.getElementById('tm-target-select');
