@@ -291,7 +291,10 @@ html.is-touch .search-btn { display: inline-flex; }
   border-radius: var(--radius-lg); padding: 12px 40px 12px 14px;
   margin-bottom: 10px;
 }
-.pending-card-name { font-weight: 600; font-size: 13.5px; color: var(--text-primary); margin-bottom: 4px; }
+.pending-card-name {
+  font-weight: 600; font-size: 13.5px; color: var(--text-primary); margin-bottom: 4px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .pending-card-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
 .pending-card-chip {
   font-size: 11px; padding: 2px 7px; border-radius: 999px;
@@ -17518,7 +17521,7 @@ function renderPendingTasksList() {
   container.innerHTML = groups.map(g => {
     const e = g.latest;
     const desc = e.description || '';
-    const name = (e.heading && e.heading.trim()) ? e.heading.trim() : desc.slice(0, 100);
+    const name = (e.heading && e.heading.trim()) ? e.heading.trim() : desc;
     const statusClass = e.taskStatus === 'Blocked' ? 'pending-card-status-blocked' : 'pending-card-status-pending';
     const chips = [
       '<span class="pending-card-chip ' + statusClass + '">' + esc(e.taskStatus || '') + '</span>',
@@ -17540,7 +17543,7 @@ function renderPendingTasksList() {
         '</div>';
     }).join('');
     return '<div class="pending-card">' +
-      '<div class="pending-card-name">' + esc(name || 'Untitled') + '</div>' +
+      '<div class="pending-card-name" title="' + esc(name || 'Untitled') + '">' + esc(name || 'Untitled') + '</div>' +
       (chips ? '<div class="pending-card-meta">' + chips + '</div>' : '') +
       (desc ? '<div class="pending-card-desc">' + esc(desc.slice(0, 100)) + (desc.length > 100 ? '…' : '') + '</div>' : '') +
       '<div class="pending-history-btn" title="History" onclick="togglePendingHistory(this)"><i class="ti ti-history"></i></div>' +
