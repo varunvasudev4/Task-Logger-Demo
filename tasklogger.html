@@ -17526,14 +17526,14 @@ function shutdownSyncInfrastructure() {
 // ── Pending Tasks popup ───────────────────────────────────────────────────────
 // Groups every log entry that is still open (Status is neither "Completed" nor
 // "Blocked") by task identity: primarily by ticket number, and only when no
-// ticket is present does it fall back to heading+project+module+nature. The
-// full chronological history per group is kept so the card's hover/tap icon can
+// ticket is present does it fall back to heading+project+module. The full
+// chronological history per group is kept so the card's hover/tap icon can
 // show a timeline of every past entry for that same task.
 function pendingTaskGroupKey(entry) {
   const ticket = (entry.ticket || '').trim();
   if (ticket) return 'tk:' + ticket.toLowerCase();
   return 'k:' + (entry.heading || '') + '|' + (entry.project || '') + '|' +
-    (entry.module || '') + '|' + (entry.nature || '');
+    (entry.module || '');
 }
 
 function getPendingTaskGroups() {
