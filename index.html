@@ -275,10 +275,22 @@
     .panel{padding:16px;}
     .control-bar{padding:14px;gap:14px;}
     .control-bar .control-group{width:100%;}
-    .control-bar select, .control-bar input[type="date"], .control-bar input[type="text"], .dropdown-toggle{width:100%;max-width:none;}
+    .control-bar .control-group > .btn{width:100%;}
+    .control-bar .btn-row{flex-direction:column;align-items:stretch;width:100%;}
+    .control-bar .btn-row > *{width:100%;}
+    .control-bar input[type="date"], .control-bar input[type="text"], select, .dropdown-toggle{width:100%;max-width:none;}
     .dropdown-toggle, .dropdown-menu{min-width:0;}
     .dropdown-menu{left:0;right:0;max-width:none;}
     .source-tag, .range-note{margin-left:0;width:100%;}
+    /* Panel-header control rows ("Break down by / Measure", "Columns", "Stale
+       only / Columns", "Columns / Rows per page", etc.) — same title-above-
+       controls stack Task Time Logger uses on phone, with each row of
+       selects/toggles going full width and wrapping two-up instead of one
+       long single column. */
+    [style*="justify-content:space-between;align-items:flex-end"]{align-items:flex-start;}
+    [style*="justify-content:space-between;align-items:flex-end"] > .control-group{width:100%;}
+    [style*="gap:8px;flex-wrap:wrap"]{width:100%;}
+    [style*="gap:8px;flex-wrap:wrap"] > .control-group{flex:1 1 calc(50% - 4px);min-width:130px;}
     .log-top{flex-direction:column;align-items:flex-start;gap:2px;}
     .modal-box{padding:18px;}
     .modal-actions{flex-wrap:wrap;}
@@ -289,6 +301,7 @@
     .kpi-row{grid-template-columns:1fr;}
     h1{font-size:21px;}
     .modal-box h3{font-size:16px;}
+    [style*="gap:8px;flex-wrap:wrap"] > .control-group{flex:1 1 100%;}
   }
 
   /* ---------- control bar ---------- */
@@ -304,6 +317,7 @@
     margin-bottom:24px;
   }
   .control-group{display:flex;flex-direction:column;gap:6px;}
+  .control-bar .btn-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
   .control-group label{
     font-family:'IBM Plex Mono', monospace;
     font-size:10.5px;
@@ -327,6 +341,10 @@
     border-color:var(--orange);
   }
   .btn{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    gap:6px;
     background:transparent;
     color:var(--text);
     border:1px solid var(--border);
@@ -941,7 +959,7 @@
   <div class="control-bar">
     <div class="control-group">
       <label>Data source</label>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <div class="btn-row">
         <label class="btn btn-highlight" for="csvFileInput">Upload CSV / Excel</label>
         <input type="file" id="csvFileInput" accept=".csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" multiple>
         <button class="btn" id="filesButton" type="button" disabled>Uploaded files (0)</button>
@@ -949,8 +967,8 @@
     </div>
     <div class="control-group">
       <label>&nbsp;</label>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-        <a class="btn btn-highlight" href="tasklogger.html" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px;">
+      <div class="btn-row">
+        <a class="btn btn-highlight" href="tasklogger.html" style="text-decoration:none;">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
           Open Task Time Logger
         </a>
@@ -1046,7 +1064,7 @@
   <div class="control-bar" id="exportRow">
     <div class="control-group">
       <label>Export current view</label>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <div class="btn-row">
         <button class="btn" id="exportCsvBtn" type="button" disabled>Download CSV</button>
         <button class="btn" id="exportPngBtn" type="button" disabled>Download PNG</button>
         <button class="btn" id="exportPdfBtn" type="button" disabled>Print / Save as PDF</button>
@@ -1290,7 +1308,7 @@
     <div style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:10px;">
       <div>
         <h2>Ticket effort rollup</h2>
-        <p class="p-sub" id="ticketRollupSub" style="margin-bottom:0;">Every ticket's total time, span, and current status — click a header to sort</p>
+        <p class="p-sub" id="ticketRollupSub" style="margin-bottom:0;">Every task's total time, span, and current status — grouped by ticket, or by description + project + module when there's no ticket — click a header to sort</p>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;" id="ticketRollupControlsRow">
         <div class="control-group">
@@ -1316,7 +1334,7 @@
           <col data-col="employees"><col data-col="first"><col data-col="last"><col data-col="daysOpen"><col data-col="status">
         </colgroup>
         <thead><tr>
-          <th class="sortable" data-tcol="ticket" data-col="ticket">Ticket <span class="sort-arrow" data-tarrow="ticket"></span><button type="button" class="col-pin-icon" data-col="ticket" title="Pin column"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg></button><span class="col-resize-handle"></span></th>
+          <th class="sortable" data-tcol="ticket" data-col="ticket">Task <span class="sort-arrow" data-tarrow="ticket"></span><button type="button" class="col-pin-icon" data-col="ticket" title="Pin column"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg></button><span class="col-resize-handle"></span></th>
           <th class="sortable" data-tcol="system" data-col="system">System <span class="sort-arrow" data-tarrow="system"></span><button type="button" class="col-pin-icon" data-col="system" title="Pin column"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg></button><span class="col-resize-handle"></span></th>
           <th class="sortable" data-tcol="minutes" data-col="minutes" style="text-align:right;">Hours <span class="sort-arrow" data-tarrow="minutes"></span><button type="button" class="col-pin-icon" data-col="minutes" title="Pin column"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg></button><span class="col-resize-handle"></span></th>
           <th class="sortable" data-tcol="count" data-col="count" style="text-align:right;">Entries <span class="sort-arrow" data-tarrow="count"></span><button type="button" class="col-pin-icon" data-col="count" title="Pin column"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg></button><span class="col-resize-handle"></span></th>
@@ -1936,7 +1954,7 @@ function renderAll(){
     document.getElementById('moduleTableBody').innerHTML = '';
     document.getElementById('recentLog').innerHTML = '';
     document.getElementById('ticketRollupBody').innerHTML = '';
-    document.getElementById('ticketRollupSub').textContent = 'Every ticket\'s total time, span, and current status — click a header to sort';
+    document.getElementById('ticketRollupSub').textContent = 'Every task\'s total time, span, and current status — click a header to sort';
     document.getElementById('employeeSnapshotPanel').style.display = 'none';
     document.getElementById('rawTableBody').innerHTML = '';
     document.getElementById('rawTablePageInfo').textContent = '';
@@ -1950,10 +1968,14 @@ function renderAll(){
   document.getElementById('kpiHours').innerHTML = totalHrs.toFixed(1) + '<span class="t-unit">hrs</span>';
   document.getElementById('kpiMinutes').textContent = Math.round(totalMin).toLocaleString() + ' min across ' + data.length + ' entries';
 
-  const completed = data.filter(d=>d.status==='Completed').length;
-  const compRate = completed/data.length*100;
+  // Completion rate is per distinct task (Task Time Logger's ticket-or-desc+project+module
+  // grouping, see taskGroupKey/buildTicketRollup above), not per log row — a task logged
+  // across several entries only counts once, using its most recently dated status.
+  const taskGroupsForKpi = buildTicketRollup(data);
+  const completed = taskGroupsForKpi.filter(g=>g.status==='Completed').length;
+  const compRate = taskGroupsForKpi.length ? completed/taskGroupsForKpi.length*100 : 0;
   document.getElementById('kpiCompletion').innerHTML = compRate.toFixed(1) + '<span class="t-unit">%</span>';
-  document.getElementById('kpiCompletionFoot').textContent = completed + ' of ' + data.length + ' tasks closed';
+  document.getElementById('kpiCompletionFoot').textContent = completed + ' of ' + taskGroupsForKpi.length + ' tasks closed';
 
   const daysSet = new Set(data.map(d=>d.date));
   const activeDays = daysSet.size; // any day with at least one log entry counts as a worked day
@@ -1975,7 +1997,7 @@ function renderAll(){
 
     document.getElementById('snapshotStats').innerHTML = [
       ['Hours logged', totalHrs.toFixed(1) + ' hrs'],
-      ['Tasks', data.length],
+      ['Tasks', taskGroupsForKpi.length],
       ['Completion', compRate.toFixed(0) + '%'],
       ['Active days', activeDays],
       ['Avg hrs/day', avgPerDay.toFixed(1)]
@@ -2325,25 +2347,47 @@ function renderRecentLog(data, summary){
 function escHtml(v){
   return String(v==null ? '' : v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
-// ---- ticket effort rollup: every ticket's total time, span, and current status ----
+// ---- task identity: same grouping rule Task Time Logger uses for its own
+// "Pending Tasks" popup (pendingTaskGroupKey() in tasklogger.html) — group by
+// ticket number when present; otherwise fall back to description + project +
+// module, so a ticket-less log row still rolls up into one task across repeat
+// entries instead of being dropped (old behavior) or double-counted per row. ----
+function taskGroupKey(r){
+  const ticket = (r.ticket || '').toString().trim();
+  if(ticket) return 'tk:' + ticket.toLowerCase();
+  return 'k:' + (r.desc || '') + '|' + (r.project || '') + '|' + (r.module || '');
+}
+
+// ---- task rollup: one row per task (Task Time Logger's grouping — ticket, or
+// description+project+module when there's no ticket), with total time, span,
+// and current status. "Current status" mirrors Task Time Logger's own pending-
+// list logic: within each group, the most recently dated entry's status wins. ----
 function buildTicketRollup(data){
   if(!data.length) return [];
-  const byTicket = {};
+  const groups = {};
   data.forEach(r=>{
-    if(!r.ticket) return;
-    if(!byTicket[r.ticket]){
-      byTicket[r.ticket] = { ticket:r.ticketDisplay||r.ticket, system:r.ticketSystem||'Other', minutes:0, count:0, employees:new Set(), first:r.date, last:r.date, lastStatus:r.status, lastDate:r.date };
+    const key = taskGroupKey(r);
+    if(!groups[key]){
+      groups[key] = {
+        ticket: r.ticketDisplay || r.desc || '(untitled task)',
+        system: r.ticket ? (r.ticketSystem || 'Other') : '—',
+        minutes: 0, count: 0, employees: new Set(),
+        first: r.date, last: r.date, lastStatus: r.status, lastDate: r.date
+      };
     }
-    const t = byTicket[r.ticket];
+    const t = groups[key];
     t.minutes += r.effort;
     t.count += 1;
     t.employees.add(r.employee);
     if(r.date < t.first) t.first = r.date;
     if(r.date > t.last) t.last = r.date;
+    // latest-dated entry in the group sets the task's current status — same rule
+    // Task Time Logger's getPendingTaskGroups() applies (there, sorted by start
+    // time; here, by date, since that's the granularity this dashboard keeps).
     if(r.date >= t.lastDate){ t.lastDate = r.date; t.lastStatus = r.status; }
   });
   const maxDate = data.reduce((m,r)=> r.date > m ? r.date : m, data[0].date);
-  return Object.entries(byTicket).map(([rawId, t])=>{
+  return Object.entries(groups).map(([rawId, t])=>{
     const daysOpen = Math.max(0, Math.round((new Date(maxDate+'T00:00:00Z') - new Date(t.first+'T00:00:00Z')) / 86400000));
     return {
       rawId, ticket: t.ticket, system: t.system, minutes: t.minutes, count: t.count,
@@ -2395,7 +2439,7 @@ function renderTicketRollup(data){
   ticketRollupMgr.applyPins();
   ticketRollupMgr.applyVisibility();
   document.getElementById('ticketRollupSub').textContent =
-    (rows.length ? shown.length + ' of ' + rows.length + ' tickets' + (staleOnly ? ' (stale filter on)' : '') : 'No ticket references in the current filters') + ' — click a header to sort, double-click a row for its history';
+    (rows.length ? shown.length + ' of ' + rows.length + ' tasks' + (staleOnly ? ' (stale filter on)' : '') : 'No tasks in the current filters') + ' — click a header to sort, double-click a row for its history';
   document.querySelectorAll('#ticketRollupTable .sort-arrow').forEach(el=>{
     el.textContent = el.dataset.tarrow === ticketSortCol ? (ticketSortDir==='asc' ? '▲' : '▼') : '';
   });
@@ -2438,7 +2482,7 @@ function openHistoryModal(title, subtitle, entries){
   ticketHistoryModalEl.style.display = 'flex';
 }
 function openTicketHistoryModal(rollupRow){
-  const entries = ticketRollupSourceData.filter(d => d.ticket === rollupRow.rawId).slice().sort((a,b)=> a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+  const entries = ticketRollupSourceData.filter(d => taskGroupKey(d) === rollupRow.rawId).slice().sort((a,b)=> a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
   const subtitle =
     entries.length + ' log ' + (entries.length===1?'entry':'entries') + ' · ' + (rollupRow.minutes/60).toFixed(1) + ' hrs total · ' +
     rollupRow.employeeCount + ' ' + (rollupRow.employeeCount===1?'person':'people') + ' · ' + rollupRow.first + ' → ' + rollupRow.last +
