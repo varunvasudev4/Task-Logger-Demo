@@ -936,6 +936,12 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .search-empty { padding: 28px 16px; text-align: center; color: var(--text-tertiary); font-size: 13px; }
+.search-result-actions { display: flex; gap: 2px; flex-shrink: 0; padding-top: 1px; }
+.search-result-type-tag {
+  display: inline-block; font-family: var(--font-mono); font-size: 9.5px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.04em; border-radius: 3px; padding: 1px 5px;
+  background: var(--violet-bg, #f1edff); color: var(--violet-dark, #5b3ec9); border: 1px solid var(--violet-mid, #a78bfa);
+}
 .search-chip {
   display: inline-flex; align-items: center; gap: 4px;
   background: var(--blue-bg); color: var(--blue-dark);
@@ -15885,14 +15891,24 @@ function renderSearchResults() {
     return;
   }
 
-  // An entry matches if it contains ALL keywords (AND logic across keywords)
+  // An entry/todo item matches if it contains ALL keywords (AND logic across keywords)
   const fields = e => [e.heading, e.project, e.nature, e.ticket, e.description, e.module]
     .map(v => (v || '').toLowerCase()).join(' ');
+  const todoFields = t => [t.heading, t.project, t.nature, t.ticket, t.module,
+      ...(t.customFields ? Object.values(t.customFields) : [])]
+    .map(v => (v || '').toLowerCase()).join(' ');
 
-  const hits = logEntries.filter(e => {
+  const entryHits = logEntries.filter(e => {
     const text = fields(e);
     return allKws.every(kw => text.includes(kw));
-  });
+  }).map(e => ({ type: 'entry', sortTs: e.startTs, data: e }));
+
+  const todoHits = todoItems.filter(t => {
+    const text = todoFields(t);
+    return allKws.every(kw => text.includes(kw));
+  }).map(t => ({ type: 'todo', sortTs: t.createdAt || 0, data: t }));
+
+  const hits = [...entryHits, ...todoHits];
 
   if (!hits.length) {
     const kwDisplay = allKws.map(k => `<strong>${escHtml(k)}</strong>`).join(' + ');
@@ -15900,7 +15916,7 @@ function renderSearchResults() {
     return;
   }
 
-  const sorted = [...hits].sort((a, b) => b.startTs - a.startTs).slice(0, 80);
+  const sorted = [...hits].sort((a, b) => b.sortTs - a.sortTs).slice(0, 80);
 
   function highlight(str) {
     if (!str) return '';
@@ -15922,7 +15938,27 @@ function renderSearchResults() {
     ${_searchKeywords.length ? `<button class="btn" style="font-size:11px;padding:2px 8px" onclick="clearSearchKeywords()">Clear all</button>` : ''}
   </div>`;
 
-  container.innerHTML = header + sorted.map((e, i) => {
+  container.innerHTML = header + sorted.map((hit, i) => {
+    if (hit.type === 'todo') {
+      const t = hit.data;
+      const metaBadges = [
+        t.nature  ? `<span style="background:var(--green-bg);color:var(--green-dark);border:1px solid var(--green-mid);border-radius:10px;font-size:10px;padding:1px 7px">${highlight(t.nature)}</span>` : '',
+        t.ticket  ? `<span style="background:var(--amber-bg,#fff8e1);color:var(--amber-dark,#795900);border:1px solid var(--amber-mid,#f0b400);border-radius:10px;font-size:10px;padding:1px 7px">#${highlight(t.ticket)}</span>` : '',
+        t.project ? `<span style="font-size:11px;color:var(--text-secondary)">${highlight(t.project)}</span>` : '',
+      ].filter(Boolean).join(' ');
+      const dateLabel = t.plannedDate ? fmtDate(new Date(t.plannedDate + 'T00:00:00')) : 'Unplanned';
+      return `<div class="search-result-item" onclick="planTodoFromSearch(${t.id})" data-idx="${i}">
+        <div class="search-result-date"><span class="search-result-type-tag">To Do</span><br>${esc(dateLabel)}</div>
+        <div class="search-result-body">
+          <div class="search-result-heading">${highlight(t.heading) || '<span style="color:var(--text-tertiary);font-style:italic">Untitled</span>'}</div>
+          ${metaBadges ? `<div class="search-result-meta" style="display:flex;gap:5px;align-items:center;flex-wrap:wrap;margin-top:3px">${metaBadges}</div>` : ''}
+        </div>
+        <div class="search-result-actions">
+          <div class="pending-card-icon-btn" title="Plan a date" onclick="event.stopPropagation(); planTodoFromSearch(${t.id})"><i class="ti ti-calendar-plus"></i></div>
+        </div>
+      </div>`;
+    }
+    const e = hit.data;
     const d = new Date(e.startTs);
     const dateLabel = String(d.getDate()).padStart(2,'0') + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + d.getFullYear();
     const entryDate = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
@@ -15937,8 +15973,22 @@ function renderSearchResults() {
         <div class="search-result-heading">${highlight(e.heading) || '<span style="color:var(--text-tertiary);font-style:italic">Untitled</span>'}</div>
         ${metaBadges ? `<div class="search-result-meta" style="display:flex;gap:5px;align-items:center;flex-wrap:wrap;margin-top:3px">${metaBadges}</div>` : ''}
       </div>
+      <div class="search-result-actions">
+        <div class="pending-card-icon-btn" title="Carry forward to a date" onclick="event.stopPropagation(); carryForwardFromSearch(${e.taskId})"><i class="ti ti-arrow-forward-up"></i></div>
+      </div>
     </div>`;
   }).join('');
+}
+
+// Wrappers so a search result's action icon closes the search overlay first — both target
+// modals are also full-screen overlays, so opening them underneath Search would be hidden.
+function planTodoFromSearch(id) {
+  closeSearch();
+  openTodoPlanModal(id);
+}
+function carryForwardFromSearch(taskId) {
+  closeSearch();
+  continueTomorrow(taskId);
 }
 
 function clearSearchKeywords() {
