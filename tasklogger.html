@@ -937,6 +937,15 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
 }
 .search-empty { padding: 28px 16px; text-align: center; color: var(--text-tertiary); font-size: 13px; }
 .search-result-actions { display: flex; gap: 2px; flex-shrink: 0; padding-top: 1px; }
+/* Search-result History: inline timeline of every log entry for the same task
+   (ticket, else task name + project + module). Reuses the Pending popup's entry styles. */
+.search-history-panel { display: none; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); cursor: default; }
+.search-history-panel.open { display: block; }
+.search-history-head { font-size: 11px; color: var(--text-tertiary); margin-bottom: 4px; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }
+.search-history-panel .pending-history-entry { cursor: pointer; padding: 6px 4px; border-radius: 4px; }
+.search-history-panel .pending-history-entry:hover { background: var(--bg-secondary); }
+.search-history-panel .pending-history-entry.is-current { background: var(--blue-bg); }
+.search-history-status { font-size: 10px; font-weight: 500; border: 1px solid var(--border-md); border-radius: 10px; padding: 0 6px; color: var(--text-secondary); }
 .search-result-type-tag {
   display: inline-block; font-family: var(--font-mono); font-size: 9.5px; font-weight: 600;
   text-transform: uppercase; letter-spacing: 0.04em; border-radius: 3px; padding: 1px 5px;
@@ -1275,6 +1284,10 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
   .header { flex-wrap: wrap; }
   .header-actions { gap: 6px; row-gap: 8px; }
 }
+/* Header buttons hidden by settings (Sync <- Enable Synchronization, Pending <- user flag).
+   !important so it also beats the phone layout's `.header-row-2 > * { display:flex }`.
+   Hidden items are removed from flex/grid flow, so the remaining buttons re-align. */
+.header-btn-hidden { display: none !important; }
 @media (max-width: 640px) {
   /* Phase 25: less top offset on phones — more room stays available once
      the software keyboard is open. */
@@ -1296,7 +1309,11 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
   }
   .header-row { display: grid; gap: 6px; width: 100%; min-width: 0; }
   .header-row-1 { grid-template-columns: 23fr 54fr 23fr; }
-  .header-row-2 { grid-template-columns: 2fr 1fr 1fr 1fr 1fr; }
+  /* Row 2 sizes itself from whatever is visible: every button gets one equal track and
+     Sync gets two. Sync / Pending / Search can each be hidden (settings, non-touch) and the
+     rest simply share the row — same proportions as before when all five are shown. */
+  .header-row-2 { grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); grid-template-columns: none; }
+  .header-row-2 .sync-btn { grid-column: span 2; }
   /* Phase 25B: past dates hide Add task (see updateTaskVisibility()) —
      when it's hidden, Date takes the freed 23% too (23fr 77fr) instead of
      leaving an empty third column where Add task used to sit. The class
@@ -2379,11 +2396,12 @@ let taskIdCounter = 0;
 // with the same task-card-style fields as a new task but never tied to a day and never
 // materialized into `tasks`/`logEntries`. See saveState()/loadState() for persistence
 // and the "── To Do (no-date backlog) ──" section near the Pending Tasks popup code for
-// all behavior. Not yet wired into Google Drive sync (local-only, like the rest of a
-// device's localStorage state, until a future phase adds it to buildStatePayload()).
+// all behavior. Synced via the 'todoItems' domain (per-item uid + updatedAt merge, with
+// deletion tombstones) — see applyRemoteTodoItems().
 let todoItems = [];
 let todoIdCounter = 0;
 let pendingTodoPlanId = null; // id of the To Do item currently targeted by the Plan-a-Date popup
+let todoTombstones = {};      // uid -> deletedAt (ms). Synced so a To Do deleted on one device is not resurrected by another.
 let recurringPlans = []; // { id, heading, project, nature, module, ticket, customFields,
                           //   startDate (YYYY-MM-DD), endDate (YYYY-MM-DD|null = indefinite),
                           //   includeWeekends, active, disabledFromDate (YYYY-MM-DD|null),
@@ -2398,7 +2416,7 @@ let expandedTaskCardFields = new Set();
 let masters = {
   weekendDays: [...DEFAULT_WEEKEND_DAYS],
   workHours: { startH: DEFAULT_WORK_START_H, startM: DEFAULT_WORK_START_M, endH: DEFAULT_WORK_END_H, endM: DEFAULT_WORK_END_M },
-  flags: { sleepAutoPause: true, backgroundSyncEnabled: true }, // future flags can be added here
+  flags: { sleepAutoPause: true, backgroundSyncEnabled: true, showPending: true }, // future flags can be added here
   fontPrefs: { family: 'default', size: 'md' }, // 'default' = built-in IBM Plex Sans stack, unscaled
   logColumns: DEFAULT_LOG_COLUMNS.map(c => ({ ...c })),
   // Single consolidated store for every list-type column's options — Projects, Nature of
@@ -3008,7 +3026,7 @@ const DOMAIN_WHOLE_KEY = '__domain__';
 // still records a domain outside this list (forward-compatible with a state
 // category not yet anticipated), but every call site added in this session uses one
 // of these.
-const SYNC_DOMAINS = ['logEntries', 'recurringPlans', 'masters', 'breakData', 'theme', 'weekendOverrides', 'counters', 'userName'];
+const SYNC_DOMAINS = ['logEntries', 'recurringPlans', 'masters', 'breakData', 'theme', 'weekendOverrides', 'counters', 'userName', 'todoItems'];
 
 // In-memory domain change state, shaped as:
 //   { schemaVersion, domains: { [domain]: { dirty, version, lastChangeAt, entities: { [entityId]: { operation, version, timestamp, deviceId } } } } }
@@ -3223,7 +3241,7 @@ function buildDomainMeta() {
   // either was still "upload-only" (SYNC_AUDIT.md §1). No new tracking added;
   // both already write into domainSyncState via recordSyncChange() at every
   // real mutation site (Phase 19C/19D), same as the other five domains below.
-  ['masters', 'theme', 'breakData', 'counters', 'userName', 'logEntries', 'recurringPlans'].forEach(d => {
+  ['masters', 'theme', 'breakData', 'counters', 'userName', 'logEntries', 'recurringPlans', 'todoItems'].forEach(d => {
     const rec = domainSyncState.domains[d];
     if (rec && rec.lastChangeAt) {
       meta[d] = { version: rec.version || 0, modifiedAt: rec.lastChangeAt, deviceId: getDeviceId() };
@@ -3312,25 +3330,131 @@ function applyRemoteThemeIfNewer(remoteParsed) {
   return true;
 }
 
+// Break-time sync (rewritten). The old version overwrote this device's whole `ttl_break`
+// with the remote copy, including the live `currentStart` of a break that was open on
+// ANOTHER device. A device that was merely idle/open (or that auto-backfilled "break since
+// 09:30" at startup) therefore injected phantom break time into the device you were
+// actually working on. Rules now:
+//   1. Only CLOSED segments sync (see getBreakDataForSync()); `currentStart` is device-local.
+//   2. Per date, this device's own record always wins — remote never overwrites or is
+//      merged into a day this device has real data for.
+//   3. Remote data only fills a day this device has nothing for, or only an auto-opened
+//      "idle" break for (flagged `idleOnly`, never uploaded).
+function cleanBreakSegments(list) {
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter(sg => sg && isFinite(sg.start) && isFinite(sg.end) && sg.end > sg.start)
+    .map(sg => ({ start: sg.start, end: sg.end }));
+}
+
+function getBreakDataForSync() {
+  const all = getBreakData();
+  const out = {};
+  Object.keys(all).forEach(dateStr => {
+    const day = all[dateStr];
+    if (!day || typeof day !== 'object' || day.idleOnly) return;
+    const segs = cleanBreakSegments(day.segments);
+    if (segs.length === 0) return;
+    out[dateStr] = { segments: segs };
+  });
+  return out;
+}
+
+// Called when a task really starts/resumes on THIS device: the day's break record is now
+// meaningful (this device worked), so it becomes eligible to sync.
+function markBreakDayWorkedHere() {
+  const dateStr = todayStr();
+  const { all, day } = getBreakDataForDate(dateStr);
+  if (day.workedHere && !day.idleOnly) return;
+  day.workedHere = true;
+  delete day.idleOnly;
+  all[dateStr] = day;
+  saveBreakData(all);
+}
+
 function applyRemoteBreakDataIfNewer(remoteParsed) {
   if (!remoteParsed || !remoteParsed.breakData || typeof remoteParsed.breakData !== 'object') return false;
-  if (isDomainDirty('breakData')) return false;
-  const remoteMeta = remoteParsed._syncMeta && remoteParsed._syncMeta.domainMeta && remoteParsed._syncMeta.domainMeta.breakData;
-  if (!remoteMeta || !remoteMeta.modifiedAt) return false;
-  const rec = domainSyncState.domains['breakData'];
-  const localModifiedAt = rec ? rec.lastChangeAt : null;
-  if (localModifiedAt && localModifiedAt >= remoteMeta.modifiedAt) return false;
-  // Persisted timing data only (segment start/end epoch ms, a currentStart epoch
-  // ms if a break is mid-flight) — never a JS interval/timer handle, which never
-  // leaves this device in the first place (getBreakData()/saveBreakData() are the
-  // only read/write path; nothing here touches setInterval/clearInterval). A
-  // receiving device reconstructs its break display from this persisted data on
-  // its own next render, exactly as task brief §11 requires.
-  try { localStorage.setItem('ttl_break', JSON.stringify(remoteParsed.breakData)); } catch (e) {}
+  const remote = remoteParsed.breakData;
+  const local = getBreakData();
+  let changed = false;
+  Object.keys(remote).forEach(dateStr => {
+    const rDay = remote[dateStr];
+    if (!rDay || typeof rDay !== 'object') return;
+    const segs = cleanBreakSegments(rDay.segments);
+    if (segs.length === 0) return;
+    const lDay = local[dateStr];
+    const lHasOwnData = !!(lDay && !lDay.idleOnly &&
+      ((Array.isArray(lDay.segments) && lDay.segments.length > 0) || (lDay.currentStart !== null && lDay.currentStart !== undefined)));
+    if (lHasOwnData) return;
+    local[dateStr] = { segments: segs, currentStart: null };
+    changed = true;
+  });
+  if (!changed) return false;
+  try { localStorage.setItem('ttl_break', JSON.stringify(local)); } catch (e) {}
   if (typeof renderBreakWidget === 'function') renderBreakWidget();
-  adoptRemoteDomainMeta('breakData', remoteMeta);
+  const remoteMeta = remoteParsed._syncMeta && remoteParsed._syncMeta.domainMeta && remoteParsed._syncMeta.domainMeta.breakData;
+  if (!isDomainDirty('breakData') && remoteMeta && remoteMeta.modifiedAt) adoptRemoteDomainMeta('breakData', remoteMeta);
   return true;
 }
+
+// ── To Do sync ──────────────────────────────────────────────────────────────────
+// Items are merged per item by `uid` (stable across devices — the numeric `id` is
+// device-local and can collide), newest `updatedAt` wins, and deletions travel as
+// tombstones so a deleted To Do is never resurrected by a device that still has it.
+function todoItemStamp(t) { return (t && (t.updatedAt || t.createdAt)) || 0; }
+function todoSyncShape(list, tombs) {
+  const items = {};
+  (list || []).forEach(t => {
+    if (!t || !t.uid) return;
+    const c = Object.assign({}, t); delete c.id;
+    items[t.uid] = c;
+  });
+  return stableStringify({ items: items, tombs: tombs || {} });
+}
+function applyRemoteTodoItems(remoteParsed) {
+  if (!remoteParsed || typeof remoteParsed !== 'object') return false;
+  const remoteItems = Array.isArray(remoteParsed.todoItems) ? remoteParsed.todoItems.filter(t => t && typeof t === 'object' && t.uid) : [];
+  const remoteTombs = (remoteParsed.todoTombstones && typeof remoteParsed.todoTombstones === 'object') ? remoteParsed.todoTombstones : {};
+
+  const tombs = Object.assign({}, todoTombstones);
+  Object.keys(remoteTombs).forEach(uid => {
+    const v = Number(remoteTombs[uid]) || 0;
+    if (v > (tombs[uid] || 0)) tombs[uid] = v;
+  });
+
+  const byUid = {};
+  todoItems.forEach(t => { byUid[t.uid] = t; });
+  let nextId = todoIdCounter;
+  remoteItems.forEach(r => {
+    const l = byUid[r.uid];
+    if (!l) byUid[r.uid] = Object.assign({}, r, { id: ++nextId });               // new here: fresh local id
+    else if (todoItemStamp(r) > todoItemStamp(l)) byUid[r.uid] = Object.assign({}, r, { id: l.id }); // keep local id
+  });
+
+  const merged = [];
+  Object.keys(byUid).forEach(uid => {
+    const it = byUid[uid];
+    if (tombs[uid] && tombs[uid] >= todoItemStamp(it)) return; // deleted after its last edit
+    merged.push(it);
+  });
+  merged.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  const cutoff = Date.now() - 180 * 86400000;
+  Object.keys(tombs).forEach(uid => { if (tombs[uid] < cutoff) delete tombs[uid]; });
+
+  const changed = todoSyncShape(todoItems, todoTombstones) !== todoSyncShape(merged, tombs);
+  if (changed) {
+    todoItems = merged;
+    todoTombstones = tombs;
+    todoIdCounter = Math.max(todoIdCounter, nextId);
+  }
+  // If the merged result has something the remote copy lacks, push it back (converges:
+  // once uploaded, every device computes the same merged shape and stops marking dirty).
+  if (todoSyncShape(merged, tombs) !== todoSyncShape(remoteItems, remoteTombs)) {
+    try { recordSyncChange('todoItems', null, 'update'); } catch (e) {}
+  }
+  return changed;
+}
+// ── End To Do sync ──────────────────────────────────────────────────────────────
 
 function applyRemoteUserNameIfNewer(remoteParsed) {
   if (!remoteParsed || typeof remoteParsed.userName !== 'string' || !remoteParsed.userName) return false;
@@ -3459,6 +3583,7 @@ function mergeNonTaskDomains(remoteParsed) {
     // six domains above — no change to this function's own shape.
     if (applyRemoteLogEntriesIfNewer(remoteParsed)) changed.push('logEntries');
     if (applyRemoteRecurringPlansIfNewer(remoteParsed)) changed.push('recurringPlans');
+    if (applyRemoteTodoItems(remoteParsed)) changed.push('todoItems');
   } catch (e) {}
   if (changed.length > 0) {
     saveState();
@@ -3488,6 +3613,11 @@ function mergeNonTaskDomains(remoteParsed) {
     }
     if (changedSet.indexOf('breakData') !== -1) {
       if (typeof renderBreakWidget === 'function') renderBreakWidget();
+    }
+    if (changedSet.indexOf('todoItems') !== -1) {
+      if (typeof renderTodoList === 'function') renderTodoList();
+      if (typeof updatePendingMenuCounts === 'function') updatePendingMenuCounts();
+      if (typeof updatePendingTasksBadge === 'function') updatePendingTasksBadge();
     }
     if (changedSet.indexOf('weekendOverrides') !== -1) {
       if (typeof renderWorkWidget === 'function') renderWorkWidget();
@@ -5263,7 +5393,12 @@ const GoogleDriveWorkspace = (function () {
       recurringPlanIdCounter: recurringPlanIdCounter,
       userName: userName,
       theme: getStoredTheme(),
-      breakData: getBreakData(),
+      // Break sync fix: only closed segments of days this device actually worked on —
+      // never the live `currentStart`, never an idle-device's auto-opened break.
+      breakData: getBreakDataForSync(),
+      todoItems: todoItems,
+      todoTombstones: todoTombstones,
+      todoIdCounter: todoIdCounter,
       weekendOverrides: weekendOverrides
     };
     const nowIso = new Date().toISOString();
@@ -9961,6 +10096,7 @@ function saveState() {
     localStorage.setItem('ttl_log',      JSON.stringify(logEntries));
     localStorage.setItem('ttl_todo_items',   JSON.stringify(todoItems));
     localStorage.setItem('ttl_todo_counter', String(todoIdCounter));
+    localStorage.setItem('ttl_todo_tombstones', JSON.stringify(todoTombstones));
     localStorage.setItem('ttl_counter',  String(taskIdCounter));
     localStorage.setItem('ttl_import_counter', String(importIdCounter));
     localStorage.setItem('ttl_masters',  JSON.stringify(masters));
@@ -9974,6 +10110,7 @@ function saveState() {
   // generalized tracker every other domain uses — see trackNonTaskDomainChangesOnSave()'s
   // own header comment for why this, not per-call-site instrumentation.
   if (typeof trackNonTaskDomainChangesOnSave === 'function') trackNonTaskDomainChangesOnSave();
+  try { applyHeaderButtonVisibility(); } catch (e) {}
   // Phase 22K (PROBLEM 3): same "one funnel, not ~30 scattered call sites" reasoning
   // as trackNonTaskDomainChangesOnSave() just above — virtually every task/log/master
   // mutation in this file already calls saveState() immediately after changing
@@ -10055,6 +10192,16 @@ function loadState() {
     }
     if (td) { try { todoItems = JSON.parse(td) || []; } catch (e) { todoItems = []; } }
     if (tdCounter) todoIdCounter = parseInt(tdCounter) || 0;
+    try { todoTombstones = JSON.parse(localStorage.getItem('ttl_todo_tombstones') || '{}') || {}; } catch (e) { todoTombstones = {}; }
+    // To Do sync migration: give every pre-existing item a stable cross-device uid + updatedAt.
+    let _todoNeedsFirstUpload = false;
+    if (Array.isArray(todoItems)) {
+      todoItems.forEach(t => {
+        if (!t.uid) { t.uid = generateSyncId(); _todoNeedsFirstUpload = true; }
+        if (!t.updatedAt) t.updatedAt = t.createdAt || Date.now();
+      });
+    }
+    if (_todoNeedsFirstUpload) setTimeout(() => { try { recordSyncChange('todoItems', null, 'update'); } catch (e) {} }, 0);
     if (counter) taskIdCounter = parseInt(counter) || 0;
     if (importCounter) importIdCounter = parseInt(importCounter) || 0;
     if (m) {
@@ -10062,9 +10209,10 @@ function loadState() {
       masters = { ...masters, ...parsed };
       if (!masters.weekendDays) masters.weekendDays = [...DEFAULT_WEEKEND_DAYS];
       if (!masters.workHours) masters.workHours = { startH: DEFAULT_WORK_START_H, startM: DEFAULT_WORK_START_M, endH: DEFAULT_WORK_END_H, endM: DEFAULT_WORK_END_M };
-      if (!masters.flags) masters.flags = { sleepAutoPause: true, backgroundSyncEnabled: true };
+      if (!masters.flags) masters.flags = { sleepAutoPause: true, backgroundSyncEnabled: true, showPending: true };
       if (masters.flags.sleepAutoPause === undefined) masters.flags.sleepAutoPause = true;
       if (masters.flags.backgroundSyncEnabled === undefined) masters.flags.backgroundSyncEnabled = true;
+      if (masters.flags.showPending === undefined) masters.flags.showPending = true;
       if (!masters.fontPrefs) masters.fontPrefs = { family: 'default', size: 'md' };
       if (!masters.fontPrefs.family) masters.fontPrefs.family = 'default';
       if (!masters.fontPrefs.size) masters.fontPrefs.size = 'md';
@@ -10671,6 +10819,7 @@ function startTask(id) {
   task.status = 'running';
   task.segmentStart = Date.now();
   if (!task.startedAt) task.startedAt = Date.now();
+  markBreakDayWorkedHere();
 
   const newEntryStartTs = Date.now();
   logEntries.push({
@@ -10738,6 +10887,7 @@ function resumeTask(id) {
   pauseOthersExcept(id);
   task.status = 'running';
   task.segmentStart = Date.now();
+  markBreakDayWorkedHere();
   intervals[id] = setInterval(() => {
     const el = document.getElementById('timer-'+id);
     if (el) { el.textContent = fmt(liveElapsedSecs(task)); el.className='timer-display running'; }
@@ -13645,6 +13795,14 @@ function renderMastersContent() {
         <div style="font-size:11px;color:var(--text-tertiary);margin-top:6px">This name appears in the effort log and XLSX export.</div>
       </div>
       <div style="margin-top:18px;padding-top:16px;border-top:1px solid var(--border)">
+        <label class="complete-label" style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.06em;font-weight:600;display:block;margin-bottom:8px">Header</label>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-secondary);cursor:pointer">
+          <input type="checkbox" id="flag-show-pending" ${(masters.flags && masters.flags.showPending !== false) ? 'checked' : ''} onchange="toggleShowPendingFlag()" style="width:14px;height:14px;cursor:pointer" />
+          Show Pending button (Pending Tasks / To Do)
+        </label>
+        <div style="font-size:11px;color:var(--text-tertiary);margin-top:6px">When off, the Pending button is hidden from the header. The Sync button follows Masters &rsaquo; Sync &rsaquo; Enable Synchronization.</div>
+      </div>
+      <div style="margin-top:18px;padding-top:16px;border-top:1px solid var(--border)">
         <label class="complete-label" style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.06em;font-weight:600;display:block;margin-bottom:5px">Appearance</label>
         <div class="complete-row" style="margin-top:8px">
           <div class="complete-field">
@@ -14882,6 +15040,7 @@ function computeTopSyncStatus() {
 // itself. Cheap (no Drive calls, no re-render of anything else); safe to
 // call as often as needed.
 function refreshTopSyncIndicator() {
+  try { applyHeaderButtonVisibility(); } catch (e) {}
   const dot = document.getElementById('top-sync-dot');
   const btn = document.getElementById('top-sync-btn');
   if (!dot || !btn) return;
@@ -14940,6 +15099,33 @@ function saveWorkHours() {
   checkBreakState();
   renderBreakWidget();
   renderWorkWidget();
+}
+
+// Header button visibility. Sync shows only while "Enable Synchronization" is on
+// (masters.flags.backgroundSyncEnabled); Pending shows only while the user-master flag
+// masters.flags.showPending is true. Hidden buttons get display:none, so the desktop flex
+// row and the phone grid (auto columns) close the gap by themselves. Cheap and idempotent —
+// called from saveState() and refreshTopSyncIndicator() so every path that changes masters
+// (toggles, backup restore, remote sync merge, startup) keeps the header in step.
+function applyHeaderButtonVisibility() {
+  const flags = (masters && masters.flags) || {};
+  const showSync = flags.backgroundSyncEnabled !== false;
+  const showPending = flags.showPending !== false;
+  const syncBtn = document.getElementById('top-sync-btn');
+  const pendBtn = document.getElementById('pending-tasks-btn');
+  if (syncBtn) syncBtn.classList.toggle('header-btn-hidden', !showSync);
+  if (pendBtn) pendBtn.classList.toggle('header-btn-hidden', !showPending);
+  if (!showPending) {
+    const dd = document.getElementById('pending-menu-dropdown');
+    if (dd) dd.classList.add('hidden');
+  }
+}
+
+function toggleShowPendingFlag() {
+  if (!masters.flags) masters.flags = {};
+  masters.flags.showPending = document.getElementById('flag-show-pending').checked;
+  saveState();
+  applyHeaderButtonVisibility();
 }
 
 function toggleSleepFlag() {
@@ -15616,7 +15802,11 @@ function exportBackup() {
     theme: getStoredTheme(),
     logTableColWidths,
     logTableColPinned,
-    weekendOverrides
+    weekendOverrides,
+    // To Do backlog (Pending > To Do) — included so a restore doesn't lose it.
+    todoItems,
+    todoTombstones,
+    todoIdCounter
   };
   // Future synchronization integration point: Export
   // No implementation in Phase 0.5A
@@ -15672,10 +15862,31 @@ function importBackup(event) {
           try { localStorage.setItem('ttl_weekend_' + dateStr, b.weekendOverrides[dateStr]); } catch (e) {}
         });
       }
+      // To Do backlog. Backups exported before To Do was included have no todoItems
+      // field — in that case leave the current To Do list untouched rather than wiping it.
+      let todoRestored = false;
+      if (Array.isArray(b.todoItems)) {
+        todoItems = b.todoItems.filter(t => t && typeof t === 'object');
+        todoTombstones = (b.todoTombstones && typeof b.todoTombstones === 'object') ? b.todoTombstones : {};
+        let maxTodoId = 0;
+        todoItems.forEach(t => {
+          if (!t.uid) t.uid = generateSyncId();
+          if (!t.updatedAt) t.updatedAt = t.createdAt || Date.now();
+          if (typeof t.id === 'number' && t.id > maxTodoId) maxTodoId = t.id;
+        });
+        todoIdCounter = Math.max(parseInt(b.todoIdCounter) || 0, maxTodoId);
+        todoRestored = true;
+      }
       saveState();
+      if (todoRestored) { try { recordSyncChange('todoItems', null, 'update'); } catch (e) {} }
       // Re-render everything
       renderAll();
-      if (status) { status.style.color = 'var(--green-dark)'; status.textContent = `✓ Restored ${tasks.length} tasks and ${logEntries.length} log entries.`; }
+      if (todoRestored) {
+        try { if (typeof renderTodoList === 'function') renderTodoList(); } catch (e) {}
+        try { if (typeof updatePendingMenuCounts === 'function') updatePendingMenuCounts(); } catch (e) {}
+        try { if (typeof updatePendingTasksBadge === 'function') updatePendingTasksBadge(); } catch (e) {}
+      }
+      if (status) { status.style.color = 'var(--green-dark)'; status.textContent = `✓ Restored ${tasks.length} tasks, ${logEntries.length} log entries` + (todoRestored ? ` and ${todoItems.length} To Do items.` : '.'); }
       setTimeout(() => switchTab('data'), 300);
     } catch(err) {
       if (status) { status.style.color = 'var(--red-mid)'; status.textContent = '✗ ' + err.message; }
@@ -15918,6 +16129,41 @@ function renderSearchResults() {
 
   const sorted = [...hits].sort((a, b) => b.sortTs - a.sortTs).slice(0, 80);
 
+  // History index: every log entry grouped by task identity — ticket when present, else
+  // task name + project + module (same rule the Pending popup uses). Newest first.
+  const historyIndex = {};
+  logEntries.forEach(le => {
+    const k = pendingTaskGroupKey(le);
+    (historyIndex[k] = historyIndex[k] || []).push(le);
+  });
+  Object.keys(historyIndex).forEach(k => historyIndex[k].sort((a, b) => (b.startTs || 0) - (a.startTs || 0)));
+
+  function historyPanelHtml(item, currentTs) {
+    const key = pendingTaskGroupKey(item);
+    const list = historyIndex[key] || [];
+    const basis = (item.ticket || '').trim()
+      ? 'Ticket #' + escHtml(item.ticket.trim())
+      : escHtml([item.heading, item.project, item.module].filter(v => v && String(v).trim()).join(' \u203A ') || 'Untitled');
+    const totalSecs = list.reduce((sum, h) => sum + (h.durationSecs != null ? h.durationSecs
+      : (h.endTs && h.startTs ? Math.floor((h.endTs - h.startTs) / 1000) : 0)), 0);
+    const rows = list.map(h => {
+      const d = h.startTs ? new Date(h.startTs) : null;
+      const ds = d ? d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0') : '';
+      const secs = h.durationSecs != null ? h.durationSecs
+        : (h.endTs && h.startTs ? Math.floor((h.endTs - h.startTs) / 1000) : null);
+      return `<div class="pending-history-entry${h.startTs === currentTs ? ' is-current' : ''}" onclick="event.stopPropagation(); jumpToDate('${ds}', ${h.startTs || 'null'})" title="Go to this entry">
+        <div class="pending-history-entry-top"><span>${d ? escHtml(fmtDate(d)) : ''}${h.taskStatus ? ` <span class="search-history-status">${escHtml(h.taskStatus)}</span>` : ''}</span><span>${secs != null ? escHtml(fmtDuration(secs)) : 'In progress'}</span></div>
+        ${h.description ? `<div class="pending-history-entry-desc">${escHtml(h.description)}</div>` : ''}
+        ${h.remark ? `<div class="pending-history-entry-remark">${escHtml(h.remark)}</div>` : ''}
+      </div>`;
+    }).join('');
+    return `<div class="search-history-panel" onclick="event.stopPropagation()">
+      <div class="search-history-head"><span>History \u00B7 ${list.length} entr${list.length === 1 ? 'y' : 'ies'}${list.length ? ' \u00B7 ' + escHtml(fmtDuration(totalSecs)) + ' total' : ''}</span><span>${basis}</span></div>
+      ${rows || '<div class="pending-history-entry" style="cursor:default;color:var(--text-tertiary)">No logged entries yet for this task.</div>'}
+    </div>`;
+  }
+  const historyBtn = '<div class="pending-card-icon-btn" title="History (same ticket, or same task name + project + module)" onclick="event.stopPropagation(); toggleSearchHistory(this)"><i class="ti ti-history"></i></div>';
+
   function highlight(str) {
     if (!str) return '';
     let s = escHtml(str);
@@ -15941,6 +16187,7 @@ function renderSearchResults() {
   container.innerHTML = header + sorted.map((hit, i) => {
     if (hit.type === 'todo') {
       const t = hit.data;
+      const todoHasHistory = !!(historyIndex[pendingTaskGroupKey(t)] || []).length;
       const metaBadges = [
         t.nature  ? `<span style="background:var(--green-bg);color:var(--green-dark);border:1px solid var(--green-mid);border-radius:10px;font-size:10px;padding:1px 7px">${highlight(t.nature)}</span>` : '',
         t.ticket  ? `<span style="background:var(--amber-bg,#fff8e1);color:var(--amber-dark,#795900);border:1px solid var(--amber-mid,#f0b400);border-radius:10px;font-size:10px;padding:1px 7px">#${highlight(t.ticket)}</span>` : '',
@@ -15952,8 +16199,10 @@ function renderSearchResults() {
         <div class="search-result-body">
           <div class="search-result-heading">${highlight(t.heading) || '<span style="color:var(--text-tertiary);font-style:italic">Untitled</span>'}</div>
           ${metaBadges ? `<div class="search-result-meta" style="display:flex;gap:5px;align-items:center;flex-wrap:wrap;margin-top:3px">${metaBadges}</div>` : ''}
+          ${todoHasHistory ? historyPanelHtml(t, null) : ''}
         </div>
         <div class="search-result-actions">
+          ${todoHasHistory ? historyBtn : ''}
           <div class="pending-card-icon-btn" title="Plan a date" onclick="event.stopPropagation(); planTodoFromSearch(${t.id})"><i class="ti ti-calendar-plus"></i></div>
         </div>
       </div>`;
@@ -15972,8 +16221,10 @@ function renderSearchResults() {
       <div class="search-result-body">
         <div class="search-result-heading">${highlight(e.heading) || '<span style="color:var(--text-tertiary);font-style:italic">Untitled</span>'}</div>
         ${metaBadges ? `<div class="search-result-meta" style="display:flex;gap:5px;align-items:center;flex-wrap:wrap;margin-top:3px">${metaBadges}</div>` : ''}
+        ${historyPanelHtml(e, e.startTs)}
       </div>
       <div class="search-result-actions">
+        ${historyBtn}
         <div class="pending-card-icon-btn" title="Carry forward to a date" onclick="event.stopPropagation(); carryForwardFromSearch(${e.taskId})"><i class="ti ti-arrow-forward-up"></i></div>
       </div>
     </div>`;
@@ -15985,6 +16236,12 @@ function renderSearchResults() {
 function planTodoFromSearch(id) {
   closeSearch();
   openTodoPlanModal(id);
+}
+function toggleSearchHistory(btn) {
+  btn.classList.toggle('active');
+  const item = btn.closest('.search-result-item');
+  const panel = item ? item.querySelector('.search-history-panel') : null;
+  if (panel) panel.classList.toggle('open');
 }
 function carryForwardFromSearch(taskId) {
   closeSearch();
@@ -17179,6 +17436,9 @@ function startBreak() {
   const dateStr = todayStr();
   const { all, day } = getBreakDataForDate(dateStr);
   if (day.currentStart !== null) return; // already on break
+  // Brand-new day with no work done on THIS device: an idle/open device's break is not
+  // real break time, so flag it to stay local (never uploaded, replaceable by synced data).
+  if (!day.workedHere && day.segments.length === 0) day.idleOnly = true;
   day.currentStart = Date.now();
   all[dateStr] = day;
   saveBreakData(all);
@@ -17288,6 +17548,7 @@ function initBreakTimer() {
       w.startH, w.startM, 0, 0);
     // Break started at workStart (09:30) — open segment, will close when task starts
     day.currentStart = workStart.getTime();
+    if (!day.workedHere) day.idleOnly = true; // startup backfill is a guess — keep it local
     data[dateStr] = day;
     saveBreakData(data);
   }
@@ -18269,8 +18530,11 @@ function saveTodoDraft() {
     else if (val) customFields[c.key] = val;
   });
 
+  const _newUid = generateSyncId();
   todoItems.unshift({
     id: ++todoIdCounter,
+    uid: _newUid,
+    updatedAt: Date.now(),
     heading,
     project: core.project,
     nature: core.nature,
@@ -18281,6 +18545,7 @@ function saveTodoDraft() {
     createdAt: Date.now()
   });
   saveState();
+  recordSyncChange('todoItems', _newUid, 'create');
   closeAddTodoForm();
   renderTodoList();
   updatePendingMenuCounts();
@@ -18288,8 +18553,11 @@ function saveTodoDraft() {
 }
 
 function deleteTodoItem(id) {
+  const _gone = todoItems.find(t => t.id === id);
   todoItems = todoItems.filter(t => t.id !== id);
+  if (_gone && _gone.uid) todoTombstones[_gone.uid] = Date.now();
   saveState();
+  if (_gone && _gone.uid) recordSyncChange('todoItems', _gone.uid, 'delete');
   renderTodoList();
   updatePendingMenuCounts();
   updatePendingTasksBadge();
@@ -18321,7 +18589,9 @@ function confirmTodoPlanDate() {
   if (!item) { closeTodoPlanModal(); return; }
   const chosen = document.getElementById('todo-plan-date').value;
   item.plannedDate = chosen || null;
+  item.updatedAt = Date.now();
   saveState();
+  if (item.uid) recordSyncChange('todoItems', item.uid, 'update');
   closeTodoPlanModal();
   renderTodoList();
 }
@@ -18329,14 +18599,16 @@ function clearTodoPlanDate() {
   const id = pendingTodoPlanId;
   if (id == null) return;
   const item = todoItems.find(t => t.id === id);
-  if (item) item.plannedDate = null;
+  if (item) { item.plannedDate = null; item.updatedAt = Date.now(); }
   saveState();
+  if (item && item.uid) recordSyncChange('todoItems', item.uid, 'update');
   closeTodoPlanModal();
   renderTodoList();
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 loadState();
+applyHeaderButtonVisibility();
 initTheme();
 // Future synchronization initialization
 // No implementation in Phase 0.5A
