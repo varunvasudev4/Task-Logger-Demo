@@ -937,14 +937,16 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
 }
 .search-empty { padding: 28px 16px; text-align: center; color: var(--text-tertiary); font-size: 13px; }
 .search-result-actions { display: flex; gap: 2px; flex-shrink: 0; padding-top: 1px; }
-/* Search-result History: inline timeline of every log entry for the same task
-   (ticket, else task name + project + module). Reuses the Pending popup's entry styles. */
-.search-history-panel { display: none; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); cursor: default; }
-.search-history-panel.open { display: block; }
-.search-history-head { font-size: 11px; color: var(--text-tertiary); margin-bottom: 4px; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }
-.search-history-panel .pending-history-entry { cursor: pointer; padding: 6px 4px; border-radius: 4px; }
-.search-history-panel .pending-history-entry:hover { background: var(--bg-secondary); }
-.search-history-panel .pending-history-entry.is-current { background: var(--blue-bg); }
+/* Search-result History popup: sits on top of the search overlay (z-index 9999). Timeline of every
+   log entry for the same task (ticket, else task name + project + module); reuses the Pending
+   popup's entry styles. */
+#search-history-modal { z-index: 10000; }
+#search-history-modal .modal { max-width: 520px; max-height: min(80vh, 640px); }
+.search-history-head { font-size: 11px; color: var(--text-tertiary); margin-bottom: 8px; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; justify-content: space-between; }
+.search-history-basis { font-size: 12px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px; word-break: break-word; }
+#search-history-modal .pending-history-entry { cursor: pointer; padding: 8px 6px; border-radius: 4px; }
+#search-history-modal .pending-history-entry:hover { background: var(--bg-secondary); }
+#search-history-modal .pending-history-entry.is-current { background: var(--blue-bg); }
 .search-history-status { font-size: 10px; font-weight: 500; border: 1px solid var(--border-md); border-radius: 10px; padding: 0 6px; color: var(--text-secondary); }
 .search-result-type-tag {
   display: inline-block; font-family: var(--font-mono); font-size: 9.5px; font-weight: 600;
@@ -1914,6 +1916,17 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
 </div>
 
 <!-- To Do modal (Pending ▾ → To Do) -->
+<!-- Search > History popup (opens on top of the search overlay) -->
+<div class="modal-overlay hidden" id="search-history-modal" onclick="if(event.target===this)closeSearchHistory()">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title"><i class="ti ti-history" style="vertical-align:-2px;margin-right:6px;color:var(--blue-mid)"></i>Task History</div>
+      <button class="btn-icon" onclick="closeSearchHistory()" title="Close"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="modal-body" id="search-history-body"></div>
+  </div>
+</div>
+
 <div class="modal-overlay hidden" id="todo-modal">
   <div class="modal" style="max-width:560px">
     <div class="modal-header">
@@ -12949,6 +12962,7 @@ function _fsSupported() {
 const FS_PORTAL_IDS = [
   'appTooltip',            // custom tooltip
   'task-search-overlay',   // Ctrl+Shift+F search
+  'search-history-modal',  // History popup opened from a search result
   'complete-modal',
   'carry-forward-modal',
   'pending-tasks-modal',
@@ -16056,6 +16070,7 @@ function openSearch() {
 }
 
 function closeSearch() {
+  closeSearchHistory();
   document.getElementById('task-search-overlay').classList.add('hidden');
 }
 
@@ -16138,31 +16153,13 @@ function renderSearchResults() {
   });
   Object.keys(historyIndex).forEach(k => historyIndex[k].sort((a, b) => (b.startTs || 0) - (a.startTs || 0)));
 
-  function historyPanelHtml(item, currentTs) {
-    const key = pendingTaskGroupKey(item);
-    const list = historyIndex[key] || [];
-    const basis = (item.ticket || '').trim()
-      ? 'Ticket #' + escHtml(item.ticket.trim())
-      : escHtml([item.heading, item.project, item.module].filter(v => v && String(v).trim()).join(' \u203A ') || 'Untitled');
-    const totalSecs = list.reduce((sum, h) => sum + (h.durationSecs != null ? h.durationSecs
-      : (h.endTs && h.startTs ? Math.floor((h.endTs - h.startTs) / 1000) : 0)), 0);
-    const rows = list.map(h => {
-      const d = h.startTs ? new Date(h.startTs) : null;
-      const ds = d ? d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0') : '';
-      const secs = h.durationSecs != null ? h.durationSecs
-        : (h.endTs && h.startTs ? Math.floor((h.endTs - h.startTs) / 1000) : null);
-      return `<div class="pending-history-entry${h.startTs === currentTs ? ' is-current' : ''}" onclick="event.stopPropagation(); jumpToDate('${ds}', ${h.startTs || 'null'})" title="Go to this entry">
-        <div class="pending-history-entry-top"><span>${d ? escHtml(fmtDate(d)) : ''}${h.taskStatus ? ` <span class="search-history-status">${escHtml(h.taskStatus)}</span>` : ''}</span><span>${secs != null ? escHtml(fmtDuration(secs)) : 'In progress'}</span></div>
-        ${h.description ? `<div class="pending-history-entry-desc">${escHtml(h.description)}</div>` : ''}
-        ${h.remark ? `<div class="pending-history-entry-remark">${escHtml(h.remark)}</div>` : ''}
-      </div>`;
-    }).join('');
-    return `<div class="search-history-panel" onclick="event.stopPropagation()">
-      <div class="search-history-head"><span>History \u00B7 ${list.length} entr${list.length === 1 ? 'y' : 'ies'}${list.length ? ' \u00B7 ' + escHtml(fmtDuration(totalSecs)) + ' total' : ''}</span><span>${basis}</span></div>
-      ${rows || '<div class="pending-history-entry" style="cursor:default;color:var(--text-tertiary)">No logged entries yet for this task.</div>'}
-    </div>`;
+  // Popup contexts: each History button passes an index into this array (keeps arbitrary
+  // ticket/task text out of inline onclick attributes).
+  _searchHistoryCtx = [];
+  function historyBtnFor(item, currentTs) {
+    _searchHistoryCtx.push({ item: item, currentTs: currentTs });
+    return '<div class="pending-card-icon-btn" title="History (same ticket, or same task name + project + module)" onclick="event.stopPropagation(); openSearchHistory(' + (_searchHistoryCtx.length - 1) + ')"><i class="ti ti-history"></i></div>';
   }
-  const historyBtn = '<div class="pending-card-icon-btn" title="History (same ticket, or same task name + project + module)" onclick="event.stopPropagation(); toggleSearchHistory(this)"><i class="ti ti-history"></i></div>';
 
   function highlight(str) {
     if (!str) return '';
@@ -16199,10 +16196,9 @@ function renderSearchResults() {
         <div class="search-result-body">
           <div class="search-result-heading">${highlight(t.heading) || '<span style="color:var(--text-tertiary);font-style:italic">Untitled</span>'}</div>
           ${metaBadges ? `<div class="search-result-meta" style="display:flex;gap:5px;align-items:center;flex-wrap:wrap;margin-top:3px">${metaBadges}</div>` : ''}
-          ${todoHasHistory ? historyPanelHtml(t, null) : ''}
         </div>
         <div class="search-result-actions">
-          ${todoHasHistory ? historyBtn : ''}
+          ${todoHasHistory ? historyBtnFor(t, null) : ''}
           <div class="pending-card-icon-btn" title="Plan a date" onclick="event.stopPropagation(); planTodoFromSearch(${t.id})"><i class="ti ti-calendar-plus"></i></div>
         </div>
       </div>`;
@@ -16221,10 +16217,9 @@ function renderSearchResults() {
       <div class="search-result-body">
         <div class="search-result-heading">${highlight(e.heading) || '<span style="color:var(--text-tertiary);font-style:italic">Untitled</span>'}</div>
         ${metaBadges ? `<div class="search-result-meta" style="display:flex;gap:5px;align-items:center;flex-wrap:wrap;margin-top:3px">${metaBadges}</div>` : ''}
-        ${historyPanelHtml(e, e.startTs)}
       </div>
       <div class="search-result-actions">
-        ${historyBtn}
+        ${historyBtnFor(e, e.startTs)}
         <div class="pending-card-icon-btn" title="Carry forward to a date" onclick="event.stopPropagation(); carryForwardFromSearch(${e.taskId})"><i class="ti ti-arrow-forward-up"></i></div>
       </div>
     </div>`;
@@ -16237,12 +16232,65 @@ function planTodoFromSearch(id) {
   closeSearch();
   openTodoPlanModal(id);
 }
-function toggleSearchHistory(btn) {
-  btn.classList.toggle('active');
-  const item = btn.closest('.search-result-item');
-  const panel = item ? item.querySelector('.search-history-panel') : null;
-  if (panel) panel.classList.toggle('open');
+let _searchHistoryCtx = [];
+
+// History popup for a search result: every log entry for the same task, newest first.
+// Identity = ticket when present, else task name + project + module (pendingTaskGroupKey()).
+function openSearchHistory(idx) {
+  const ctx = _searchHistoryCtx[idx];
+  const modal = document.getElementById('search-history-modal');
+  const body = document.getElementById('search-history-body');
+  if (!ctx || !modal || !body) return;
+  const item = ctx.item;
+  const key = pendingTaskGroupKey(item);
+  const list = logEntries.filter(le => pendingTaskGroupKey(le) === key)
+    .sort((a, b) => (b.startTs || 0) - (a.startTs || 0));
+  const hasTicket = !!(item.ticket || '').trim();
+  const basis = hasTicket
+    ? 'Ticket #' + escHtml(item.ticket.trim())
+    : escHtml([item.heading, item.project, item.module].filter(v => v && String(v).trim()).join(' \u203A ') || 'Untitled');
+  const secsOf = h => h.durationSecs != null ? h.durationSecs
+    : (h.endTs && h.startTs ? Math.floor((h.endTs - h.startTs) / 1000) : null);
+  const totalSecs = list.reduce((sum, h) => sum + (secsOf(h) || 0), 0);
+  const rows = list.map(h => {
+    const d = h.startTs ? new Date(h.startTs) : null;
+    const ds = d ? d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0') : '';
+    const secs = secsOf(h);
+    return `<div class="pending-history-entry${ctx.currentTs != null && h.startTs === ctx.currentTs ? ' is-current' : ''}" onclick="jumpToDateFromHistory('${ds}', ${h.startTs || 'null'})" title="Go to this entry">
+      <div class="pending-history-entry-top"><span>${d ? escHtml(fmtDate(d)) : ''}${h.taskStatus ? ` <span class="search-history-status">${escHtml(h.taskStatus)}</span>` : ''}</span><span>${secs != null ? escHtml(fmtDuration(secs)) : 'In progress'}</span></div>
+      ${h.description ? `<div class="pending-history-entry-desc">${escHtml(h.description)}</div>` : ''}
+      ${h.remark ? `<div class="pending-history-entry-remark">${escHtml(h.remark)}</div>` : ''}
+    </div>`;
+  }).join('');
+  body.innerHTML = `
+    <div class="search-history-basis">${basis}</div>
+    <div class="search-history-head"><span>${hasTicket ? 'Grouped by ticket' : 'Grouped by task name + project + module'}</span><span>${list.length} entr${list.length === 1 ? 'y' : 'ies'}${list.length ? ' \u00B7 ' + escHtml(fmtDuration(totalSecs)) + ' total' : ''}</span></div>
+    ${rows || '<div class="pending-empty">No logged entries yet for this task.</div>'}`;
+  modal.classList.remove('hidden');
 }
+
+function closeSearchHistory() {
+  const modal = document.getElementById('search-history-modal');
+  if (modal) modal.classList.add('hidden');
+}
+
+function jumpToDateFromHistory(dateStr, entryTs) {
+  closeSearchHistory();
+  jumpToDate(dateStr, entryTs);
+}
+
+// Escape closes the History popup first (capture phase, before the search overlay's own Escape
+// handlers run), so one Escape peels back one layer instead of closing Search underneath it.
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  const modal = document.getElementById('search-history-modal');
+  if (modal && !modal.classList.contains('hidden')) {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    closeSearchHistory();
+  }
+}, true);
+
 function carryForwardFromSearch(taskId) {
   closeSearch();
   continueTomorrow(taskId);
