@@ -1070,6 +1070,39 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
 .timer-summary-time { font-family: var(--font-mono); font-size: 20px; font-weight: 700; color: var(--green-dark); font-variant-numeric: tabular-nums; }
 .timer-summary-label { font-family: var(--font-mono); font-size: 12px; color: var(--green-dark); }
 
+/* ── Wallpaper (Masters → Wallpaper) ───────────────────────────────────── */
+#app-wallpaper { position: fixed; inset: 0; z-index: -1; display: none; pointer-events: none; background-repeat: no-repeat; }
+#app-wallpaper::after { content: ""; position: absolute; inset: 0; background: var(--bg); opacity: var(--wp-dim, .25); }
+.wp-select { width: 100%; max-width: 340px; padding: 8px 10px; font-size: 13px; border: 1px solid var(--border-md); border-radius: var(--radius-md); background: var(--bg); color: var(--text-primary); }
+.wp-frames { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; margin: 14px 0 10px; }
+.wp-frame-wrap { display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 11px; color: var(--text-secondary); }
+.wp-frame { position: relative; overflow: hidden; border: 3px solid var(--text-primary); background: var(--bg-tertiary); box-shadow: 0 2px 8px rgba(0,0,0,.18); }
+.wp-frame.phone   { width: 84px;  aspect-ratio: 9 / 19.5; border-radius: 14px; }
+.wp-frame.tablet  { width: 150px; aspect-ratio: 3 / 4;    border-radius: 10px; }
+.wp-frame.desktop { width: 220px; aspect-ratio: 16 / 10;  border-radius: 6px; }
+.wp-img { position: absolute; inset: 0; background-repeat: no-repeat; }
+.wp-img::after { content: ""; position: absolute; inset: 0; background: var(--bg); opacity: var(--wp-dim, .25); }
+.wp-mock { position: absolute; inset: 0; padding: 9% 8%; display: flex; flex-direction: column; gap: 6%; pointer-events: none; }
+.wp-mock i { display: block; border-radius: 3px; background: var(--bg); opacity: .92; border: 1px solid var(--border); }
+.wp-mock i:nth-child(1) { flex: 0 0 9%; }
+.wp-mock i:nth-child(2) { flex: 0 0 24%; }
+.wp-mock i:nth-child(3) { flex: 0 0 24%; }
+.wp-stage { position: relative; overflow: hidden; border: 2px solid var(--green-mid); border-radius: 8px; cursor: grab; touch-action: none; margin: 10px 0; max-width: 100%; background: var(--bg-tertiary); user-select: none; -webkit-user-select: none; }
+.wp-stage:active { cursor: grabbing; }
+.wp-stage.phone   { width: 170px; aspect-ratio: 9 / 19.5; }
+.wp-stage.tablet  { width: 260px; aspect-ratio: 3 / 4; }
+.wp-stage.desktop { width: 380px; aspect-ratio: 16 / 10; }
+.wp-stage::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(to right, transparent 33.2%, rgba(255,255,255,.5) 33.3%, transparent 33.5%, transparent 66.5%, rgba(255,255,255,.5) 66.6%, transparent 66.8%),
+              linear-gradient(to bottom, transparent 33.2%, rgba(255,255,255,.5) 33.3%, transparent 33.5%, transparent 66.5%, rgba(255,255,255,.5) 66.6%, transparent 66.8%); }
+.wp-row { display: flex; align-items: center; gap: 10px; margin: 6px 0; font-size: 12px; color: var(--text-secondary); }
+.wp-row label { width: 56px; flex-shrink: 0; }
+.wp-row input[type=range] { flex: 1; min-width: 0; }
+.wp-row output { width: 44px; text-align: right; font-family: var(--font-mono); font-size: 11px; }
+.wp-card { border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 12px 14px; margin-top: 12px; background: var(--bg-secondary); }
+.wp-msg { font-size: 11px; margin-top: 6px; color: var(--text-tertiary); }
+.wp-msg.err { color: var(--red-mid); }
+
 /* Masters modal */
 .tab-btn {
   padding: 6px 14px; border-radius: 20px; border: 1px solid var(--border-md);
@@ -1674,6 +1707,8 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
 </style>
 </head>
 <body>
+<div id="app-wallpaper" aria-hidden="true"></div>
+<input type="file" id="wp-file-input" accept="image/*" style="display:none" onchange="wpOnFilePicked(this)" />
 <div id="appTooltip" role="tooltip"></div>
 
 <div class="app-constrained">
@@ -2279,6 +2314,7 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
         <button class="tab-btn" onclick="switchTab('workhours')"><i class="ti ti-clock" style="font-size:13px"></i> Work Hours</button>
         <button class="tab-btn" onclick="switchTab('email')"><i class="ti ti-mail" style="font-size:13px"></i> Email</button>
         <button class="tab-btn" onclick="switchTab('colors')"><i class="ti ti-palette" style="font-size:13px"></i> Colors</button>
+        <button class="tab-btn" onclick="switchTab('wallpaper')"><i class="ti ti-photo" style="font-size:13px"></i> Wallpaper</button>
         <button class="tab-btn" onclick="switchTab('data')"><i class="ti ti-database" style="font-size:13px"></i> Data</button>
         <button class="tab-btn" onclick="switchTab('sync')"><i class="ti ti-cloud" style="font-size:13px"></i> Synchronization</button>
       </nav>
@@ -3804,6 +3840,7 @@ function mergeNonTaskDomains(remoteParsed, opts) {
       // restoreIntervals()/timer-touching) renderList() is the correct
       // "minimum required UI update" per §6, not an over-reaction.
       if (typeof renderList === 'function') renderList();
+      if (typeof applyWallpaper === 'function') applyWallpaper();
     }
     if (changedSet.indexOf('theme') !== -1) {
       // Just a CSS attribute + icon/label swap — never a task-card concern.
@@ -11509,6 +11546,7 @@ function loadState() {
     if (typeof primeNonTaskDomainHashes === 'function') primeNonTaskDomainHashes();
     if (typeof applyFontPrefs === 'function') applyFontPrefs();
     if (typeof applyColorPrefs === 'function') applyColorPrefs();
+    if (typeof applyWallpaper === 'function') applyWallpaper();
   } catch(e) {}
 }
 
@@ -15130,7 +15168,7 @@ function renderColorsTabHTML() {
 function switchTab(tab) {
   activeMastersTab = tab;
   _grpDdOpen = null;
-  const TAB_ORDER = ['user','pending','lists','columns','weekends','workhours','email','colors','data','sync'];
+  const TAB_ORDER = ['user','pending','lists','columns','weekends','workhours','email','colors','wallpaper','data','sync'];
   document.querySelectorAll('.master-nav .tab-btn').forEach((b,i) => {
     b.classList.toggle('active', TAB_ORDER[i] === tab);
   });
@@ -15487,6 +15525,11 @@ function renderMastersContent() {
   }
   if (activeMastersTab === 'colors') {
     content.innerHTML = renderColorsTabHTML();
+    return;
+  }
+  if (activeMastersTab === 'wallpaper') {
+    content.innerHTML = renderWallpaperTabHTML();
+    wpAfterRender();
     return;
   }
   if (activeMastersTab === 'columns') {
@@ -17038,14 +17081,333 @@ function syncAvatarSize() {
   };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
 })();
+// ══ Wallpaper (Masters → Wallpaper — reached from the header photo, like User + Colors) ══
+// masters.wallpaper = { source:'none'|'preset'|'custom', presetId, customType:'url'|'upload', customUrl,
+//                       dim:0–80, fit:{ phone|tablet|desktop: {zoom:1–4, x:0–1, y:0–1} } }
+// URLs (preset / custom) sync with the other masters. An uploaded file is downscaled and kept ONLY on
+// this device (localStorage 'ttl_wallpaper_upload') so a big image never rides along in Drive sync.
+const WP_UPLOAD_KEY = 'ttl_wallpaper_upload';
+const WP_PRESETS = [
+  { id: 'valley', name: 'Mountain valley',    url: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=2000&q=80' },
+  { id: 'forest', name: 'Misty forest',       url: 'https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?auto=format&fit=crop&w=2000&q=80' },
+  { id: 'night',  name: 'Starry night peaks', url: 'https://images.unsplash.com/photo-1519681393784-d120267933ba?auto=format&fit=crop&w=2000&q=80' }
+];
+const WP_DEVICES = [
+  { key: 'phone',   label: 'Phone',   icon: 'ti-device-mobile',  aspect: 9 / 19.5 },
+  { key: 'tablet',  label: 'Tablet',  icon: 'ti-device-tablet',  aspect: 3 / 4 },
+  { key: 'desktop', label: 'Desktop', icon: 'ti-device-desktop', aspect: 16 / 10 }
+];
+const _wpDims = {};          // src → {w,h} | {err:true}
+let _wpEdit = { open: false, dev: 'phone' };
+let _wpMsg = { text: '', err: false };
+
+function wpClamp(v, a, b) { return Math.min(b, Math.max(a, v)); }
+function wpGet() {
+  const w = masters.wallpaper || {};
+  return {
+    source: ['preset', 'custom'].includes(w.source) ? w.source : 'none',
+    presetId: w.presetId || WP_PRESETS[0].id,
+    customType: w.customType === 'upload' ? 'upload' : 'url',
+    customUrl: w.customUrl || '',
+    dim: typeof w.dim === 'number' ? wpClamp(w.dim, 0, 80) : 25,
+    fit: w.fit || {}
+  };
+}
+function wpSet(patch) {
+  masters.wallpaper = Object.assign({}, masters.wallpaper || {}, patch);
+}
+function wpFit(dev) {
+  const f = (wpGet().fit || {})[dev] || {};
+  return { zoom: wpClamp(+f.zoom || 1, 1, 4), x: f.x == null ? 0.5 : wpClamp(+f.x, 0, 1), y: f.y == null ? 0.5 : wpClamp(+f.y, 0, 1) };
+}
+function wpSetFit(dev, fit) {
+  const all = Object.assign({}, wpGet().fit);
+  all[dev] = { zoom: +fit.zoom.toFixed(3), x: +fit.x.toFixed(4), y: +fit.y.toFixed(4) };
+  wpSet({ fit: all });
+}
+function wpSrc() {
+  const w = wpGet();
+  if (w.source === 'preset') { const p = WP_PRESETS.find(p => p.id === w.presetId); return p ? p.url : ''; }
+  if (w.source === 'custom') {
+    if (w.customType === 'upload') { try { return localStorage.getItem(WP_UPLOAD_KEY) || ''; } catch (e) { return ''; } }
+    return w.customUrl;
+  }
+  return '';
+}
+function wpViewportDevice() { const w = window.innerWidth; return w <= 640 ? 'phone' : (w <= 1024 ? 'tablet' : 'desktop'); }
+function wpLoadDims(src, cb) {
+  if (_wpDims[src]) { cb(!_wpDims[src].err); return; }
+  const img = new Image();
+  img.onload = () => { _wpDims[src] = { w: img.naturalWidth, h: img.naturalHeight }; cb(true); };
+  img.onerror = () => { _wpDims[src] = { err: true }; cb(false); };
+  img.src = src;
+}
+// One formula for every surface (preview frames, editor stage, the real app background):
+// cover the box, multiply by zoom, then slide by x/y (0–1) inside the overflow.
+function wpApplyBg(el, src, aspect, fit) {
+  const d = _wpDims[src], z = Math.round(fit.zoom * 100);
+  let size = 'cover';
+  if (d && d.w) size = (d.w / d.h > aspect) ? 'auto ' + z + '%' : z + '% auto';
+  el.style.backgroundImage = "url('" + src.replace(/'/g, '%27') + "')";
+  el.style.backgroundSize = size;
+  el.style.backgroundPosition = (fit.x * 100) + '% ' + (fit.y * 100) + '%';
+}
+function applyWallpaper() {
+  const el = document.getElementById('app-wallpaper');
+  if (!el) return;
+  const w = wpGet(), src = wpSrc();
+  if (!src) { el.style.display = 'none'; el.style.backgroundImage = ''; return; }
+  wpLoadDims(src, ok => {
+    if (wpSrc() !== src) return; // selection changed while the image was loading
+    if (!ok) { el.style.display = 'none'; return; }
+    wpApplyBg(el, src, window.innerWidth / Math.max(1, window.innerHeight), wpFit(wpViewportDevice()));
+    el.style.setProperty('--wp-dim', w.dim / 100);
+    el.style.display = 'block';
+  });
+}
+(function () {
+  let t = null;
+  window.addEventListener('resize', () => { clearTimeout(t); t = setTimeout(applyWallpaper, 150); });
+  window.addEventListener('load', applyWallpaper);
+})();
+
+// ── Masters → Wallpaper tab ──
+function renderWallpaperTabHTML() {
+  const w = wpGet(), src = wpSrc();
+  const selVal = w.source === 'preset' ? w.presetId : w.source;
+  const opts = [`<option value="none"${selVal === 'none' ? ' selected' : ''}>None (theme colour only)</option>`]
+    .concat(WP_PRESETS.map(p => `<option value="${p.id}"${selVal === p.id ? ' selected' : ''}>${esc(p.name)}</option>`))
+    .concat([`<option value="custom"${selVal === 'custom' ? ' selected' : ''}>Custom image…</option>`]).join('');
+  let custom = '';
+  if (w.source === 'custom') {
+    const urlVal = w.customType === 'url' ? w.customUrl : '';
+    custom = `
+      <div class="wp-card">
+        <div style="font-size:12px;font-weight:600;margin-bottom:6px">Custom image</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <input class="master-add-input" id="wp-url-input" type="url" inputmode="url" spellcheck="false" placeholder="https://… image URL (recommended)" value="${esc(urlVal)}"
+            onkeydown="if(event.key==='Enter') wpApplyUrl()" style="flex:1;min-width:200px" />
+          <button class="btn btn-primary" onclick="wpApplyUrl()"><i class="ti ti-link"></i> Use URL</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap">
+          <button class="btn" onclick="document.getElementById('wp-file-input').click()"><i class="ti ti-upload"></i> Upload file</button>
+          <span style="font-size:11px;color:var(--text-tertiary)">${w.customType === 'upload' && src ? 'Using an uploaded file (saved on this device only).' : 'A hosted URL loads faster and syncs to your other devices; an uploaded file stays on this device.'}</span>
+        </div>
+        <div class="wp-msg${_wpMsg.err ? ' err' : ''}" id="wp-msg">${esc(_wpMsg.text)}</div>
+      </div>`;
+  }
+  const frames = WP_DEVICES.map(d => `
+    <div class="wp-frame-wrap">
+      <div class="wp-frame ${d.key}"><div class="wp-img" data-wp-dev="${d.key}"></div><div class="wp-mock"><i></i><i></i><i></i></div></div>
+      <span><i class="ti ${d.icon}" style="vertical-align:-2px"></i> ${d.label}</span>
+    </div>`).join('');
+  const hasImg = w.source !== 'none';
+  let edit = '';
+  if (w.source === 'custom' && src) {
+    edit = `<div style="margin-top:8px"><button class="btn" onclick="wpToggleEdit()"><i class="ti ti-crop"></i> ${_wpEdit.open ? 'Close editor' : 'Edit photo'}</button></div>`;
+    if (_wpEdit.open) {
+      const dv = WP_DEVICES.find(d => d.key === _wpEdit.dev) || WP_DEVICES[0];
+      const f = wpFit(dv.key);
+      edit += `
+      <div class="wp-card">
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:4px">
+          ${WP_DEVICES.map(d => `<button class="btn ${d.key === dv.key ? 'btn-primary' : ''}" onclick="wpEditDevice('${d.key}')"><i class="ti ${d.icon}"></i> ${d.label}</button>`).join('')}
+        </div>
+        <div style="font-size:11px;color:var(--text-tertiary)">Drag the image to reposition. Scroll or use the slider to zoom. Each screen keeps its own framing.</div>
+        <div class="wp-stage ${dv.key}" id="wp-stage"><div class="wp-img" id="wp-stage-img" style="--wp-dim:0"></div></div>
+        <div class="wp-row"><label for="wp-zoom">Zoom</label>
+          <button class="btn" style="padding:2px 9px" onclick="wpNudgeZoom(-0.1)" aria-label="Zoom out">−</button>
+          <input type="range" id="wp-zoom" min="100" max="400" step="1" value="${Math.round(f.zoom * 100)}" oninput="wpFitInput('zoom', this.value/100)" onchange="wpFitCommit()" />
+          <button class="btn" style="padding:2px 9px" onclick="wpNudgeZoom(0.1)" aria-label="Zoom in">+</button>
+          <output id="wp-zoom-out">${Math.round(f.zoom * 100)}%</output></div>
+        <div class="wp-row"><label for="wp-x">Left–Right</label>
+          <input type="range" id="wp-x" min="0" max="100" step="1" value="${Math.round(f.x * 100)}" oninput="wpFitInput('x', this.value/100)" onchange="wpFitCommit()" />
+          <output id="wp-x-out">${Math.round(f.x * 100)}%</output></div>
+        <div class="wp-row"><label for="wp-y">Up–Down</label>
+          <input type="range" id="wp-y" min="0" max="100" step="1" value="${Math.round(f.y * 100)}" oninput="wpFitInput('y', this.value/100)" onchange="wpFitCommit()" />
+          <output id="wp-y-out">${Math.round(f.y * 100)}%</output></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+          <button class="btn" onclick="wpResetFit()"><i class="ti ti-restore"></i> Reset this screen</button>
+          <button class="btn" onclick="wpCopyFitToAll()"><i class="ti ti-copy"></i> Copy to all screens</button>
+        </div>
+      </div>`;
+    }
+  }
+  const dim = hasImg ? `
+    <div class="wp-card">
+      <div class="wp-row" style="margin:0"><label for="wp-dim" style="width:64px">Overlay</label>
+        <input type="range" id="wp-dim" min="0" max="80" step="1" value="${w.dim}" oninput="wpDimInput(this.value)" onchange="saveState()" />
+        <output id="wp-dim-out">${w.dim}%</output></div>
+      <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">Softens the image with your theme colour so text stays readable.</div>
+    </div>` : '';
+  return `
+    <div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">Choose a background picture for the whole app. The preview shows how it fits a phone, tablet and desktop screen.</div>
+    <label for="wp-select" style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Wallpaper</label>
+    <select class="wp-select" id="wp-select" onchange="wpOnSelect(this.value)">${opts}</select>
+    ${custom}
+    <div class="wp-frames" id="wp-frames">${frames}</div>
+    <div class="wp-msg" id="wp-frames-msg"></div>
+    ${edit}
+    ${dim}`;
+}
+function wpAfterRender() { wpPaintFrames(); wpBindStage(); }
+function wpPaintFrames() {
+  const w = wpGet(), src = wpSrc();
+  const wrap = document.getElementById('wp-frames'), msg = document.getElementById('wp-frames-msg');
+  if (wrap) wrap.style.setProperty('--wp-dim', w.dim / 100);
+  const imgs = document.querySelectorAll('#masters-content .wp-img[data-wp-dev]');
+  if (!src) {
+    imgs.forEach(el => { el.style.backgroundImage = ''; });
+    if (msg) { msg.className = 'wp-msg'; msg.textContent = w.source === 'custom' ? 'Add an image URL or upload a file to see the preview.' : ''; }
+    return;
+  }
+  wpLoadDims(src, ok => {
+    if (wpSrc() !== src) return;
+    const m = document.getElementById('wp-frames-msg');
+    if (!ok) {
+      document.querySelectorAll('#masters-content .wp-img').forEach(el => { el.style.backgroundImage = ''; });
+      if (m) { m.className = 'wp-msg err'; m.textContent = 'This image could not be loaded. Check the link, or try another image.'; }
+      return;
+    }
+    if (m) { m.className = 'wp-msg'; m.textContent = ''; }
+    document.querySelectorAll('#masters-content .wp-img[data-wp-dev]').forEach(el => {
+      const dv = WP_DEVICES.find(d => d.key === el.getAttribute('data-wp-dev'));
+      wpApplyBg(el, src, dv.aspect, wpFit(dv.key));
+    });
+    wpPaintStage();
+  });
+}
+function wpPaintStage() {
+  const el = document.getElementById('wp-stage-img'), src = wpSrc();
+  if (!el || !src || !_wpDims[src] || _wpDims[src].err) return;
+  const dv = WP_DEVICES.find(d => d.key === _wpEdit.dev) || WP_DEVICES[0];
+  wpApplyBg(el, src, dv.aspect, wpFit(dv.key));
+}
+function wpCommit() { saveState(); applyWallpaper(); renderMastersContent(); }
+function wpOnSelect(val) {
+  _wpMsg = { text: '', err: false };
+  _wpEdit.open = false;
+  if (val === 'none') wpSet({ source: 'none' });
+  else if (val === 'custom') wpSet({ source: 'custom' });
+  else wpSet({ source: 'preset', presetId: val });
+  wpCommit();
+}
+function wpApplyUrl() {
+  const input = document.getElementById('wp-url-input');
+  const url = (input ? input.value : '').trim();
+  const setMsg = (text, err) => { _wpMsg = { text, err }; const m = document.getElementById('wp-msg'); if (m) { m.textContent = text; m.className = 'wp-msg' + (err ? ' err' : ''); } };
+  if (!/^https?:\/\/\S+$/i.test(url)) { setMsg('Enter a full link starting with https://', true); return; }
+  setMsg('Checking image…', false);
+  delete _wpDims[url];
+  wpLoadDims(url, ok => {
+    if (!ok) { setMsg('Could not load an image from that link. Make sure it points straight at an image file.', true); return; }
+    _wpMsg = { text: '', err: false };
+    wpSet({ source: 'custom', customType: 'url', customUrl: url, fit: {} });
+    wpCommit();
+  });
+}
+function wpOnFilePicked(input) {
+  const file = input.files && input.files[0];
+  input.value = '';
+  if (!file) return;
+  if (!/^image\//.test(file.type)) { alert('Please choose an image file.'); return; }
+  const url = URL.createObjectURL(file), img = new Image();
+  img.onload = () => {
+    URL.revokeObjectURL(url);
+    let data = null;
+    for (const maxSide of [2000, 1400, 900]) {
+      const s = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
+      const c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(img.naturalWidth * s)); c.height = Math.max(1, Math.round(img.naturalHeight * s));
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+      ctx.drawImage(img, 0, 0, c.width, c.height);
+      const out = c.toDataURL('image/jpeg', 0.85);
+      try { localStorage.setItem(WP_UPLOAD_KEY, out); data = out; break; } catch (e) { /* quota — retry smaller */ }
+    }
+    if (!data) { alert('That image is too large to store in the browser. Host it online and paste its URL instead.'); return; }
+    delete _wpDims[data];
+    _wpMsg = { text: '', err: false };
+    wpSet({ source: 'custom', customType: 'upload', customUrl: '', fit: {} });
+    wpCommit();
+  };
+  img.onerror = () => { URL.revokeObjectURL(url); alert('Could not read that image. Try a JPG or PNG.'); };
+  img.src = url;
+}
+function wpDimInput(v) {
+  wpSet({ dim: wpClamp(+v, 0, 80) });
+  const o = document.getElementById('wp-dim-out'); if (o) o.textContent = wpGet().dim + '%';
+  const wrap = document.getElementById('wp-frames'); if (wrap) wrap.style.setProperty('--wp-dim', wpGet().dim / 100);
+  const el = document.getElementById('app-wallpaper'); if (el) el.style.setProperty('--wp-dim', wpGet().dim / 100);
+}
+// ── Editor ──
+function wpToggleEdit() { _wpEdit.open = !_wpEdit.open; renderMastersContent(); }
+function wpEditDevice(k) { _wpEdit.dev = k; renderMastersContent(); }
+function wpSyncControls() {
+  const f = wpFit(_wpEdit.dev);
+  [['wp-zoom', Math.round(f.zoom * 100)], ['wp-x', Math.round(f.x * 100)], ['wp-y', Math.round(f.y * 100)]].forEach(([id, v]) => {
+    const s = document.getElementById(id), o = document.getElementById(id + '-out');
+    if (s) s.value = v; if (o) o.textContent = v + '%';
+  });
+}
+function wpRefreshLive() {
+  wpPaintFrames(); wpPaintStage(); wpSyncControls();
+  if (wpViewportDevice() === _wpEdit.dev) applyWallpaper();
+}
+function wpFitInput(field, val) {
+  const f = wpFit(_wpEdit.dev);
+  f[field] = field === 'zoom' ? wpClamp(+val, 1, 4) : wpClamp(+val, 0, 1);
+  wpSetFit(_wpEdit.dev, f);
+  wpRefreshLive();
+}
+function wpFitCommit() { saveState(); }
+function wpNudgeZoom(delta) { wpFitInput('zoom', wpFit(_wpEdit.dev).zoom + delta); wpFitCommit(); }
+function wpResetFit() { wpSetFit(_wpEdit.dev, { zoom: 1, x: 0.5, y: 0.5 }); wpRefreshLive(); saveState(); }
+function wpCopyFitToAll() {
+  const f = wpFit(_wpEdit.dev);
+  WP_DEVICES.forEach(d => wpSetFit(d.key, f));
+  wpRefreshLive(); saveState();
+}
+function wpBindStage() {
+  const st = document.getElementById('wp-stage');
+  if (!st || st._wpBound) return;
+  st._wpBound = true;
+  let drag = null;
+  st.addEventListener('pointerdown', e => {
+    drag = { x: e.clientX, y: e.clientY, f: wpFit(_wpEdit.dev) };
+    try { st.setPointerCapture(e.pointerId); } catch (err) {}
+    e.preventDefault();
+  });
+  st.addEventListener('pointermove', e => {
+    if (!drag) return;
+    const src = wpSrc(), d = _wpDims[src];
+    if (!d || d.err) return;
+    const r = st.getBoundingClientRect(), base = Math.max(r.width / d.w, r.height / d.h);
+    const rx = d.w * base * drag.f.zoom - r.width, ry = d.h * base * drag.f.zoom - r.height;
+    const f = { zoom: drag.f.zoom, x: drag.f.x, y: drag.f.y };
+    if (rx > 1) f.x = wpClamp(drag.f.x - (e.clientX - drag.x) / rx, 0, 1);
+    if (ry > 1) f.y = wpClamp(drag.f.y - (e.clientY - drag.y) / ry, 0, 1);
+    wpSetFit(_wpEdit.dev, f);
+    wpRefreshLive();
+  });
+  const end = () => { if (drag) { drag = null; saveState(); } };
+  st.addEventListener('pointerup', end);
+  st.addEventListener('pointercancel', end);
+  st.addEventListener('wheel', e => {
+    e.preventDefault();
+    wpFitInput('zoom', wpFit(_wpEdit.dev).zoom + (e.deltaY < 0 ? 0.08 : -0.08));
+    clearTimeout(st._wpWheelT); st._wpWheelT = setTimeout(saveState, 300);
+  }, { passive: false });
+}
+
 // Masters tabs visible when the popup is opened from the header photo.
-const PROFILE_ONLY_TABS = ['user', 'colors'];
+const PROFILE_ONLY_TABS = ['user', 'colors', 'wallpaper'];
 function applyMastersTabFilter(profileOnly) {
   document.querySelectorAll('#master-nav .tab-btn').forEach(b => {
     const m = /switchTab\('([^']+)'\)/.exec(b.getAttribute('onclick') || '');
     const key = m ? m[1] : '';
     const isProfileTab = PROFILE_ONLY_TABS.includes(key);
-    // Photo click: only User + Colors. Masters button: everything except User + Colors.
+    // Photo click: only User + Colors + Wallpaper. Masters button: everything except those.
     b.style.display = (profileOnly ? !isProfileTab : isProfileTab) ? 'none' : '';
   });
 }
