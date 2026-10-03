@@ -967,6 +967,24 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .search-empty { padding: 28px 16px; text-align: center; color: var(--text-tertiary); font-size: 13px; }
+/* Masters > Pending & Search: group headers used by the Pending Tasks popup and Search results */
+.grp-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 11px; font-weight: 600; letter-spacing: .04em; color: var(--text-primary); background: var(--bg-secondary); border-bottom: 1px solid var(--border); padding: 5px 14px; position: sticky; top: 0; z-index: 1; }
+.grp-head-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.grp-head-2 { box-shadow: inset 3px 0 0 var(--blue-mid); }
+.grp-head-0 { color: var(--text-tertiary); font-weight: 500; }
+.grp-head-count { font-family: var(--font-mono); font-weight: 500; color: var(--text-tertiary); flex-shrink: 0; }
+#pending-tasks-list .grp-head { margin: 8px -4px 6px; border-radius: 4px; border-bottom: none; top: -4px; }
+.grp-dd-btn { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px; text-align: left; cursor: pointer; }
+.grp-dd-btn span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.grp-dd-btn .placeholder { color: var(--text-tertiary); }
+.grp-dd-panel { display: none; margin-top: 4px; border: 1px solid var(--border-md); border-radius: var(--radius-md); background: var(--bg-primary); max-height: 220px; overflow-y: auto; }
+.grp-dd-panel.open { display: block; }
+.grp-dd-item { display: flex; align-items: center; gap: 8px; padding: 7px 10px; font-size: 13px; color: var(--text-primary); cursor: pointer; user-select: none; }
+.grp-dd-item:hover { background: var(--bg-secondary); }
+.grp-dd-item.off { opacity: .45; cursor: not-allowed; }
+.grp-dd-item.off:hover { background: transparent; }
+.grp-dd-item input { cursor: inherit; }
+.grp-dd-tag { margin-left: auto; font-size: 10px; color: var(--text-tertiary); }
 .search-result-actions { display: flex; gap: 2px; flex-shrink: 0; padding-top: 1px; }
 /* Search-result History popup: sits on top of the search overlay (z-index 9999). Timeline of every
    log entry for the same task (ticket, else task name + project + module); reuses the Pending
@@ -2194,6 +2212,7 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
     <div class="master-body" id="master-body">
       <nav class="master-nav" id="master-nav" aria-label="Master sections">
         <button class="tab-btn" onclick="switchTab('user')"><i class="ti ti-user" style="font-size:13px"></i> User</button>
+        <button class="tab-btn" onclick="switchTab('pending')"><i class="ti ti-clock-exclamation" style="font-size:13px"></i> Pending &amp; Search</button>
         <button class="tab-btn active" onclick="switchTab('lists')"><i class="ti ti-list" style="font-size:13px"></i> Lists</button>
         <button class="tab-btn" onclick="switchTab('columns')"><i class="ti ti-table" style="font-size:13px"></i> Columns</button>
         <button class="tab-btn" onclick="switchTab('weekends')"><i class="ti ti-calendar-off" style="font-size:13px"></i> Weekends</button>
@@ -2471,20 +2490,26 @@ const DEFAULT_STATUSES = ['Completed','In Progress','Pending','Blocked'];
 //                           column's value be copied onto the new task? true copies it
 //                           across; false leaves the field blank on the new instance even
 //                           though the source task/entry had a value. See buildCarriedFields().
+// A fifth flag controls validation:
+//   required             — Mandatory. When true the Complete Task / Edit Log Entry popup will not
+//                           save until this field is filled in. Date and Effort are ALWAYS required
+//                           (see isAlwaysRequiredColumn) — they can be renamed but never made
+//                           optional or deleted, because every total and report is built on them.
+//                           A mandatory field is always shown in the Complete popup so it can be filled.
 // Default number of visible rows for any TextArea-type column that doesn't have an explicit
 // col.rows set (older saved configs, or a column created before the Rows setting existed).
 // See buildRichTextInput / the .rte-editor CSS rule for how col.rows drives the actual height.
 const DEFAULT_TEXTAREA_ROWS = 3;
 const DEFAULT_LOG_COLUMNS = [
-  { key: 'date',        label: 'Date',                                  showInTaskCard: false, showInLogTable: true, showInCompletePopup: false, carryForward: false, type: 'date', dateFormat: 'DD-MM-YYYY', isDateColumn: true, essential: true },
+  { key: 'date',        label: 'Date',                                  showInTaskCard: false, showInLogTable: true, showInCompletePopup: false, carryForward: false, type: 'date', dateFormat: 'DD-MM-YYYY', isDateColumn: true, essential: true, required: true },
   { key: 'employee',    label: 'Employee Name',                         showInTaskCard: false, showInLogTable: true, showInCompletePopup: false, carryForward: false, type: 'text', isEmployeeColumn: true },
-  { key: 'project',     label: 'Project',                               showInTaskCard: true,  showInLogTable: true, showInCompletePopup: true,  carryForward: true,  type: 'list', listSource: 'projects', builtIn: true },
-  { key: 'module',      label: 'Module / Feature',                      showInTaskCard: true,  showInLogTable: true, showInCompletePopup: true,  carryForward: true,  type: 'text', builtIn: true },
-  { key: 'nature',      label: 'Nature of Task',                        showInTaskCard: true,  showInLogTable: true, showInCompletePopup: true,  carryForward: true,  type: 'list', listSource: 'natures', builtIn: true },
+  { key: 'project',     label: 'Project',                               showInTaskCard: true,  showInLogTable: true, showInCompletePopup: true,  carryForward: true,  type: 'list', listSource: 'projects', builtIn: true, required: true },
+  { key: 'module',      label: 'Module / Feature',                      showInTaskCard: true,  showInLogTable: true, showInCompletePopup: true,  carryForward: true,  type: 'text', builtIn: true, required: true },
+  { key: 'nature',      label: 'Nature of Task',                        showInTaskCard: true,  showInLogTable: true, showInCompletePopup: true,  carryForward: true,  type: 'list', listSource: 'natures', builtIn: true, required: true },
   { key: 'ticket',      label: 'Ticket # if support ticket',            showInTaskCard: true,  showInLogTable: true, showInCompletePopup: true,  carryForward: false, type: 'text', builtIn: true },
-  { key: 'description', label: 'Task progress / Effort description',   showInTaskCard: false, showInLogTable: true, showInCompletePopup: true,  carryForward: false, type: 'textarea', rows: 4, builtIn: true, isTaskName: true },
-  { key: 'effort',      label: 'Effort (Minutes)',                      showInTaskCard: false, showInLogTable: true, showInCompletePopup: false, carryForward: false, type: 'text', isEffortColumn: true, essential: true },
-  { key: 'status',      label: 'Status',                                showInTaskCard: false, showInLogTable: true, showInCompletePopup: true,  carryForward: false, type: 'list', listSource: 'statuses', isStatusColumn: true },
+  { key: 'description', label: 'Task progress / Effort description',   showInTaskCard: false, showInLogTable: true, showInCompletePopup: true,  carryForward: false, type: 'textarea', rows: 4, builtIn: true, isTaskName: true, required: true },
+  { key: 'effort',      label: 'Effort (Minutes)',                      showInTaskCard: false, showInLogTable: true, showInCompletePopup: false, carryForward: false, type: 'text', isEffortColumn: true, essential: true, required: true },
+  { key: 'status',      label: 'Status',                                showInTaskCard: false, showInLogTable: true, showInCompletePopup: true,  carryForward: false, type: 'list', listSource: 'statuses', isStatusColumn: true, required: true },
   { key: 'remark',      label: 'Remark',                                showInTaskCard: false, showInLogTable: true, showInCompletePopup: true,  carryForward: false, type: 'textarea', rows: 2, builtIn: true }
 ];
 
@@ -2522,6 +2547,7 @@ let masters = {
   flags: { sleepAutoPause: true, backgroundSyncEnabled: false, showPending: false }, // future flags can be added here
   colorPrefs: { light: {}, dark: {} }, // Masters → Colors: only the colours you changed (CSS variable → hex)
   fontPrefs: { family: 'default', size: 'md' }, // 'default' = built-in IBM Plex Sans stack, unscaled
+  groupPrefs: { primary: [], secondary: [] }, // Masters > Pending & Search: column keys used to group the Pending Tasks popup and Search results (primary combo first; secondary combo when an item can't be grouped by the primary one)
   logColumns: DEFAULT_LOG_COLUMNS.map(c => ({ ...c })),
   // Single consolidated store for every list-type column's options — Projects, Nature of
   // Task, Status, and any custom list the user creates all live here side by side and are
@@ -11276,6 +11302,11 @@ function loadState() {
       if (!masters.colorPrefs.light) masters.colorPrefs.light = {};
       if (!masters.colorPrefs.dark) masters.colorPrefs.dark = {};
       if (!masters.fontPrefs) masters.fontPrefs = { family: 'default', size: 'md' };
+      if (!masters.groupPrefs || typeof masters.groupPrefs !== 'object') masters.groupPrefs = { primary: [], secondary: [] };
+      ['primary', 'secondary'].forEach(w => {
+        const v = masters.groupPrefs[w];
+        masters.groupPrefs[w] = Array.isArray(v) ? v : ((typeof v === 'string' && v && v !== 'none') ? [v] : []);
+      });
       if (!masters.fontPrefs.family) masters.fontPrefs.family = 'default';
       if (!masters.fontPrefs.size) masters.fontPrefs.size = 'md';
       if (!masters.logColumns || !Array.isArray(masters.logColumns) || masters.logColumns.length === 0) {
@@ -11327,6 +11358,18 @@ function loadState() {
             const def = DEFAULT_LOG_COLUMNS.find(dc => dc.key === c.key);
             c.carryForward = def ? def.carryForward : true;
           }
+          // Date and Effort are always required, whatever an older save says.
+          if (c.key === 'date')   { c.isDateColumn = true;   c.essential = true; }
+          if (c.key === 'effort') { c.isEffortColumn = true; c.essential = true; }
+          // Backfill the Mandatory flag for columns saved before it existed: built-ins keep the
+          // requirement they always had (unless the user had hidden them from the Complete popup,
+          // where they were never enforced); custom columns start optional.
+          if (c.required === undefined) {
+            const def = DEFAULT_LOG_COLUMNS.find(dc => dc.key === c.key);
+            c.required = !!(def && def.required) && c.showInCompletePopup !== false;
+          }
+          if (isAlwaysRequiredColumn(c)) c.required = true;
+          if (c.required && columnHasPopupInput(c)) c.showInCompletePopup = true;
         });
         masters.migratedDescRemarkTextarea = true;
       }
@@ -11709,6 +11752,23 @@ function getConfigurableColumns() {
 function getColumnByKey(key) {
   return getLogColumns().find(c => c.key === key);
 }
+// Date and Effort are the base of the whole app (which day an entry belongs to, and every
+// minute total), so they are always required: renamable, never optional, never deletable.
+function isAlwaysRequiredColumn(c) {
+  return !!(c && (c.isDateColumn || c.isEffortColumn || c.essential));
+}
+// Does this column get an input in the Complete / Edit popup? Date, Effort and Employee are
+// filled in automatically (timer / logged-in user), so they never get one.
+function columnHasPopupInput(c) {
+  return !!(c && !(c.isDateColumn || c.isEffortColumn || c.isEmployeeColumn));
+}
+// Is this column mandatory? Single source of truth for every asterisk and every validation.
+function isColumnRequired(c) {
+  if (!c) return false;
+  if (isAlwaysRequiredColumn(c)) return true;
+  if (c.isEmployeeColumn) return false;
+  return c.required === true;
+}
 // Does this column's value get copied onto a new task card when the source task/entry
 // is carried forward, or when a recurring plan is created / materializes a new instance?
 // Defaults to true (matches the app's original behavior) unless explicitly turned off.
@@ -12033,11 +12093,13 @@ function openCompleteModal(id) {
   const projCol = getColumnByKey('project'), natCol = getColumnByKey('nature'),
         modCol = getColumnByKey('module'), tickCol = getColumnByKey('ticket'),
         descCol = getColumnByKey('description'), remCol = getColumnByKey('remark');
-  const setFieldVisibility = (fieldId, labelId, col, requiredSuffix) => {
+  // Driven entirely by the column master: a deleted column or one switched off for the Complete
+  // popup hides its field, and the asterisk follows the column's Mandatory checkbox.
+  const setFieldVisibility = (fieldId, labelId, col) => {
     const fieldEl = document.getElementById(fieldId);
     const labelEl = document.getElementById(labelId);
-    if (fieldEl) fieldEl.style.display = (col && col.showInCompletePopup === false) ? 'none' : '';
-    if (labelEl && col) labelEl.innerHTML = esc(col.label) + (requiredSuffix ? ' <span class="req">*</span>' : '');
+    if (fieldEl) fieldEl.style.display = (!col || col.showInCompletePopup === false) ? 'none' : '';
+    if (labelEl && col) labelEl.innerHTML = esc(col.label) + (isColumnRequired(col) ? ' <span class="req">*</span>' : '');
   };
   setFieldVisibility('cm-project-field', 'cm-project-label', projCol, true);
   setFieldVisibility('cm-nature-field', 'cm-nature-label', natCol, true);
@@ -12055,7 +12117,7 @@ function openCompleteModal(id) {
       const val = (lastEntry && lastEntry.customFields && lastEntry.customFields[c.key])
         || (task.customFields && task.customFields[c.key]) || '';
       return `<div class="complete-field">
-        <label class="complete-label">${esc(c.label)}</label>
+        <label class="complete-label">${esc(c.label)}${isColumnRequired(c) ? ' <span class="req">*</span>' : ''}</label>
         ${buildDynamicFieldInput(c, 'cm-custom-' + c.key, val, '', '')}
       </div>`;
     }).join('');
@@ -12162,11 +12224,13 @@ function editLogEntry(globalIdx) {
   const projCol = getColumnByKey('project'), natCol = getColumnByKey('nature'),
         modCol = getColumnByKey('module'), tickCol = getColumnByKey('ticket'),
         descCol = getColumnByKey('description'), remCol = getColumnByKey('remark');
-  const setFieldVisibility = (fieldId, labelId, col, requiredSuffix) => {
+  // Driven entirely by the column master: a deleted column or one switched off for the Complete
+  // popup hides its field, and the asterisk follows the column's Mandatory checkbox.
+  const setFieldVisibility = (fieldId, labelId, col) => {
     const fieldEl = document.getElementById(fieldId);
     const labelEl = document.getElementById(labelId);
-    if (fieldEl) fieldEl.style.display = (col && col.showInCompletePopup === false) ? 'none' : '';
-    if (labelEl && col) labelEl.innerHTML = esc(col.label) + (requiredSuffix ? ' <span class="req">*</span>' : '');
+    if (fieldEl) fieldEl.style.display = (!col || col.showInCompletePopup === false) ? 'none' : '';
+    if (labelEl && col) labelEl.innerHTML = esc(col.label) + (isColumnRequired(col) ? ' <span class="req">*</span>' : '');
   };
   setFieldVisibility('cm-project-field', 'cm-project-label', projCol, true);
   setFieldVisibility('cm-nature-field', 'cm-nature-label', natCol, true);
@@ -12183,7 +12247,7 @@ function editLogEntry(globalIdx) {
     customContainer.innerHTML = customCols.map(c => {
       const val = (entry.customFields && entry.customFields[c.key]) || '';
       return `<div class="complete-field">
-        <label class="complete-label">${esc(c.label)}</label>
+        <label class="complete-label">${esc(c.label)}${isColumnRequired(c) ? ' <span class="req">*</span>' : ''}</label>
         ${buildDynamicFieldInput(c, 'cm-custom-' + c.key, val, '', '')}
       </div>`;
     }).join('');
@@ -12258,6 +12322,8 @@ function recalcCustomDuration() {
 }
 
 function onDurationAdjChange() {
+  const adjNow = document.getElementById('cm-duration-adj');
+  if (adjNow) adjNow.classList.remove('invalid');
   // If custom time checkbox is on, don't let manual field override
   const cb = document.getElementById('cm-custom-time');
   if (cb && cb.checked) return;
@@ -12369,13 +12435,48 @@ function submitComplete() {
     if (!val && !isHidden) { targetEl.classList.add('invalid'); invalid=true; }
     else targetEl.classList.remove('invalid');
   };
+  // Task Name is always required; every other field follows its Mandatory checkbox in
+  // Masters → Columns (checked there, so renaming/adding/deleting columns just works).
   check('cm-heading', heading);
-  check('cm-project', project, 'cm-project-field');
-  check('cm-nature', nature, 'cm-nature-field');
-  check('cm-module', module, 'cm-module-field');
-  check('cm-status', status, 'cm-status-field');
-  check('cm-description', desc, 'cm-description-field');
-  if (invalid) return;
+  const checkIf = (key, elId, val, fieldId) => {
+    if (isColumnRequired(getColumnByKey(key))) { check(elId, val, fieldId); return; }
+    const el = document.getElementById(elId);
+    const t = (el && el.type === 'hidden') ? (document.getElementById(elId + '-trigger') || el) : el;
+    if (t) t.classList.remove('invalid');
+  };
+  checkIf('project',     'cm-project',     project, 'cm-project-field');
+  checkIf('nature',      'cm-nature',      nature,  'cm-nature-field');
+  checkIf('module',      'cm-module',      module,  'cm-module-field');
+  checkIf('ticket',      'cm-ticket',      ticket,  'cm-ticket-field');
+  checkIf('status',      'cm-status',      status,  'cm-status-field');
+  checkIf('description', 'cm-description', desc,    'cm-description-field');
+  checkIf('remark',      'cm-remark',      remark,  'cm-remark-field');
+  customCols.forEach(c => {
+    if (isColumnRequired(c)) check('cm-custom-' + c.key, String(customValues[c.key] || '').trim(), null);
+  });
+
+  // Effort is always required: either tracked time, or minutes typed into "Adjust duration".
+  {
+    const adjEl = document.getElementById('cm-duration-adj');
+    const adjChk = parseInt(adjEl.value, 10);
+    let haveEffort = !isNaN(adjChk) && adjChk > 0;
+    if (!haveEffort) {
+      if (pendingEditIdx !== null) { const ee = logEntries[pendingEditIdx]; haveEffort = !!(ee && ee.durationSecs > 0); }
+      else haveEffort = liveElapsedSecs(task) > 0;
+    }
+    if (!haveEffort) {
+      adjEl.classList.add('invalid');
+      adjEl.placeholder = 'Effort required — enter minutes…';
+      invalid = true;
+    } else {
+      adjEl.classList.remove('invalid');
+    }
+  }
+  if (invalid) {
+    const firstBad = document.querySelector('#complete-modal .invalid');
+    if (firstBad && firstBad.scrollIntoView) firstBad.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    return;
+  }
 
   // Edit mode — just update entry fields, no task changes
   if (pendingEditIdx !== null) {
@@ -13534,7 +13635,7 @@ function focusFieldInput(idAttr) {
 // Ticket keep their historical placeholders. System-managed columns (see isSystemManagedColumn)
 // are skipped since they have no freely-editable per-task value to bind to.
 const CORE_TASK_FIELD_KEYS = ['project', 'nature', 'module', 'ticket'];
-const TASK_CARD_REQUIRED_KEYS = ['project', 'nature', 'module'];
+// Which fields show a * is decided per column by isColumnRequired() (Masters → Columns → Mandatory).
 const TASK_CARD_PLACEHOLDERS = { module: 'e.g. Scanner Integration', ticket: 'e.g. NAV-1234' };
 
 function renderTaskCardFields(task, id, dis) {
@@ -13560,7 +13661,7 @@ function renderTaskCardFields(task, id, dis) {
              onclick="toggleTaskCardFieldCollapse(${id},'${c.key}')"
              title="${isExpanded ? 'Collapse' : 'Expand'} ${esc(c.label)}"><i class="ti ti-chevron-down"></i></button>`
         : '';
-      const required = TASK_CARD_REQUIRED_KEYS.includes(c.key) ? ' <span class="req">*</span>' : '';
+      const required = isColumnRequired(c) ? ' <span class="req">*</span>' : '';
       const placeholder = TASK_CARD_PLACEHOLDERS[c.key] || '';
       return `<div class="meta-field meta-field-${cssKey}${wideClass}${collapsedClass}">
         <span class="meta-label">${esc(c.label)}${required}${collapseToggle}</span>
@@ -13730,7 +13831,7 @@ function renderRow(id) {
       ${renderTaskCardFields(task, id, dis)}
     </div>
     <div class="validation-msg" id="val-msg-${id}">
-      <i class="ti ti-alert-circle"></i> Project, Nature of Task and Module are required before starting.
+      <i class="ti ti-alert-circle"></i> Fill in the mandatory (*) fields.
     </div>
   `;
   // Phase 19F: restore focus/selection captured just above, now that the
@@ -14880,7 +14981,8 @@ function renderColorsTabHTML() {
 }
 function switchTab(tab) {
   activeMastersTab = tab;
-  const TAB_ORDER = ['user','lists','columns','weekends','workhours','email','colors','data','sync'];
+  _grpDdOpen = null;
+  const TAB_ORDER = ['user','pending','lists','columns','weekends','workhours','email','colors','data','sync'];
   document.querySelectorAll('.master-nav .tab-btn').forEach((b,i) => {
     b.classList.toggle('active', TAB_ORDER[i] === tab);
   });
@@ -14907,13 +15009,18 @@ function renderColumnsTabHTML() {
   const cols = getLogColumns();
   const TYPE_LABELS = { text: 'Text', textarea: 'Text Area', list: 'Dropdown list', multilist: 'Dropdown list (multi-select)', date: 'Date' };
   const DATE_FORMAT_PRESETS = ['DD-MM-YYYY','YYYY-MM-DD','MM-DD-YYYY','DD/MM/YYYY','MM/DD/YYYY','DD MMM YYYY','ddd, DD MMM YYYY','MMMM D, YYYY'];
-  // Date and Effort can't be deleted — the timer/duration math depends on these existing —
-  // but they can still be renamed, reordered, and (for Date) have their format changed.
-  const UNDELETABLE_KEYS = ['date', 'effort'];
+  // Date and Effort are always required and can't be deleted — the timer/duration math depends
+  // on them — but they can still be renamed, reordered, and (for Date) have their format changed.
 
   const rows = cols.map((c, idx) => {
     const listOptions = Object.keys(masters.customLists || {});
     const isCustomFormat = c.type === 'date' && c.dateFormat && !DATE_FORMAT_PRESETS.includes(c.dateFormat);
+    const alwaysReq = isAlwaysRequiredColumn(c);
+    const mandatoryLocked = alwaysReq || !!c.isEmployeeColumn;
+    const popupLocked = isColumnRequired(c) && columnHasPopupInput(c);
+    const mandatoryTitle = alwaysReq ? 'Always required — the timer and every total depend on this field'
+      : c.isEmployeeColumn ? 'Filled in automatically from the logged-in user'
+      : 'Tick to make this field mandatory: a task can\'t be completed / a log entry saved until it is filled in';
     return `<div class="master-item" draggable="true" data-idx="${idx}"
         ondragstart="colDragStart(event,${idx})" ondragover="colDragOver(event,${idx})"
         ondragleave="colDragLeave(event)" ondrop="colDrop(event,${idx})" ondragend="colDragEnd(event)"
@@ -14957,8 +15064,8 @@ function renderColumnsTabHTML() {
           <input type="checkbox" ${c.showInLogTable!==false?'checked':''} onchange="toggleColumnContext('${c.key}','showInLogTable')" />
           Log table
         </label>
-        <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-secondary);cursor:pointer" title="Show this column as an input in the Complete / Edit Entry popup">
-          <input type="checkbox" ${c.showInCompletePopup!==false?'checked':''} onchange="toggleColumnContext('${c.key}','showInCompletePopup')" />
+        <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-secondary);cursor:${popupLocked?'default':'pointer'}" title="${popupLocked ? 'Mandatory fields always appear in the Complete popup so they can be filled in' : 'Show this column as an input in the Complete / Edit Entry popup'}">
+          <input type="checkbox" ${(c.showInCompletePopup!==false || popupLocked)?'checked':''} ${popupLocked?'disabled':''} onchange="toggleColumnContext('${c.key}','showInCompletePopup')" />
           Complete popup
         </label>
         <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-secondary);cursor:${isSystemManagedColumn(c)?'default':'pointer'}"
@@ -14966,7 +15073,11 @@ function renderColumnsTabHTML() {
           <input type="checkbox" ${c.carryForward!==false?'checked':''} ${isSystemManagedColumn(c)?'disabled':''} onchange="toggleColumnContext('${c.key}','carryForward')" />
           Carry fwd / Recurring
         </label>
-        ${!UNDELETABLE_KEYS.includes(c.key) ? `<button class="btn-icon btn-delete" onclick="confirmDeleteColumn('${c.key}')" title="Delete column"><i class="ti ti-trash"></i></button>` : `<span style="font-size:10px;color:var(--text-tertiary)" title="Required for timer/duration tracking">required</span>`}
+        <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-secondary);cursor:${mandatoryLocked?'default':'pointer'}" title="${mandatoryTitle}">
+          <input type="checkbox" ${isColumnRequired(c)?'checked':''} ${mandatoryLocked?'disabled':''} onchange="toggleColumnRequired('${c.key}')" />
+          Mandatory
+        </label>
+        ${!alwaysReq ? `<button class="btn-icon btn-delete" onclick="confirmDeleteColumn('${c.key}')" title="Delete column"><i class="ti ti-trash"></i></button>` : `<span style="font-size:10px;color:var(--text-tertiary)" title="Always required — the timer and every total depend on this field">always required</span>`}
       </div>
     </div>`;
   }).join('');
@@ -14977,9 +15088,11 @@ function renderColumnsTabHTML() {
       the log table, task card, and Complete popup. "Carry fwd / Recurring" controls a separate
       thing — whether that field's value gets copied onto the new task card when you carry a task
       forward or when a recurring plan is created or generates a new instance; leave it unchecked
-      to have that field start blank instead. Date and Effort can't be deleted since the
-      timer depends on them, but every other column — including Status — can be renamed, retyped,
-      or removed. Changes apply to exports and CSV import mapping too.
+      to have that field start blank instead. "Mandatory" means a task can't be completed (or a
+      log entry saved) until that field is filled in. Date and Effort are always mandatory and
+      can't be deleted since the timer depends on them — but you can rename them. Every other
+      column — including Status — can be renamed, retyped, made mandatory or optional, or removed.
+      Changes apply to exports and CSV import mapping too.
     </div>
     <div class="master-list" id="columns-list-container">${rows}</div>
     <div style="display:flex;gap:8px;margin-top:14px;border-top:1px solid var(--border);padding-top:14px">
@@ -15044,8 +15157,6 @@ function renderListsTabHTML() {
              <button class="btn-icon" onclick="commitListItemEdit(${idx})" title="Save"><i class="ti ti-check" style="color:var(--green-mid)"></i></button>
              <button class="btn-icon" onclick="cancelListItemEdit()" title="Cancel"><i class="ti ti-x"></i></button>`
           : `<span class="master-item-name" ondblclick="startListItemEdit(${idx})" title="Double-click to rename">${esc(item)}</span>
-             <button class="btn-icon" onclick="moveListItem(${idx},-1)" title="Move up" ${idx===0?'disabled style="opacity:.3"':''}><i class="ti ti-arrow-up"></i></button>
-             <button class="btn-icon" onclick="moveListItem(${idx},1)" title="Move down" ${idx===items.length-1?'disabled style="opacity:.3"':''}><i class="ti ti-arrow-down"></i></button>
              <button class="btn-icon btn-edit" onclick="startListItemEdit(${idx})" title="Rename"><i class="ti ti-pencil"></i></button>
              <button class="btn-icon btn-delete" onclick="deleteCustomListItem(activeListKey,${idx})" title="Delete"><i class="ti ti-x"></i></button>`}
       </div>`; }).join('') + '</div>'}
@@ -15115,6 +15226,10 @@ function renderMastersContent() {
       </div>`;
     return;
   }
+  if (activeMastersTab === 'pending') {
+    content.innerHTML = renderPendingMasterHTML();
+    return;
+  }
   if (activeMastersTab === 'user') {
     content.innerHTML = `
       <div style="margin-bottom:6px">
@@ -15126,14 +15241,6 @@ function renderMastersContent() {
           <button class="btn btn-primary" onclick="saveUserName()"><i class="ti ti-check"></i> Save</button>
         </div>
         <div style="font-size:11px;color:var(--text-tertiary);margin-top:6px">This name appears in the effort log and XLSX export.</div>
-      </div>
-      <div style="margin-top:18px;padding-top:16px;border-top:1px solid var(--border)">
-        <label class="complete-label" style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.06em;font-weight:600;display:block;margin-bottom:8px">Header</label>
-        <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-secondary);cursor:pointer">
-          <input type="checkbox" id="flag-show-pending" ${(masters.flags && masters.flags.showPending !== false) ? 'checked' : ''} onchange="toggleShowPendingFlag()" style="width:14px;height:14px;cursor:pointer" />
-          Show Pending button (Pending Tasks / To Do)
-        </label>
-        <div style="font-size:11px;color:var(--text-tertiary);margin-top:6px">When off, the Pending button is hidden from the header. The Sync button follows Masters &rsaquo; Sync &rsaquo; Enable Synchronization.</div>
       </div>
       <div style="margin-top:18px;padding-top:16px;border-top:1px solid var(--border)">
         <label class="complete-label" style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.06em;font-weight:600;display:block;margin-bottom:5px">Appearance</label>
@@ -16506,6 +16613,165 @@ function applyHeaderButtonVisibility() {
   }
 }
 
+// ---- Masters > Pending & Search --------------------------------------------------------
+// Holds everything about the header Pending button and how the Pending Tasks popup and the
+// Search results are grouped. masters.groupPrefs = { primary: [keys], secondary: [keys] }.
+// Each side is a multi-select of Text / List columns (Masters > Columns). An item is grouped
+// by the PRIMARY combination (all of its selected fields, joined) when every one of those
+// fields has a value; when that isn't possible the SECONDARY combination is tried instead;
+// if neither works the item goes under "Ungrouped" at the end.
+// Task Name is not a column in Masters > Columns, so it is added here statically to both
+// the Primary and Secondary lists (key 'taskname' = the task heading; entries without a
+// heading fall back to their description, same as the card title).
+const GROUP_TASKNAME_KEY = 'taskname';
+function getGroupFieldOptions() {
+  const cols = (masters.logColumns || []).filter(c => c && c.key &&
+    (c.type === 'list' || c.type === 'text') &&
+    !c.isDateColumn && !c.isEmployeeColumn && !c.isEffortColumn);
+  return cols.concat([{ key: GROUP_TASKNAME_KEY, label: 'Task Name' }]);
+}
+function getGroupPrefs() {
+  const gp = masters.groupPrefs || {};
+  const keys = getGroupFieldOptions().map(c => c.key); // column order
+  const pick = v => keys.filter(k => (Array.isArray(v) ? v : (v && v !== 'none' ? [v] : [])).indexOf(k) !== -1);
+  const primary = pick(gp.primary);
+  const secondary = pick(gp.secondary).filter(k => primary.indexOf(k) === -1);
+  return { primary, secondary };
+}
+function groupFieldLabel(key) {
+  const c = getGroupFieldOptions().find(x => x.key === key);
+  return c ? (c.label || key) : key;
+}
+// Value of a grouping field for a log entry (or To Do item when isTodo).
+function groupValueOfRecord(rec, key, isTodo) {
+  if (!rec) return '';
+  if (key === 'status') return isTodo ? 'To Do' : (rec.taskStatus || '');
+  if (key === GROUP_TASKNAME_KEY) return String((rec.heading && String(rec.heading).trim()) || (isTodo ? '' : rec.description) || '').trim();
+  let v = rec[key];
+  if ((v === undefined || v === null || v === '') && rec.customFields) v = rec.customFields[key];
+  return String(v === undefined || v === null ? '' : v).trim();
+}
+// Builds list HTML honouring the Primary / Secondary grouping. valueOf(item, key) returns
+// the item's value for a grouping field; itemHtml(item, domIndex) returns one row's HTML.
+// Item order inside each group is whatever order the caller supplied (newest first).
+function buildGroupedHtml(items, valueOf, itemHtml) {
+  const gp = getGroupPrefs();
+  let idx = 0;
+  if (!gp.primary.length && !gp.secondary.length) return items.map(it => itemHtml(it, idx++)).join('');
+  const SEP = '\u0001';
+  const prim = {}, sec = {}, rest = [];
+  function keyFor(it, fields) {
+    if (!fields.length) return null;
+    const vals = fields.map(k => valueOf(it, k));
+    return vals.some(v => !v) ? null : vals.join(SEP);
+  }
+  items.forEach(it => {
+    const pk = keyFor(it, gp.primary);
+    if (pk !== null) { (prim[pk] = prim[pk] || []).push(it); return; }
+    const sk = keyFor(it, gp.secondary);
+    if (sk !== null) { (sec[sk] = sec[sk] || []).push(it); return; }
+    rest.push(it);
+  });
+  const sortKeys = m => Object.keys(m).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true }));
+  function section(map, fields, cls) {
+    return sortKeys(map).map(k => {
+      const vals = k.split(SEP);
+      const name = fields.map((f, i) => groupFieldLabel(f) + ': ' + vals[i]).join(' \u203a ');
+      return '<div class="grp-head ' + cls + '"><span class="grp-head-name">' + esc(name) + '</span><span class="grp-head-count">' + map[k].length + '</span></div>' +
+        map[k].map(it => itemHtml(it, idx++)).join('');
+    }).join('');
+  }
+  let html = section(prim, gp.primary, 'grp-head-1') + section(sec, gp.secondary, 'grp-head-2');
+  if (rest.length) {
+    html += '<div class="grp-head grp-head-0"><span class="grp-head-name">Ungrouped</span><span class="grp-head-count">' + rest.length + '</span></div>' +
+      rest.map(it => itemHtml(it, idx++)).join('');
+  }
+  return html;
+}
+var _grpDdOpen = null;
+function toggleGroupDd(which, evt) {
+  if (evt) evt.stopPropagation();
+  _grpDdOpen = (_grpDdOpen === which) ? null : which;
+  document.querySelectorAll('.grp-dd-panel').forEach(p => p.classList.toggle('open', p.getAttribute('data-which') === _grpDdOpen));
+}
+document.addEventListener('click', (evt) => {
+  if (!_grpDdOpen) return;
+  if (evt.target.closest && evt.target.closest('.grp-dd')) return;
+  _grpDdOpen = null;
+  document.querySelectorAll('.grp-dd-panel.open').forEach(p => p.classList.remove('open'));
+});
+function toggleGroupField(which, key) {
+  if (!masters.groupPrefs) masters.groupPrefs = { primary: [], secondary: [] };
+  const other = which === 'primary' ? 'secondary' : 'primary';
+  const cur = getGroupPrefs();
+  if (cur[other].indexOf(key) !== -1) return; // a field can only sit on one side
+  const list = cur[which].slice();
+  const i = list.indexOf(key);
+  if (i >= 0) list.splice(i, 1); else list.push(key);
+  masters.groupPrefs[which] = list;
+  masters.groupPrefs[other] = cur[other];
+  saveState();
+  renderMastersContent();
+  const pm = document.getElementById('pending-tasks-modal');
+  if (pm && !pm.classList.contains('hidden')) renderPendingTasksList();
+  const so = document.getElementById('task-search-overlay');
+  if (so && !so.classList.contains('hidden')) renderSearchResults();
+}
+function clearGroupFields(which) {
+  if (!masters.groupPrefs) masters.groupPrefs = { primary: [], secondary: [] };
+  masters.groupPrefs[which] = [];
+  saveState();
+  renderMastersContent();
+  const pm = document.getElementById('pending-tasks-modal');
+  if (pm && !pm.classList.contains('hidden')) renderPendingTasksList();
+  const so = document.getElementById('task-search-overlay');
+  if (so && !so.classList.contains('hidden')) renderSearchResults();
+}
+function renderPendingMasterHTML() {
+  const gp = getGroupPrefs();
+  const opts = getGroupFieldOptions();
+  const lbl = 'font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.06em;font-weight:600;display:block;margin-bottom:8px';
+  const showPending = !!(masters.flags && masters.flags.showPending !== false);
+  const picker = (which, title, hint) => {
+    const mine = gp[which], other = gp[which === 'primary' ? 'secondary' : 'primary'];
+    const summary = mine.length ? mine.map(k => esc(groupFieldLabel(k))).join(', ') : '<span class="placeholder">Select fields&hellip;</span>';
+    return `
+        <div class="grp-dd" style="margin-top:14px">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px">
+            <label class="complete-label" style="margin:0">${title}</label>
+            ${mine.length ? `<button class="btn" style="font-size:11px;padding:2px 8px" onclick="clearGroupFields('${which}')">Clear</button>` : ''}
+          </div>
+          <button type="button" class="meta-select grp-dd-btn" onclick="toggleGroupDd('${which}', event)" aria-haspopup="listbox" aria-expanded="${_grpDdOpen === which}"><span>${summary}</span><i class="ti ti-chevron-down" style="font-size:14px;flex-shrink:0"></i></button>
+          <div class="grp-dd-panel ${_grpDdOpen === which ? 'open' : ''}" data-which="${which}" role="listbox" aria-multiselectable="true">
+            ${opts.map(c => {
+              const on = mine.indexOf(c.key) !== -1, off = other.indexOf(c.key) !== -1;
+              return `<label class="grp-dd-item ${off ? 'off' : ''}" title="${off ? 'Already used in the other group' : ''}">
+                <input type="checkbox" ${on ? 'checked' : ''} ${off ? 'disabled' : ''} onchange="toggleGroupField('${which}', '${esc(c.key)}')" />
+                <span>${esc(c.label || c.key)}</span>${off ? `<span class="grp-dd-tag">in ${which === 'primary' ? 'secondary' : 'primary'}</span>` : ''}
+              </label>`;
+            }).join('')}
+          </div>
+          <div style="font-size:11px;color:var(--text-tertiary);margin-top:6px">${hint}</div>
+        </div>`;
+  };
+  return `
+      <div style="margin-bottom:6px">
+        <label class="complete-label" style="${lbl}">Header</label>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-secondary);cursor:pointer">
+          <input type="checkbox" id="flag-show-pending" ${showPending ? 'checked' : ''} onchange="toggleShowPendingFlag()" style="width:14px;height:14px;cursor:pointer" />
+          Show Pending button (Pending Tasks / To Do)
+        </label>
+        <div style="font-size:11px;color:var(--text-tertiary);margin-top:6px">When off, the Pending button is hidden from the header. The Sync button follows Masters &rsaquo; Synchronization &rsaquo; Enable Synchronization.</div>
+      </div>
+      <div style="margin-top:18px;padding-top:16px;border-top:1px solid var(--border)">
+        <label class="complete-label" style="${lbl}">Grouping</label>
+        <div style="font-size:12px;color:var(--text-secondary)">Controls how the <strong>Pending Tasks</strong> popup and the <strong>Search</strong> results are grouped. Pick one or more fields in each dropdown &mdash; the selected fields are combined into one group (e.g. Project + Module).</div>
+        ${picker('primary', 'Primary group fields', 'Used first. An item is grouped here only when <strong>every</strong> selected field has a value.')}
+        ${picker('secondary', 'Secondary group fields', 'Used when an item can&rsquo;t be grouped by the primary fields (a selected field is empty). Items that fit neither are listed last under &ldquo;Ungrouped&rdquo;.')}
+        <div style="font-size:11px;color:var(--text-tertiary);margin-top:12px">With nothing selected, lists are not grouped. To Do items in Search count as Status &ldquo;To Do&rdquo;. Fields are the Text and List columns from Masters &rsaquo; Columns plus Task Name; a field can be used on one side only.</div>
+      </div>`;
+}
+
 function toggleShowPendingFlag() {
   if (!masters.flags) masters.flags = {};
   masters.flags.showPending = document.getElementById('flag-show-pending').checked;
@@ -16696,14 +16962,29 @@ function changeColumnListSource(key, listSource) {
 function toggleColumnContext(key, flagName) {
   const col = getColumnByKey(key);
   if (!col) return;
+  // A mandatory field must stay visible in the Complete popup, or nobody could fill it in.
+  if (flagName === 'showInCompletePopup' && isColumnRequired(col) && columnHasPopupInput(col)) return;
   col[flagName] = col[flagName] === false ? true : false;
   saveState();
+  refreshAfterColumnConfigChange();
+}
+
+// Turn the Mandatory flag on/off for a column. Date and Effort (and the auto-filled Employee
+// column) are fixed, so this is a no-op for them.
+function toggleColumnRequired(key) {
+  const col = getColumnByKey(key);
+  if (!col || isAlwaysRequiredColumn(col) || col.isEmployeeColumn) return;
+  col.required = !col.required;
+  if (col.required && columnHasPopupInput(col)) col.showInCompletePopup = true;
+  saveState();
+  renderMastersContent();
   refreshAfterColumnConfigChange();
 }
 
 function confirmDeleteColumn(key) {
   const col = getColumnByKey(key);
   if (!col) return;
+  if (isAlwaysRequiredColumn(col)) return; // Date and Effort can never be deleted
   const listKey = col.listSource;
   // Only offer to remove the list if it's a custom one (not the shared built-in
   // Projects/Nature/Status lists) and no other column still points to it.
@@ -16741,7 +17022,7 @@ function addCustomColumn() {
   const existingKeys = getLogColumns().map(c => c.key);
   while (existingKeys.includes(key)) { key = baseKey + '_' + (++n); }
 
-  const newCol = { key, label, visible: true, type, builtIn: false, carryForward: true };
+  const newCol = { key, label, visible: true, type, builtIn: false, carryForward: true, required: false };
   if (type === 'date') newCol.dateFormat = 'DD-MM-YYYY';
   if (type === 'textarea') newCol.rows = DEFAULT_TEXTAREA_ROWS;
   if (type === 'list' || type === 'multilist') {
@@ -17855,7 +18136,7 @@ function renderSearchResults() {
     ${_searchKeywords.length ? `<button class="btn" style="font-size:11px;padding:2px 8px" onclick="clearSearchKeywords()">Clear all</button>` : ''}
   </div>`;
 
-  container.innerHTML = header + sorted.map((hit, i) => {
+  container.innerHTML = header + buildGroupedHtml(sorted, (hit, key) => groupValueOfRecord(hit.data, key, hit.type === 'todo'), (hit, i) => {
     if (hit.type === 'todo') {
       const t = hit.data;
       const todoHasHistory = !!(historyIndex[pendingTaskGroupKey(t)] || []).length;
@@ -17897,7 +18178,7 @@ function renderSearchResults() {
         <div class="pending-card-icon-btn" title="Carry forward to a date" onclick="event.stopPropagation(); carryForwardFromSearch(${e.taskId})"><i class="ti ti-arrow-forward-up"></i></div>
       </div>
     </div>`;
-  }).join('');
+  });
 }
 
 // Wrappers so a search result's action icon closes the search overlay first — both target
@@ -20047,7 +20328,7 @@ function renderPendingTasksList() {
     return s;
   }
 
-  container.innerHTML = groups.map(g => {
+  container.innerHTML = buildGroupedHtml(groups, (g, key) => groupValueOfRecord(g.latest, key, false), (g) => {
     const e = g.latest;
     const desc = e.description || '';
     const name = (e.heading && e.heading.trim()) ? e.heading.trim() : desc;
@@ -20081,7 +20362,7 @@ function renderPendingTasksList() {
       '</div>' +
       '<div class="pending-history-panel">' + historyHtml + '</div>' +
       '</div>';
-  }).join('');
+  });
 }
 
 function togglePendingHistory(btn) {
@@ -20217,7 +20498,7 @@ function renderTodoDraftFields() {
     const idAttr = isCore ? ('todo-draft-' + c.key) : ('todo-draft-custom-' + c.key);
     const cssKey = isCore ? c.key : 'custom';
     const wideClass = c.type === 'textarea' ? ' meta-field-wide' : '';
-    const required = TASK_CARD_REQUIRED_KEYS.includes(c.key) ? ' <span class="req">*</span>' : '';
+    const required = isColumnRequired(c) ? ' <span class="req">*</span>' : '';
     const placeholder = TASK_CARD_PLACEHOLDERS[c.key] || '';
     return '<div class="meta-field meta-field-' + cssKey + wideClass + '">' +
       '<span class="meta-label">' + esc(c.label) + required + '</span>' +
