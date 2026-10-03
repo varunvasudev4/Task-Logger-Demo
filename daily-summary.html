@@ -1,0 +1,1156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Daily Summary</title>
+<link rel="icon" href="./favicon.ico" type="image/x-icon">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+/* ────────────────────────────────────────────────────────────────
+   Daily Summary — standalone stylesheet.
+   All selectors are prefixed with `.ds-` (or scoped under #ds-page)
+   so nothing here can collide with tasklogger.html's own CSS if the
+   two files are ever open in frames together. Color/font tokens are
+   copied from tasklogger.html's :root so the two pages look related.
+   ──────────────────────────────────────────────────────────────── */
+
+:root {
+  --ds-bg: #fffdf8;
+  --ds-bg-secondary: #f7f0dd;
+  --ds-bg-tertiary: #ede1c3;
+  --ds-text-primary: #26211a;
+  --ds-text-secondary: #5a4f3c;
+  --ds-text-tertiary: #8a7f68;
+  --ds-border: rgba(38,33,26,0.16);
+  --ds-border-md: rgba(38,33,26,0.30);
+  --ds-radius-md: 6px;
+  --ds-radius-lg: 10px;
+  --ds-blue-bg: #fbe2d3;
+  --ds-blue-mid: #c94f1f;
+  --ds-blue-dark: #9c3c15;
+  --ds-green-bg: #dcefe8;
+  --ds-green-mid: #2f8f76;
+  --ds-green-dark: #1f6350;
+  --ds-font-ui: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --ds-font-head: 'Space Grotesk', 'IBM Plex Sans', sans-serif;
+  --ds-font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ds-bg: #1c2230; --ds-bg-secondary: #232a3d; --ds-bg-tertiary: #0c0e13;
+    --ds-text-primary: #edeff4; --ds-text-secondary: #8b93a7; --ds-text-tertiary: #5b6478;
+    --ds-border: #2e3549; --ds-border-md: #454f6b;
+    --ds-blue-bg: #3a2a20; --ds-blue-mid: #e8622c; --ds-blue-dark: #ff8f5c;
+    --ds-green-bg: #1c332e; --ds-green-mid: #3fab8f; --ds-green-dark: #7fd4bc;
+  }
+}
+
+html, body { max-width: 100%; overflow-x: hidden; }
+
+body {
+  font-family: var(--ds-font-ui);
+  background: var(--ds-bg-tertiary); color: var(--ds-text-primary);
+  min-height: 100vh; padding: 2rem 1rem 4rem; line-height: 1.6;
+  margin: 0;
+}
+
+#ds-page { width: 100%; max-width: 1100px; margin: 0 auto; }
+
+/* ── Header ── */
+.ds-header {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  margin-bottom: 1.5rem; gap: 12px; min-width: 0; flex-wrap: wrap;
+}
+.ds-header-titlebar { min-width: 0; flex: 1 1 auto; }
+.ds-title {
+  font-family: var(--ds-font-head); font-size: 24px; font-weight: 700; letter-spacing: -0.3px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;
+}
+.ds-subtitle {
+  font-family: var(--ds-font-mono); font-size: 12px; color: var(--ds-text-tertiary);
+  margin-top: 5px; letter-spacing: 0.02em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;
+}
+.ds-header-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* ── Buttons (matches tasklogger.html's .btn conventions) ── */
+.ds-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 14px; border: 1px solid var(--ds-border-md);
+  border-radius: var(--ds-radius-md); background: var(--ds-bg);
+  color: var(--ds-text-primary); font-size: 12.5px; font-weight: 500;
+  cursor: pointer; transition: border-color 0.15s, background 0.15s; white-space: nowrap;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.06); font-family: var(--ds-font-mono); letter-spacing: 0.02em;
+  text-decoration: none; min-height: 44px;
+}
+.ds-btn:hover { background: var(--ds-bg-secondary); border-color: var(--ds-text-tertiary); }
+.ds-btn:focus-visible { outline: 2px solid var(--ds-blue-mid); outline-offset: 2px; }
+.ds-btn i { font-size: 15px; }
+
+/* ── Toolbar row: date display + project filter placeholders ── */
+.ds-toolbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px; border-bottom: 1px solid var(--ds-border);
+  background: var(--ds-bg-secondary); gap: 10px; flex-wrap: wrap;
+  border-radius: var(--ds-radius-lg) var(--ds-radius-lg) 0 0;
+}
+.ds-toolbar-group { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ds-date-display {
+  display: flex; align-items: center; gap: 7px;
+  font-family: var(--ds-font-head); font-size: 13px; font-weight: 600; color: var(--ds-text-primary);
+  padding: 7px 12px; border: 1px solid var(--ds-border-md); border-radius: var(--ds-radius-md);
+  background: var(--ds-bg);
+}
+.ds-date-display i { color: var(--ds-text-tertiary); font-size: 14px; }
+/* ── Project multi-select filter (Stage 9) ──────────────────────────────────
+   Reuses tasklogger.html's .msdd trigger/panel/option architecture and class
+   names (DAILY_SUMMARY_BASELINE.md) so the interaction pattern matches the
+   rest of the app; visual styling here uses Daily Summary's own --ds- tokens
+   since this page has no .meta-select base style to build on. */
+.msdd { position: relative; display: inline-block; min-width: 140px; }
+.msdd-trigger {
+  display: inline-flex; align-items: center; gap: 6px;
+  width: 100%; text-align: left; cursor: pointer; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+  font-family: var(--ds-font-mono); font-size: 12.5px; font-weight: 500;
+  color: var(--ds-text-primary); background: var(--ds-bg);
+  border: 1px solid var(--ds-border-md); border-radius: var(--ds-radius-md);
+  padding: 7px 12px; letter-spacing: 0.02em;
+}
+.msdd-trigger:hover { background: var(--ds-bg-secondary); }
+.msdd-trigger:focus-visible { outline: 2px solid var(--ds-blue-mid); outline-offset: -2px; }
+.msdd-trigger i { font-size: 14px; color: var(--ds-text-tertiary); }
+.msdd-panel {
+  position: absolute; top: calc(100% + 4px); right: 0; z-index: 60;
+  background: var(--ds-bg); border: 1px solid var(--ds-border); border-radius: var(--ds-radius-md);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.14); min-width: 200px; max-height: 240px; overflow-y: auto;
+  padding: 4px;
+}
+.msdd-panel.hidden { display: none; }
+.msdd-option {
+  display: flex; align-items: center; gap: 8px; padding: 8px;
+  font-family: var(--ds-font-ui); font-size: 12.5px; color: var(--ds-text-primary);
+  cursor: pointer; border-radius: 6px;
+  min-height: 36px; box-sizing: border-box;
+}
+.msdd-option span { overflow-wrap: anywhere; word-break: break-word; }
+.msdd-option:hover { background: var(--ds-bg-secondary); }
+.msdd-option:focus-within { outline: 2px solid var(--ds-blue-mid); outline-offset: -2px; background: var(--ds-bg-secondary); }
+.msdd-option input[type="checkbox"] { cursor: pointer; flex-shrink: 0; }
+.msdd-empty { font-size: 12px; color: var(--ds-text-tertiary); padding: 6px 8px; }
+
+/* ── Stage 11: compact summary information bar (date + visible
+   project/task/effort counts) ── Daily Summary-specific, read-only. ── */
+.ds-summary-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; flex-wrap: wrap;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--ds-border);
+  background: var(--ds-bg);
+  font-family: var(--ds-font-mono); font-size: 12px; letter-spacing: 0.02em;
+}
+.ds-summary-bar-date { font-weight: 600; color: var(--ds-text-primary); }
+.ds-summary-bar-stats { color: var(--ds-text-secondary); }
+
+/* ── Card / panel shell that will eventually hold the summary content ── */
+.ds-panel {
+  background: var(--ds-bg); border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-lg); overflow: hidden;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+}
+.ds-content {
+  padding: 18px;
+  min-height: 160px;
+}
+
+/* ── Empty state ── */
+.ds-empty-state {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center; gap: 10px;
+  padding: 48px 20px; color: var(--ds-text-tertiary);
+}
+.ds-empty-state i { font-size: 32px; color: var(--ds-text-tertiary); }
+.ds-empty-state-title {
+  font-family: var(--ds-font-head); font-size: 14px; font-weight: 600; color: var(--ds-text-secondary);
+}
+.ds-empty-state-sub {
+  font-family: var(--ds-font-mono); font-size: 11.5px; color: var(--ds-text-tertiary);
+  max-width: 360px;
+}
+
+/* ── Footer nav (Back to Task Logger) ──
+   Stage 4: converted from an in-flow footer link to a page-fixed control
+   pinned to the bottom-right of the SCREEN (not the document), so it stays
+   visible while scrolling. Daily Summary-specific class (.ds-back-fixed) —
+   does not touch anything in tasklogger.html. */
+.ds-footer-nav { display: none; }
+
+.ds-back-fixed {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 40;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.16);
+}
+
+/* Stage 4: reserve room at the bottom of the page so the fixed button never
+   overlaps summary content, on any viewport size. */
+body { padding-bottom: 84px; }
+
+/* ── Stage 6: project groups + tasks ──
+   Daily Summary-specific classes only; nothing here touches tasklogger.html's
+   own CSS. Identity-only rendering for now (name + project relationship) —
+   module/nature/effort/ticket/description/remark styling is a later stage. */
+.daily-summary-project {
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-md);
+  margin-bottom: 16px;
+  overflow: hidden;
+  background: var(--ds-bg);
+}
+.daily-summary-project:last-child { margin-bottom: 0; }
+.daily-summary-project-header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 14px;
+  background: var(--ds-bg-secondary);
+  border-bottom: 1px solid var(--ds-border);
+  font-family: var(--ds-font-head); font-size: 14px; font-weight: 600;
+  color: var(--ds-text-primary);
+  cursor: pointer; user-select: none;
+  min-height: 44px; box-sizing: border-box;
+}
+.daily-summary-project-header:hover { background: var(--ds-bg-tertiary); }
+.daily-summary-project-header:focus-visible { outline: 2px solid var(--ds-blue-mid); outline-offset: -2px; }
+.daily-summary-project-header i { color: var(--ds-text-tertiary); font-size: 15px; }
+.daily-summary-project-header-label {
+  flex: 1 1 auto; min-width: 0;
+  overflow-wrap: anywhere; word-break: break-word;
+}
+/* Stage 10: expand/collapse chevron indicator. Rotates in place — no new
+   icon set introduced, reuses the existing Tabler icon font already loaded
+   for the page. */
+.daily-summary-project-chevron {
+  flex-shrink: 0; font-size: 16px; color: var(--ds-text-tertiary);
+  transition: transform 0.15s ease;
+}
+.daily-summary-project-chevron.collapsed { transform: rotate(-90deg); }
+/* Stage 12: flat, standup-scannable task list. The project card (above) is
+   the only bordered/background container — individual tasks are NOT cards.
+   A subtle top border between consecutive tasks (not a box around each one)
+   provides the visual separation instead. */
+.daily-summary-project-tasks {
+  display: flex; flex-direction: column;
+  padding: 4px 14px 8px;
+}
+.daily-summary-task {
+  padding: 10px 0;
+}
+.daily-summary-task + .daily-summary-task {
+  border-top: 1px solid var(--ds-border);
+}
+.daily-summary-task-name {
+  font-family: var(--ds-font-ui); font-size: 14px; font-weight: 600;
+  color: var(--ds-text-primary);
+  overflow-wrap: anywhere; word-break: break-word;
+}
+/* ── Stage 7: complete task details (module/nature/effort, ticket,
+   description, remarks) ── Daily Summary-specific classes only; nothing
+   here touches tasklogger.html's own CSS. Read-only display — no inputs. */
+.daily-summary-task-meta {
+  font-family: var(--ds-font-mono); font-size: 11px; color: var(--ds-text-secondary);
+  margin-top: 4px;
+  overflow-wrap: anywhere; word-break: break-word;
+}
+.daily-summary-task-ticket {
+  font-family: var(--ds-font-mono); font-size: 11px;
+  margin-top: 4px;
+  overflow-wrap: anywhere; word-break: break-word;
+}
+.daily-summary-task-ticket a {
+  color: var(--ds-blue-mid); text-decoration: underline;
+}
+.daily-summary-task-block {
+  margin-top: 6px;
+}
+.daily-summary-task-block-label {
+  font-family: var(--ds-font-mono); font-size: 10.5px; font-weight: 600;
+  color: var(--ds-text-tertiary); text-transform: uppercase; letter-spacing: 0.04em;
+  margin-bottom: 2px;
+}
+.daily-summary-task-block-value {
+  font-family: var(--ds-font-ui); font-size: 12.5px; color: var(--ds-text-primary);
+  white-space: pre-line; overflow-wrap: anywhere; word-break: break-word;
+}
+
+/* ── Responsive: phone breakpoint, mirrors tasklogger.html's 640px rule ── */
+@media (max-width: 640px) {
+  body { padding: 1rem 0.75rem calc(4rem + 68px); }
+  .ds-header { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .ds-header-actions { width: 100%; }
+  .ds-header-actions .ds-btn { flex: 1; justify-content: center; }
+  .ds-toolbar { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .ds-toolbar-group { width: 100%; flex-wrap: wrap; }
+  .ds-summary-bar { flex-direction: column; align-items: flex-start; gap: 4px; }
+  .ds-date-display { flex: 1 1 auto; justify-content: center; }
+  .msdd { width: 100%; }
+  .msdd-trigger { width: 100%; justify-content: center; }
+  .msdd-panel { left: 0; right: 0; min-width: 0; width: 100%; }
+  .ds-back-fixed { right: 12px; bottom: 12px; }
+  /* Stage 12: reclaim horizontal space on narrow screens — less side padding
+     around the project header/task list, no change to content or logic. */
+  .daily-summary-project-header { padding: 10px 12px; }
+  .daily-summary-project-tasks { padding: 4px 12px 8px; }
+}
+</style>
+</head>
+<body>
+
+<div id="ds-page">
+
+  <div class="ds-header">
+    <div class="ds-header-titlebar">
+      <div class="ds-title">Daily Summary</div>
+      <div class="ds-subtitle">Read-only overview · generated from Task Logger data</div>
+    </div>
+  </div>
+
+  <div class="ds-panel">
+
+    <!-- Date display placeholder + project filter placeholder. -->
+    <div class="ds-toolbar">
+      <div class="ds-toolbar-group">
+        <div class="ds-date-display" id="ds-date-display">
+          <i class="ti ti-calendar" aria-hidden="true"></i>
+          <span id="ds-date-display-value">— select a date —</span>
+        </div>
+      </div>
+      <div class="ds-toolbar-group">
+        <!-- Stage 9: project multi-select filter. Reuses tasklogger.html's
+             .msdd multi-select-dropdown architecture (trigger button + panel
+             of checkbox options) — daily-summary.html has no access to
+             tasklogger.html's JS scope, so the class names/structure are
+             reused verbatim but the behavior is implemented in this file's
+             own dsMsdd*/dsProjectFilter* functions below. Options are
+             populated dynamically from dailySummaryProjectData (Stage 5). -->
+        <div class="msdd" id="ds-project-filter">
+          <button type="button" class="msdd-trigger" id="ds-project-filter-trigger" onclick="dsMsddToggle()" aria-haspopup="true" aria-expanded="false" aria-controls="ds-project-filter-panel">
+            <i class="ti ti-filter" aria-hidden="true"></i> <span id="ds-project-filter-label">Projects</span>
+          </button>
+          <div class="msdd-panel hidden" id="ds-project-filter-panel" role="group" aria-label="Filter by project">
+            <div class="msdd-empty">No projects</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Stage 11: compact summary information bar — selected date plus
+         visible project/task/effort counts. Read-only display, kept in sync
+         with the existing renderDailySummary() flow (including the Stage 9
+         project filter) by updateDailySummaryInfoBar(). No independent date
+         or filtering system is introduced — the date reuses
+         selectedSummaryDate (Stage 3/4) and the counts are derived from
+         whatever renderDailySummary() already determined to be visible. -->
+    <div class="ds-summary-bar" id="ds-summary-bar">
+      <span class="ds-summary-bar-date" id="ds-summary-bar-date"></span>
+      <span class="ds-summary-bar-stats" id="ds-summary-bar-stats"></span>
+    </div>
+
+    <!-- Summary content container. Stage 4: holds either the (still
+         unimplemented) per-project rendering placeholder or the empty
+         state, depending on whether any entries started on the selected
+         date. Project grouping/task rendering itself is Stage 5+. -->
+    <div class="ds-content" id="ds-summary-content">
+      <div class="ds-empty-state" id="ds-empty-state">
+        <i class="ti ti-report" aria-hidden="true"></i>
+        <div class="ds-empty-state-title" id="ds-empty-state-title">No summary data yet</div>
+        <div class="ds-empty-state-sub" id="ds-empty-state-sub">
+          This page is a shell. Task data, date filtering, and totals will be added in a later stage.
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Legacy in-flow footer nav container, kept for markup continuity but
+       hidden (display:none) now that the Back control is fixed — see
+       .ds-back-fixed below. Only one Back control exists on the page. -->
+  <div class="ds-footer-nav"></div>
+
+</div>
+
+<!-- Stage 4: single Back to Task Logger control, fixed to the bottom-right
+     of the screen, using a Daily Summary-specific class so nothing here
+     can affect tasklogger.html. -->
+<a class="ds-btn ds-back-fixed" id="ds-back-btn" href="tasklogger.html" aria-label="Back to Task Logger" title="Back to Task Logger">
+  <span>Back to TTL</span> <i class="ti ti-arrow-right" aria-hidden="true"></i>
+</a>
+
+<script>
+// ── Daily Summary : read-only data access layer ─────────────────────────────
+// Stage 4 scope: establish selectedSummaryDate (already available since
+// Stage 3) and filter existing Task Logger log entries down to just the
+// ones that STARTED on that date, using the app's existing date semantics
+// (DAILY_SUMMARY_BASELINE.md §4 / tasklogger.html's entryMatchesDate()).
+// No project grouping, task rendering, or aggregation happens here yet.
+//
+// Storage keys (see DAILY_SUMMARY_BASELINE.md §7 — read-only, never written
+// here): ttl_tasks, ttl_log, ttl_masters. Sync/queue/domain-state keys and
+// every localStorage.setItem/saveState() call are intentionally out of scope.
+
+function dsTodayStr() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+// Date-transfer mechanism (DAILY_SUMMARY_BASELINE.md §9): tasklogger.html's
+// Summary button appends the date it was showing as ?date=YYYY-MM-DD.
+// Falls back to today if the param is missing or not a well-formed date.
+function getDailySummarySelectedDate() {
+  const param = new URLSearchParams(location.search).get('date');
+  return (param && /^\d{4}-\d{2}-\d{2}$/.test(param)) ? param : dsTodayStr();
+}
+
+// Clearly accessible internal selected-date value — the day Task Logger was
+// showing when Summary was opened (Stage 4 Part B).
+const selectedSummaryDate = getDailySummarySelectedDate();
+
+// Read-only load of existing Task Logger data. Mirrors tasklogger.html's
+// loadState() reads for ttl_tasks / ttl_log / ttl_masters only (JSON.parse
+// straight from localStorage.getItem) — never calls setItem, saveState(), or
+// any sync/queue function, so Task Logger's own data is left untouched.
+function loadDailySummaryData() {
+  let tasks = [];
+  let logEntries = [];
+  let masters = null;
+  try {
+    const t = localStorage.getItem('ttl_tasks');
+    if (t) tasks = JSON.parse(t) || [];
+  } catch (e) { tasks = []; }
+  try {
+    const l = localStorage.getItem('ttl_log');
+    if (l) logEntries = JSON.parse(l) || [];
+  } catch (e) { logEntries = []; }
+  try {
+    const m = localStorage.getItem('ttl_masters');
+    if (m) masters = JSON.parse(m);
+  } catch (e) { masters = null; }
+  return { tasks: tasks, logEntries: logEntries, masters: masters };
+}
+
+// Foundation for later stages.
+const dailySummaryData = loadDailySummaryData();
+
+// ── Part C: selected-day filtering ──────────────────────────────────────────
+// Reproduces tasklogger.html's own entryMatchesDate(entry, dateStr) exactly
+// (DAILY_SUMMARY_BASELINE.md §4): a log entry belongs to whichever local
+// calendar day its startTs falls on — not endTs, not any other field. This
+// is a straight copy of the app's existing date-matching semantics, not an
+// approximate/independent comparison.
+function dsEntryMatchesDate(entry, dateStr) {
+  const d = new Date(entry.startTs);
+  const ed = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  return ed === dateStr;
+}
+
+// Filters the existing (unmutated) log entries down to just the ones that
+// started on selectedSummaryDate. Original entry objects are preserved as-is
+// — this only builds a new array of references, it never edits an entry.
+function getDailySummaryEntries() {
+  return dailySummaryData.logEntries.filter(function (entry) {
+    return dsEntryMatchesDate(entry, selectedSummaryDate);
+  });
+}
+
+// Isolated Summary-only variable — never written back to ttl_log, never
+// passed to any Task Logger save/sync function.
+const dailySummaryEntries = getDailySummaryEntries();
+
+// Shared, single formatting of selectedSummaryDate (Stage 3/4) — reused by
+// both the existing toolbar date display and the new Stage 11 summary info
+// bar, so there is exactly one date-display format in the page rather than
+// two independent ones.
+function dsFormatSelectedDate() {
+  const d = new Date(selectedSummaryDate + 'T00:00:00');
+  return d.toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+// Reflect the selected date in the toolbar, and show either the empty state
+// or a placeholder acknowledging entries were found (Part D: real summary
+// rendering is a later stage — this just proves filtering is wired up).
+(function renderSelectedDateDisplay() {
+  const el = document.getElementById('ds-date-display-value');
+  if (!el) return;
+  el.textContent = dsFormatSelectedDate();
+})();
+
+function showDailySummaryEmptyState(reason) {
+  const contentEl = document.getElementById('ds-summary-content');
+  if (!contentEl) return;
+  contentEl.innerHTML = '';
+  const wrap = document.createElement('div');
+  wrap.className = 'ds-empty-state';
+  wrap.id = 'ds-empty-state';
+
+  const icon = document.createElement('i');
+  icon.className = 'ti ti-report';
+  icon.setAttribute('aria-hidden', 'true');
+  wrap.appendChild(icon);
+
+  const title = document.createElement('div');
+  title.className = 'ds-empty-state-title';
+  title.id = 'ds-empty-state-title';
+  title.textContent = reason === 'filtered'
+    ? 'No tasks match the selected projects.'
+    : 'No tasks found for this day.';
+  wrap.appendChild(title);
+
+  const sub = document.createElement('div');
+  sub.className = 'ds-empty-state-sub';
+  sub.id = 'ds-empty-state-sub';
+  sub.textContent = reason === 'filtered'
+    ? 'Try selecting different projects, or clear the filter to see all.'
+    : 'No log entries started on this date.';
+  wrap.appendChild(sub);
+
+  contentEl.appendChild(wrap);
+}
+
+// ── Part E (Stage 5): project-grouped summary data ──────────────────────────
+// Builds the internal (not-yet-rendered) structure:
+//   projects -> project -> tasks -> task/log information
+// from dailySummaryEntries (already selected-day filtered by Stage 4). This
+// is data-shaping only — no UI beyond the existing placeholder text above is
+// built here; project/task rendering itself is Stage 6.
+
+// Looks up the originating task object (from the read-only ttl_tasks load in
+// Stage 3) for a given entry's taskId. Used so later stages can compute live
+// effort for a still-running task (DAILY_SUMMARY_BASELINE.md §5) without a
+// second read of localStorage. Returns null if the task can't be found (e.g.
+// it was later deleted) — later stages fall back to the entry's own fields
+// in that case.
+function dsFindTaskById(taskId) {
+  for (let i = 0; i < dailySummaryData.tasks.length; i++) {
+    if (dailySummaryData.tasks[i].id === taskId) return dailySummaryData.tasks[i];
+  }
+  return null;
+}
+
+// Groups the day's entries into projects -> tasks -> log entries.
+//
+// Project grouping: uses the entry's own existing `project` field verbatim
+// (STAGE_05_PROJECT_DATA scope — no new project identifier is invented). A
+// missing/empty project is normalized to '' — the same fallback the app
+// itself already uses everywhere it reads a project value (tasklogger.html's
+// getEntryValueForColumn: `case 'project': return e.project || '';`) — so
+// entries with no project are simply grouped together under that existing
+// convention rather than a made-up label; any display label for that group
+// is a later-stage rendering concern, not a data-shaping one.
+//
+// Task grouping: DAILY_SUMMARY_BASELINE.md §3 confirms a single taskId can
+// have multiple log entries (a fresh entry per start, and split-completion
+// fan-out). Per this stage's instruction, those are grouped under one task
+// node without losing any individual entry: each task node keeps an
+// `entries` array of the original (unmutated) entry objects, preserving
+// every startTs/endTs/durationSecs/description/remark pair exactly as
+// logged, for later effort aggregation. Entries whose taskId doesn't repeat
+// simply end up as a single-entry array — the same code path, no special
+// casing, matching "if the existing application treats each log entry
+// independently, preserve that behavior."
+//
+// Running task: each task node also carries `task` (the live task object
+// looked up via dsFindTaskById, or null) so a later stage can reproduce
+// liveElapsedMs/liveElapsedSecs (DAILY_SUMMARY_BASELINE.md §5) for whichever
+// entry has durationSecs === null, without this stage changing or
+// pre-computing that effort itself.
+function buildDailySummaryData() {
+  const projectOrder = [];
+  const projectsByKey = {};
+
+  dailySummaryEntries.forEach(function (entry) {
+    const projectKey = entry.project || '';
+    if (!projectsByKey[projectKey]) {
+      projectsByKey[projectKey] = { project: projectKey, taskOrder: [], tasksByKey: {} };
+      projectOrder.push(projectKey);
+    }
+    const projectGroup = projectsByKey[projectKey];
+
+    const taskKey = entry.taskId;
+    if (!projectGroup.tasksByKey[taskKey]) {
+      projectGroup.tasksByKey[taskKey] = {
+        taskId: entry.taskId,
+        name: entry.heading || '',
+        project: projectKey,
+        module: entry.module || '',
+        nature: entry.nature || '',
+        ticket: entry.ticket || '',
+        task: dsFindTaskById(entry.taskId),
+        entries: []
+      };
+      projectGroup.taskOrder.push(taskKey);
+    }
+    // Preserve the original entry object by reference (description, remark,
+    // startTs, endTs, durationSecs all read straight off it later) — never
+    // copied/mutated, so the source `dailySummaryEntries`/`ttl_log` data is
+    // untouched.
+    projectGroup.tasksByKey[taskKey].entries.push(entry);
+  });
+
+  return projectOrder.map(function (projectKey) {
+    const projectGroup = projectsByKey[projectKey];
+    return {
+      project: projectGroup.project,
+      tasks: projectGroup.taskOrder.map(function (taskKey) {
+        return projectGroup.tasksByKey[taskKey];
+      })
+    };
+  });
+}
+
+// Isolated Summary-only structure — read-derived only, never written back
+// to ttl_tasks/ttl_log or any Task Logger save/sync function.
+const dailySummaryProjectData = buildDailySummaryData();
+
+// ── Stage 9: project multi-select filter (UI state only) ────────────────────
+// Selected projects live only in this in-memory Set for the lifetime of the
+// page load — never read from or written to localStorage, never synced, and
+// never fed back into dailySummaryProjectData itself (filtering only decides
+// what renderDailySummary() *displays*). An empty Set means "no filter
+// applied" — i.e. show every project — per this stage's explicit rule.
+const dsSelectedProjects = new Set();
+
+// ── Stage 10: collapsible project groups (UI state only) ────────────────────
+// Tracks which project groups are currently COLLAPSED, keyed by the same
+// stable project value Stage 5/9 already use (projectGroup.project — the
+// entry's own `project` field, normalized to '' for "no project"). A project
+// with no entry in this Set is expanded — the default for every project the
+// first time it's rendered, and for any project newly revealed by a filter
+// change. This Set is in-memory only for the lifetime of the page load: never
+// read from or written to localStorage, never synced, and it does not modify
+// dailySummaryProjectData or any log/task object — it only decides what
+// renderDailySummaryProject() displays.
+const dailySummaryCollapsedProjects = new Set();
+
+// Toggles one project's collapsed state and re-renders via the existing
+// renderDailySummary() entry point — no separate/duplicate rendering path.
+// Toggling one project never touches any other project's entry in the Set,
+// so each project's collapse state is independent.
+function toggleDailySummaryProject(projectKey) {
+  if (dailySummaryCollapsedProjects.has(projectKey)) {
+    dailySummaryCollapsedProjects.delete(projectKey);
+  } else {
+    dailySummaryCollapsedProjects.add(projectKey);
+  }
+  renderDailySummary();
+}
+
+// Distinct project names with entries on the selected day. Reuses Stage 5's
+// dailySummaryProjectData as-is — it already produces exactly one group per
+// distinct project value (including '' for "no project"), so there is
+// nothing further to dedupe or re-derive here.
+function dsGetAvailableProjects() {
+  return (dailySummaryProjectData || []).map(function (g) { return g.project; });
+}
+
+// (Re)builds the dropdown's checkbox options from the current available
+// projects. Each option's checked state reflects dsSelectedProjects. Options
+// are built with createElement/textContent (never innerHTML with project
+// text), so a project name containing markup-looking characters is never
+// parsed as HTML.
+function dsRenderProjectFilterOptions() {
+  const panel = document.getElementById('ds-project-filter-panel');
+  if (!panel) return;
+  panel.innerHTML = '';
+  const projects = dsGetAvailableProjects();
+  if (projects.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'msdd-empty';
+    empty.textContent = 'No projects';
+    panel.appendChild(empty);
+    return;
+  }
+  projects.forEach(function (project) {
+    const optionEl = document.createElement('label');
+    optionEl.className = 'msdd-option';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = dsSelectedProjects.has(project);
+    checkbox.addEventListener('change', function () {
+      dsProjectFilterCheckChange(project, checkbox.checked);
+    });
+    optionEl.appendChild(checkbox);
+    const labelText = document.createElement('span');
+    labelText.textContent = project || '(No project)';
+    optionEl.appendChild(labelText);
+    panel.appendChild(optionEl);
+  });
+}
+
+// Updates the trigger button's label to reflect the current selection count
+// — "Projects" when the selection is empty (i.e. showing all), "Projects
+// (N)" otherwise.
+function dsUpdateProjectFilterLabel() {
+  const labelEl = document.getElementById('ds-project-filter-label');
+  if (!labelEl) return;
+  labelEl.textContent = dsSelectedProjects.size > 0
+    ? 'Projects (' + dsSelectedProjects.size + ')'
+    : 'Projects';
+}
+
+// Checkbox change handler: updates the in-memory filter state, refreshes the
+// trigger label, then re-renders using the existing renderDailySummary()
+// entry point — no separate/duplicate rendering path.
+function dsProjectFilterCheckChange(project, isChecked) {
+  if (isChecked) dsSelectedProjects.add(project);
+  else dsSelectedProjects.delete(project);
+  dsUpdateProjectFilterLabel();
+  renderDailySummary();
+}
+
+// Sets the filter panel's open/closed state and keeps the trigger's
+// aria-expanded in sync with it, in one place — so every path that can open
+// or close the panel (click-to-toggle, outside click, Escape) reports the
+// same state to assistive tech as it shows visually. Does not change what
+// the panel contains or how filtering works.
+function dsSetFilterPanelOpen(isOpen) {
+  const panel = document.getElementById('ds-project-filter-panel');
+  const trigger = document.getElementById('ds-project-filter-trigger');
+  if (!panel || !trigger) return;
+  panel.classList.toggle('hidden', !isOpen);
+  trigger.setAttribute('aria-expanded', String(isOpen));
+}
+
+// Opens/closes the project filter's dropdown panel, matching tasklogger.html's
+// own msddToggle() behavior (close any other open .msdd-panel first).
+function dsMsddToggle() {
+  const panel = document.getElementById('ds-project-filter-panel');
+  if (!panel) return;
+  const isOpen = !panel.classList.contains('hidden');
+  document.querySelectorAll('.msdd-panel').forEach(function (p) { p.classList.add('hidden'); });
+  dsSetFilterPanelOpen(!isOpen);
+}
+
+// Close the open dropdown panel when clicking outside of it — same pattern
+// as tasklogger.html's own document-level click listener for .msdd.
+document.addEventListener('click', function (e) {
+  if (!e.target.closest('.msdd')) {
+    dsSetFilterPanelOpen(false);
+  }
+});
+
+// Escape closes the open filter panel and returns focus to its trigger, the
+// standard keyboard expectation for a dropdown — matching the "keyboard
+// interaction works where practical" requirement without altering the
+// filter's architecture or selection behavior.
+document.addEventListener('keydown', function (e) {
+  if (e.key !== 'Escape') return;
+  const panel = document.getElementById('ds-project-filter-panel');
+  if (panel && !panel.classList.contains('hidden')) {
+    dsSetFilterPanelOpen(false);
+    const trigger = document.getElementById('ds-project-filter-trigger');
+    if (trigger) trigger.focus();
+  }
+});
+
+// ── Stage 7: complete task details (read-only helpers) ──────────────────────
+// Namespaced (ds-prefixed) copies of the exact logic tasklogger.html already
+// uses for these same values (DAILY_SUMMARY_BASELINE.md) — daily-summary.html
+// has no access to tasklogger.html's JS scope (see Stage 3), so a small
+// duplicate is unavoidable, but no new selection/calculation rule is
+// invented here.
+
+// Direct copy of tasklogger.html's rteLooksLikeHtml(v): a value only gets
+// treated as rich-text HTML if it actually contains one of the tags the
+// app's own rich-text editor produces — a plain-text value (the common
+// case) passes straight through untouched.
+function dsRteLooksLikeHtml(v) {
+  return /<\/?(p|div|br|ul|ol|li|b|strong|i|em)(\s[^>]*)?>/i.test(v);
+}
+
+// Direct copy of tasklogger.html's richTextToPlain(html): flattens an old
+// rich-HTML description/remark down to plain text (list items get "• ",
+// block/line boundaries become real newlines, every tag is otherwise
+// dropped but its text content kept). Plain-text values pass through
+// unchanged. Never uses innerHTML on the *output* — only builds a detached,
+// throwaway element to read textContent back out of, so no user-entered
+// markup is ever attached to the live page.
+function dsRichTextToPlain(html) {
+  const v = html == null ? '' : String(html);
+  if (!v || !dsRteLooksLikeHtml(v)) return v;
+  const root = document.createElement('div');
+  root.innerHTML = v;
+  root.querySelectorAll('li').forEach(function (li) {
+    li.insertAdjacentText('afterbegin', '• ');
+    li.insertAdjacentText('beforeend', '\n');
+  });
+  root.querySelectorAll('p, div, br').forEach(function (el) {
+    el.insertAdjacentText('afterend', '\n');
+  });
+  return (root.textContent || '').replace(/\n{3,}/g, '\n\n').replace(/[ \t]+\n/g, '\n').trim();
+}
+
+// Direct copy of tasklogger.html's liveElapsedMs(task)/liveElapsedSecs(task)
+// (DAILY_SUMMARY_BASELINE.md §5) — needed here only to read a running task's
+// current elapsed time, never to write it back.
+function dsLiveElapsedMs(task) {
+  if (task.status === 'running' && task.segmentStart !== null)
+    return task.accumulatedMs + (Date.now() - task.segmentStart);
+  return task.accumulatedMs;
+}
+function dsLiveElapsedSecs(task) { return Math.floor(dsLiveElapsedMs(task) / 1000); }
+
+// Same "which entry counts as last" rule tasklogger.html's own
+// openCompleteModal() already uses to re-populate description/remark when
+// reopening a task: prefer the most recent *completed* entry (endTs set),
+// falling back to the most recent entry overall. Scoped to this task's
+// entries for the selected day (task.entries, from Stage 5) — the existing
+// chronological array order used throughout Stage 4-6. Read-only: returns a
+// reference, never mutates.
+function dsGetLastEntryForTask(task) {
+  const reversed = task.entries.slice().reverse();
+  return reversed.find(function (e) { return e.endTs !== null; }) || reversed[0] || null;
+}
+
+// Effort in minutes for a task's entries on the selected day. Mirrors
+// getEntryValueForColumn's existing 'effort' case exactly per entry — secs =
+// entry.durationSecs if set, else the task's live elapsed seconds if it's
+// still running (DAILY_SUMMARY_BASELINE.md §5) — summed across this task's
+// entries for the day, then converted to minutes once (Math.ceil), matching
+// the app's own rounding. Never touches durationSecs/accumulatedMs and never
+// writes anything back to storage.
+function dsGetTaskEffortMinutes(task) {
+  let totalSecs = 0;
+  task.entries.forEach(function (entry) {
+    if (entry.durationSecs != null) {
+      totalSecs += entry.durationSecs;
+    } else if (task.task) {
+      totalSecs += dsLiveElapsedSecs(task.task);
+    }
+  });
+  return Math.ceil(totalSecs / 60);
+}
+
+// Safe-display check for the ticket field (currently a free-typed text
+// column in tasklogger.html — DAILY_SUMMARY_BASELINE.md — not guaranteed to
+// be a URL). Only values that are actually well-formed http(s) links are
+// rendered as a clickable link; everything else renders as plain text. No
+// advanced ticket-system formatting beyond that, per this stage's scope.
+function dsIsHttpUrl(v) {
+  return /^https?:\/\/\S+$/i.test(v);
+}
+
+// ── Stage 8: task-name display fallback (display-only) ──────────────────────
+// Isolated here so no other rendering code needs its own copy of this rule.
+// Never writes anything back to task/entry/localStorage — purely a display
+// value computed fresh on each render.
+
+// Truncates already-plain text to the first 100 characters, appending "..."
+// only when truncation actually happened (100 chars or fewer is left as-is,
+// per this stage's explicit instruction).
+function dsTruncate100(text) {
+  return text.length > 100 ? text.slice(0, 100) + '...' : text;
+}
+
+// Case 1 — a real, non-empty task name that differs from the description:
+// show it as-is (no truncation — that only applies to the description
+// fallback below).
+// Case 2 — missing/empty task name: fall back to the description, first 100
+// characters.
+// Case 3 — task name is the same as the description: don't show the same
+// text twice — fall back to the description, first 100 characters, exactly
+// like Case 2.
+// Case 4 — neither a name nor a description is available: a safe existing
+// fallback, "Unnamed Task" — no information is invented.
+//
+// Comparison uses plain text for both sides — task.name (entry.heading) is
+// already plain text in the existing data model, and the description is run
+// through dsRichTextToPlain() first (the same flattening already used for
+// the Description block in Stage 7), so the comparison never depends on
+// whatever HTML markup an old rich-text description happens to contain.
+function getSummaryTaskName(task) {
+  const lastEntry = dsGetLastEntryForTask(task);
+  const descriptionText = lastEntry ? dsRichTextToPlain(lastEntry.description || '') : '';
+  const rawName = (task.name || '').trim();
+
+  if (rawName && rawName !== descriptionText.trim()) {
+    return rawName;
+  }
+  if (descriptionText) {
+    return dsTruncate100(descriptionText);
+  }
+  return 'Unnamed Task';
+}
+
+// ── Stage 6: project group + task rendering ─────────────────────────────────
+// Consumes the existing Stage 5 structure (dailySummaryProjectData) as-is —
+// no re-filtering, no re-grouping happens here. Identity-only task rendering
+// per this stage's scope: task name and project relationship, inside a
+// visually distinct project section. Module/nature/effort/ticket/description/
+// remark rendering, totals, and collapsible behavior are later stages.
+//
+// Text safety: every dynamic value (project label, task name) is written via
+// textContent on DOM nodes built with createElement/appendChild — never
+// innerHTML — so nothing here can introduce unsafe HTML injection from
+// user-entered log data.
+
+// Renders a single task's full detail card: name (Stage 8 fallback applied),
+// project relationship (Stage 6), then module/nature/effort, ticket, last
+// description, and remarks (Stage 7). Every dynamic value is set via
+// textContent (or, for the ticket link, a safety-checked href) — never
+// innerHTML — so no user-entered log/task text is ever parsed as markup.
+function renderDailySummaryTask(task) {
+  const taskEl = document.createElement('div');
+  taskEl.className = 'daily-summary-task';
+
+  // Line 1: task name, with the Stage 8 display-only fallback applied.
+  const nameEl = document.createElement('div');
+  nameEl.className = 'daily-summary-task-name';
+  nameEl.textContent = getSummaryTaskName(task);
+  taskEl.appendChild(nameEl);
+
+  // Stage 11: the project relationship line was removed from here — the
+  // project is already shown once, as this task's project group header
+  // (renderDailySummaryProject), so repeating it inside every task card was
+  // a duplicate display only. task.project itself is untouched and remains
+  // available internally (grouping in buildDailySummaryData, filtering in
+  // dsSelectedProjects/renderDailySummary) — only this display line is gone.
+
+  // Line 2: Module • Nature • N min — only the parts that are actually
+  // available are shown (no invented placeholder for a missing module or
+  // nature); effort is always shown since it reflects logged/running time.
+  const metaParts = [];
+  if (task.module) metaParts.push(task.module);
+  if (task.nature) metaParts.push(task.nature);
+  metaParts.push(dsGetTaskEffortMinutes(task) + ' min');
+  const metaEl = document.createElement('div');
+  metaEl.className = 'daily-summary-task-meta';
+  metaEl.textContent = metaParts.join(' • ');
+  taskEl.appendChild(metaEl);
+
+  // Line 3: ticket, when available. Rendered as a real link only when it's
+  // a well-formed http(s) URL (dsIsHttpUrl) — otherwise shown as plain
+  // text. href is only ever set to a value that already passed that check.
+  if (task.ticket) {
+    const ticketEl = document.createElement('div');
+    ticketEl.className = 'daily-summary-task-ticket';
+    if (dsIsHttpUrl(task.ticket)) {
+      const link = document.createElement('a');
+      link.href = task.ticket;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.textContent = task.ticket;
+      ticketEl.appendChild(link);
+    } else {
+      ticketEl.textContent = task.ticket;
+    }
+    taskEl.appendChild(ticketEl);
+  }
+
+  // Description: the task's *last* description for the day (per the same
+  // "prefer last completed, else last overall" rule tasklogger.html's own
+  // openCompleteModal() uses — dsGetLastEntryForTask), flattened to plain
+  // text via dsRichTextToPlain. Omitted entirely when there's nothing to
+  // show, rather than rendering an empty/misleading block.
+  const lastEntry = dsGetLastEntryForTask(task);
+  const descriptionText = lastEntry ? dsRichTextToPlain(lastEntry.description || '') : '';
+  if (descriptionText) {
+    const descBlock = document.createElement('div');
+    descBlock.className = 'daily-summary-task-block';
+    const descLabel = document.createElement('div');
+    descLabel.className = 'daily-summary-task-block-label';
+    descLabel.textContent = 'Description';
+    descBlock.appendChild(descLabel);
+    const descValue = document.createElement('div');
+    descValue.className = 'daily-summary-task-block-value';
+    descValue.textContent = descriptionText;
+    descBlock.appendChild(descValue);
+    taskEl.appendChild(descBlock);
+  }
+
+  // Remarks: same last-entry rule, remark field. No remark → no block, no
+  // placeholder text (per this stage's explicit instruction).
+  const remarkText = lastEntry ? dsRichTextToPlain(lastEntry.remark || '') : '';
+  if (remarkText) {
+    const remarkBlock = document.createElement('div');
+    remarkBlock.className = 'daily-summary-task-block';
+    const remarkLabel = document.createElement('div');
+    remarkLabel.className = 'daily-summary-task-block-label';
+    remarkLabel.textContent = 'Remarks';
+    remarkBlock.appendChild(remarkLabel);
+    const remarkValue = document.createElement('div');
+    remarkValue.className = 'daily-summary-task-block-value';
+    remarkValue.textContent = remarkText;
+    remarkBlock.appendChild(remarkValue);
+    taskEl.appendChild(remarkBlock);
+  }
+
+  return taskEl;
+}
+
+// Renders one project section: a clickable header (Stage 10: expand/collapse
+// indicator + toggle) followed by its tasks underneath, visually distinct via
+// .daily-summary-project's card border/background.
+//
+// Stage 10 collapse state: keyed by projectGroup.project — the same stable,
+// existing project identifier Stage 5/9 already group by — never DOM
+// position/index, so it's unaffected by however many projects are currently
+// visible or in what order. A project not yet present in
+// dailySummaryCollapsedProjects renders expanded (the default).
+function renderDailySummaryProject(projectGroup, idx) {
+  const sectionEl = document.createElement('div');
+  sectionEl.className = 'daily-summary-project';
+
+  const isCollapsed = dailySummaryCollapsedProjects.has(projectGroup.project);
+  const displayName = projectGroup.project || '(No project)';
+  const tasksElId = 'ds-project-tasks-' + idx;
+
+  const headerEl = document.createElement('div');
+  headerEl.className = 'daily-summary-project-header';
+  // Clickable + keyboard-accessible, matching the existing application
+  // convention of a focusable, Enter/Space-activatable control (the same
+  // pattern already used for its own toggles/triggers, e.g. dsMsddToggle()'s
+  // <button>) rather than introducing a new interaction model.
+  headerEl.setAttribute('role', 'button');
+  headerEl.setAttribute('tabindex', '0');
+  headerEl.setAttribute('aria-expanded', String(!isCollapsed));
+  headerEl.setAttribute('aria-controls', tasksElId);
+  headerEl.setAttribute('aria-label', displayName + (isCollapsed ? ', collapsed' : ', expanded'));
+  headerEl.addEventListener('click', function () {
+    toggleDailySummaryProject(projectGroup.project);
+  });
+  headerEl.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+      e.preventDefault();
+      toggleDailySummaryProject(projectGroup.project);
+    }
+  });
+
+  // Icon and chevron are purely decorative — the header's aria-label already
+  // states the project name and its expanded/collapsed state, so both are
+  // hidden from assistive tech to avoid redundant/garbled announcements.
+  const headerIcon = document.createElement('i');
+  headerIcon.className = 'ti ti-folder';
+  headerIcon.setAttribute('aria-hidden', 'true');
+  headerEl.appendChild(headerIcon);
+
+  const headerLabel = document.createElement('span');
+  headerLabel.className = 'daily-summary-project-header-label';
+  headerLabel.textContent = displayName;
+  headerEl.appendChild(headerLabel);
+
+  // Expand/collapse indicator — a chevron that rotates based on state.
+  const chevronEl = document.createElement('i');
+  chevronEl.className = 'ti ti-chevron-down daily-summary-project-chevron' + (isCollapsed ? ' collapsed' : '');
+  chevronEl.setAttribute('aria-hidden', 'true');
+  headerEl.appendChild(chevronEl);
+
+  sectionEl.appendChild(headerEl);
+
+  const tasksEl = document.createElement('div');
+  tasksEl.id = tasksElId;
+  tasksEl.className = 'daily-summary-project-tasks';
+  if (isCollapsed) tasksEl.style.display = 'none';
+  projectGroup.tasks.forEach(function (task) {
+    tasksEl.appendChild(renderDailySummaryTask(task));
+  });
+  sectionEl.appendChild(tasksEl);
+
+  return sectionEl;
+}
+
+// ── Stage 11: summary information bar (date + visible totals) ──────────────
+// Display-only. Reuses dsGetTaskEffortMinutes (Stage 7) for each visible
+// task's effort — no new effort calculation is introduced, and nothing here
+// writes to a task/entry object, dailySummaryProjectData, or localStorage.
+
+// Formats a whole number of minutes as "Xh Ym" / "Xh" / "Ym", matching the
+// example format ("6h 25m"). 0 minutes renders as "0m" rather than an empty
+// string, so the bar never goes blank.
+function dsFormatEffortDuration(totalMinutes) {
+  const mins = Math.max(0, Math.round(totalMinutes));
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  if (h > 0 && m > 0) return h + 'h ' + m + 'm';
+  if (h > 0) return h + 'h';
+  return m + 'm';
+}
+
+// Recomputes and displays the project/task/effort counts for exactly the
+// project groups the caller says are currently visible (i.e. already run
+// through the Stage 9 project filter, if any) — this function never decides
+// visibility itself, only summarizes what it's given, so it can never drift
+// from what renderDailySummary() is actually showing.
+function updateDailySummaryInfoBar(visibleGroups) {
+  const dateEl = document.getElementById('ds-summary-bar-date');
+  if (dateEl) dateEl.textContent = dsFormatSelectedDate();
+
+  const statsEl = document.getElementById('ds-summary-bar-stats');
+  if (!statsEl) return;
+
+  const groups = visibleGroups || [];
+  let taskCount = 0;
+  let effortMinutes = 0;
+  groups.forEach(function (projectGroup) {
+    projectGroup.tasks.forEach(function (task) {
+      taskCount++;
+      effortMinutes += dsGetTaskEffortMinutes(task);
+    });
+  });
+
+  statsEl.textContent = 'Projects: ' + groups.length +
+    '    Tasks: ' + taskCount +
+    '    Effort: ' + dsFormatEffortDuration(effortMinutes);
+}
+
+// Top-level render entry point: clears the summary content container and
+// renders each *visible* project group in order, or falls back to the
+// existing empty state when there's nothing to show. Reads only
+// dailySummaryProjectData — never rebuilds or re-filters the underlying
+// structure itself.
+//
+// Stage 9: which groups count as "visible" is decided here, against the
+// in-memory dsSelectedProjects only — an empty selection means no filter is
+// applied (show every project); a non-empty selection shows only the chosen
+// projects. dailySummaryProjectData is read, never modified either way.
+//
+// Stage 11: visibleGroups (however it was computed above) is also handed to
+// updateDailySummaryInfoBar() so the summary bar's counts always match
+// exactly what's rendered below it — including the "no entries for the day"
+// and "filter matches nothing" cases, where the bar correctly shows 0/0/0m.
+function renderDailySummary() {
+  const contentEl = document.getElementById('ds-summary-content');
+  if (!contentEl) return;
+
+  if (!dailySummaryProjectData || dailySummaryProjectData.length === 0) {
+    updateDailySummaryInfoBar([]);
+    showDailySummaryEmptyState();
+    return;
+  }
+
+  const visibleGroups = dsSelectedProjects.size === 0
+    ? dailySummaryProjectData
+    : dailySummaryProjectData.filter(function (g) { return dsSelectedProjects.has(g.project); });
+
+  updateDailySummaryInfoBar(visibleGroups);
+
+  if (visibleGroups.length === 0) {
+    showDailySummaryEmptyState('filtered');
+    return;
+  }
+
+  contentEl.innerHTML = '';
+  visibleGroups.forEach(function (projectGroup, idx) {
+    contentEl.appendChild(renderDailySummaryProject(projectGroup, idx));
+  });
+}
+
+dsRenderProjectFilterOptions();
+renderDailySummary();
+</script>
+
+</body>
+</html>

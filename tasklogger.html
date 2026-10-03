@@ -2160,8 +2160,8 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
       <button class="btn-icon" onclick="closeEmailPreview()"><i class="ti ti-x"></i></button>
     </div>
     <div class="modal-body" style="padding:12px 16px;flex:1;overflow:auto">
-      <div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">
-        Uncheck any rows you want to exclude, then click Copy. Your mail app will open right after copying.
+      <div id="email-preview-hint" style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">
+        Uncheck any rows you want to exclude, then click Copy.
       </div>
       <div style="overflow-x:auto">
         <table id="email-preview-table" style="width:100%;border-collapse:collapse;font-size:12px"></table>
@@ -2175,7 +2175,7 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
       </div>
       <div style="display:flex;gap:8px">
         <button class="btn" onclick="closeEmailPreview()">Cancel</button>
-        <button class="btn btn-primary" onclick="copyEmailTableFromPreview()"><i class="ti ti-clipboard-copy"></i> Copy to Clipboard</button>
+        <button class="btn btn-primary" id="email-preview-copy-btn" onclick="confirmReviewSelection()"><i class="ti ti-clipboard-copy"></i> Copy to Clipboard</button>
       </div>
     </div>
   </div>
@@ -2396,16 +2396,23 @@ const DEFAULT_WORK_START_H = 9, DEFAULT_WORK_START_M = 30;
 const DEFAULT_WORK_END_H   = 18, DEFAULT_WORK_END_M  = 0;
 const DEFAULT_WEEKEND_DAYS = [0, 6]; // 0=Sun, 6=Sat
 
-const DEFAULT_PROJECTS = [
-  'CARDINAL','CIRTEX','GODDARDS','MALCOLM','NAVBRIDGE','NAVONE CMS',
-  'NAVONE TMS','RLB','SEALINK','SMART EXPRESS','SRL','TAA','TITUS',
-  'TUTILL','VEER TRANSPORT','PROVIDA','COMMON'
-];
-const DEFAULT_NATURES = [
-  'Development','Bug Fix','Testing','Code Review','Deployment',
-  'Support','Meeting','R&D','Documentation','Customer Support','Configuration'
-];
+// Projects and Natures of Task start EMPTY on a fresh install — they are entirely user-defined
+// (Masters → Lists). Existing profiles keep whatever lists they already saved.
+const DEFAULT_PROJECTS = [];
+const DEFAULT_NATURES = [];
 const DEFAULT_STATUSES = ['Completed','In Progress','Pending','Blocked'];
+// Status ROLES (Masters → Lists → Status): which status names mean what, so no logic depends on a
+// literal status name. closed = task is finished (never shown as Pending); blocked = stuck
+// (also never shown as Pending, styled differently); defaultOnComplete = status pre-selected when
+// completing a task / fallback for entries without one; todoLabel = how To Do items show up when
+// grouped by Status. These are only the starting values — all editable in Masters.
+const DEFAULT_STATUS_CONFIG = { closed: ['Completed'], blocked: ['Blocked'], defaultOnComplete: 'Completed', todoLabel: 'To Do' };
+// Pending Tasks identity: which fields decide that two log entries are "the same task". It follows the
+// Primary / Secondary group fields chosen in Masters → Pending & Search (primary when ALL its fields have
+// a value, otherwise secondary). This built-in rule is only used while no group fields are selected, or
+// as the fallback when the selected primary fields are empty and no secondary fields are selected.
+// 'taskname' = the task heading.
+const DEFAULT_PENDING_IDENTITY = { primary: ['ticket'], fallback: ['taskname', 'project', 'module'] };
 
 // ── App-styled tooltip: replaces native browser title tooltips everywhere,
 // including truncated log-table cell text. Ported from the Dashboard's
@@ -2544,9 +2551,10 @@ let masters = {
   workHours: { startH: DEFAULT_WORK_START_H, startM: DEFAULT_WORK_START_M, endH: DEFAULT_WORK_END_H, endM: DEFAULT_WORK_END_M },
   // First load: Pending and Synchronization start OFF; the user can enable either later
   // (Masters → User → Show Pending / Masters → Synchronization → Enable Synchronization).
-  flags: { sleepAutoPause: true, backgroundSyncEnabled: false, showPending: false }, // future flags can be added here
+  flags: { sleepAutoPause: true, backgroundSyncEnabled: false, showPending: false, reviewBeforeCopy: false }, // future flags can be added here
   colorPrefs: { light: {}, dark: {} }, // Masters → Colors: only the colours you changed (CSS variable → hex)
   fontPrefs: { family: 'default', size: 'md' }, // 'default' = built-in IBM Plex Sans stack, unscaled
+  statusConfig: { closed: [...DEFAULT_STATUS_CONFIG.closed], blocked: [...DEFAULT_STATUS_CONFIG.blocked], defaultOnComplete: DEFAULT_STATUS_CONFIG.defaultOnComplete, todoLabel: DEFAULT_STATUS_CONFIG.todoLabel }, // Masters > Lists > Status roles
   groupPrefs: { primary: [], secondary: [] }, // Masters > Pending & Search: column keys used to group the Pending Tasks popup and Search results (primary combo first; secondary combo when an item can't be grouped by the primary one)
   logColumns: DEFAULT_LOG_COLUMNS.map(c => ({ ...c })),
   // Single consolidated store for every list-type column's options — Projects, Nature of
@@ -2554,13 +2562,12 @@ let masters = {
   // all managed from the one "Lists" tab in Masters.
   customLists: { projects: [...DEFAULT_PROJECTS], natures: [...DEFAULT_NATURES], statuses: [...DEFAULT_STATUSES] },
   emailTemplate: {
-    to: 'akhilk@navareglobal.com',
-    cc: 'santhoshj@navaresolutions.co.nz, Arun@navareglobal.com, rony.t@navareglobal.com, nihalm@navaresolutions.co.nz, josmy.j@navareglobal.com, dimble.v@navareglobal.com',
+    to: '',
+    cc: '',
     subject: 'Status Update | {date}',
-    body: 'Hi Akhil,\nPlease see today\'s tasks,\n\n{log_table}\n\nRegards,\n{user}',
+    body: 'Hi,\nPlease see today\'s tasks,\n\n{log_table}\n\nRegards,\n{user}',
     headerBg: '#1f4e78',
-    headerColor: '#ffffff',
-    reviewBeforeCopy: false
+    headerColor: '#ffffff'
   }
 };
 let activeMastersTab = 'lists';
@@ -11298,6 +11305,8 @@ function loadState() {
       if (masters.flags.sleepAutoPause === undefined) masters.flags.sleepAutoPause = true;
       if (masters.flags.backgroundSyncEnabled === undefined) masters.flags.backgroundSyncEnabled = true;
       if (masters.flags.showPending === undefined) masters.flags.showPending = true;
+      // Review & select rows before Copy / Email: moved here from the email template. Keep the user's old choice.
+      if (masters.flags.reviewBeforeCopy === undefined) masters.flags.reviewBeforeCopy = !!(masters.emailTemplate && masters.emailTemplate.reviewBeforeCopy);
       if (!masters.colorPrefs || typeof masters.colorPrefs !== 'object') masters.colorPrefs = { light: {}, dark: {} };
       if (!masters.colorPrefs.light) masters.colorPrefs.light = {};
       if (!masters.colorPrefs.dark) masters.colorPrefs.dark = {};
@@ -11375,17 +11384,15 @@ function loadState() {
       }
       if (!masters.customLists || typeof masters.customLists !== 'object') masters.customLists = {};
   if (!masters.emailTemplate || typeof masters.emailTemplate !== 'object') masters.emailTemplate = {
-    to: 'akhilk@navareglobal.com',
-    cc: 'santhoshj@navaresolutions.co.nz, Arun@navareglobal.com, rony.t@navareglobal.com, nihalm@navaresolutions.co.nz, josmy.j@navareglobal.com, dimble.v@navareglobal.com',
+    to: '',
+    cc: '',
     subject: 'Status Update | {date}',
-    body: 'Hi Akhil,\nPlease see today\'s tasks,\n\n{log_table}\n\nRegards,\n{user}',
+    body: 'Hi,\nPlease see today\'s tasks,\n\n{log_table}\n\nRegards,\n{user}',
     headerBg: '#1f4e78',
-    headerColor: '#ffffff',
-    reviewBeforeCopy: false
+    headerColor: '#ffffff'
   };
   if (!masters.emailTemplate.headerBg) masters.emailTemplate.headerBg = '#1f4e78';
   if (!masters.emailTemplate.headerColor) masters.emailTemplate.headerColor = '#ffffff';
-  if (masters.emailTemplate.reviewBeforeCopy === undefined) masters.emailTemplate.reviewBeforeCopy = false;
       // Migrate legacy separate masters.projects / masters.natures arrays (from older saved
       // data) into the unified customLists store, then drop the old separate keys.
       if (Array.isArray(masters.projects)) {
@@ -11399,6 +11406,12 @@ function loadState() {
       if (!masters.customLists.projects) masters.customLists.projects = [...DEFAULT_PROJECTS];
       if (!masters.customLists.natures) masters.customLists.natures = [...DEFAULT_NATURES];
       if (!masters.customLists.statuses) masters.customLists.statuses = [...DEFAULT_STATUSES];
+      // Configurable status roles. Profiles saved before these existed get the values that match the
+      // previously hard-coded behaviour, so nothing changes until edited.
+      if (!masters.statusConfig || typeof masters.statusConfig !== 'object') masters.statusConfig = {};
+      ['closed', 'blocked'].forEach(k => { if (!Array.isArray(masters.statusConfig[k])) masters.statusConfig[k] = [...DEFAULT_STATUS_CONFIG[k]]; });
+      if (typeof masters.statusConfig.defaultOnComplete !== 'string') masters.statusConfig.defaultOnComplete = DEFAULT_STATUS_CONFIG.defaultOnComplete;
+      if (!masters.statusConfig.todoLabel) masters.statusConfig.todoLabel = DEFAULT_STATUS_CONFIG.todoLabel;
 
       // One-time sweep: remove any custom list with no column pointing to it. This cleans
       // up lists left behind by earlier app versions (before column deletion correctly
@@ -11752,6 +11765,79 @@ function getConfigurableColumns() {
 function getColumnByKey(key) {
   return getLogColumns().find(c => c.key === key);
 }
+// ── Status roles (Masters → Lists → Status) ────────────────────────────────────
+// No logic should compare a status against a literal name; use these instead.
+function getStatusConfig() {
+  const sc = masters.statusConfig || DEFAULT_STATUS_CONFIG; // missing (older remote masters) → previous behaviour
+  return {
+    closed: Array.isArray(sc.closed) ? sc.closed : [],
+    blocked: Array.isArray(sc.blocked) ? sc.blocked : [],
+    defaultOnComplete: typeof sc.defaultOnComplete === 'string' ? sc.defaultOnComplete : '',
+    todoLabel: sc.todoLabel || DEFAULT_STATUS_CONFIG.todoLabel
+  };
+}
+function getStatusListKey() {
+  const c = getLogColumns().find(x => x.isStatusColumn);
+  return (c && c.listSource) || 'statuses';
+}
+function getStatusOptions() {
+  return (masters.customLists && masters.customLists[getStatusListKey()]) || [];
+}
+function _statusIn(list, status) {
+  const v = String(status == null ? '' : status).trim().toLowerCase();
+  return !!v && list.some(x => String(x).trim().toLowerCase() === v);
+}
+function isClosedStatus(status)  { return _statusIn(getStatusConfig().closed, status); }
+function isBlockedStatus(status) { return _statusIn(getStatusConfig().blocked, status); }
+// Status pre-selected when completing a task: the configured default if it still exists in the
+// Status list, else the first item of the list, else blank (the user must pick).
+function getDefaultCompleteStatus() {
+  const opts = getStatusOptions();
+  const d = getStatusConfig().defaultOnComplete;
+  if (d && opts.some(o => String(o).toLowerCase() === d.toLowerCase())) return opts.find(o => String(o).toLowerCase() === d.toLowerCase());
+  return opts[0] || '';
+}
+// Keep roles attached to a status when it is renamed / removed in the Lists tab.
+function renameStatusConfigValue(listKey, oldVal, newVal) {
+  if (listKey !== getStatusListKey() || !masters.statusConfig) return;
+  const sc = masters.statusConfig;
+  ['closed', 'blocked'].forEach(k => { sc[k] = (sc[k] || []).map(x => x === oldVal ? newVal : x); });
+  if (sc.defaultOnComplete === oldVal) sc.defaultOnComplete = newVal;
+}
+function removeStatusConfigValue(listKey, val) {
+  if (listKey !== getStatusListKey() || !masters.statusConfig) return;
+  const sc = masters.statusConfig;
+  ['closed', 'blocked'].forEach(k => { sc[k] = (sc[k] || []).filter(x => x !== val); });
+  if (sc.defaultOnComplete === val) sc.defaultOnComplete = '';
+}
+function setStatusRole(kind, idx, on) {
+  const items = getStatusOptions(); const name = items[idx];
+  if (name === undefined || (kind !== 'closed' && kind !== 'blocked')) return;
+  if (!masters.statusConfig) masters.statusConfig = { closed: [], blocked: [], defaultOnComplete: '', todoLabel: DEFAULT_STATUS_CONFIG.todoLabel };
+  const arr = (masters.statusConfig[kind] || []).filter(x => x !== name);
+  if (on) arr.push(name);
+  masters.statusConfig[kind] = arr;
+  _afterStatusConfigChange();
+}
+function setDefaultCompleteStatus(idx) {
+  const name = getStatusOptions()[idx];
+  if (name === undefined) return;
+  if (!masters.statusConfig) masters.statusConfig = { closed: [], blocked: [], defaultOnComplete: '', todoLabel: DEFAULT_STATUS_CONFIG.todoLabel };
+  masters.statusConfig.defaultOnComplete = name;
+  _afterStatusConfigChange();
+}
+function setTodoStatusLabel(val) {
+  if (!masters.statusConfig) masters.statusConfig = { closed: [], blocked: [], defaultOnComplete: '', todoLabel: DEFAULT_STATUS_CONFIG.todoLabel };
+  masters.statusConfig.todoLabel = String(val || '').trim() || DEFAULT_STATUS_CONFIG.todoLabel;
+  _afterStatusConfigChange();
+}
+function _afterStatusConfigChange() {
+  saveState();
+  renderMastersContent();
+  try { renderList(); } catch (e) {}
+  const pm = document.getElementById('pending-tasks-modal');
+  if (pm && !pm.classList.contains('hidden') && typeof renderPendingTasksList === 'function') renderPendingTasksList();
+}
 // Date and Effort are the base of the whole app (which day an entry belongs to, and every
 // minute total), so they are always required: renamable, never optional, never deletable.
 function isAlwaysRequiredColumn(c) {
@@ -11861,7 +11947,7 @@ function getEntryValueForColumn(e, task, key) {
       const secs = e.durationSecs != null ? e.durationSecs : (task ? liveElapsedSecs(task) : 0);
       return Math.ceil(secs / 60);
     }
-    case 'status':       return e.taskStatus || (e.endTs ? 'Completed' : (task ? task.status : ''));
+    case 'status':       return e.taskStatus || (e.endTs ? getDefaultCompleteStatus() : (task ? task.status : ''));
     case 'remark':       return richTextToPlain(e.remark || '');
     default: {
       // Custom column: stored under e.customFields[key]
@@ -12078,7 +12164,7 @@ function openCompleteModal(id) {
 
   // Status — always default to Completed when (re-)opening this popup, regardless
   // of what was saved last time
-  renderCmField('status', 'Completed');
+  renderCmField('status', getDefaultCompleteStatus());
 
   // Bug 2 fix: fall back to the task-card's current draft (task.customFields) when the entry
   // itself has no value yet — same fallback pattern already used below for custom columns.
@@ -12214,7 +12300,7 @@ function editLogEntry(globalIdx) {
 
   renderCmField('ticket', entry.ticket || '', { placeholder: 'e.g. NAV-1234' });
 
-  renderCmField('status', entry.taskStatus || 'Completed');
+  renderCmField('status', entry.taskStatus || getDefaultCompleteStatus());
 
   renderCmField('description', entry.description || '', { placeholder: 'Describe what was done…', multiline: true });
 
@@ -14493,7 +14579,7 @@ function updateLogTable() {
   tbody.innerHTML = filtered.map(e => {
     const task = tasks.find(t=>t.id===e.taskId);
     const isRunning = task && task.status==='running';
-    const statusText = e.taskStatus || (e.endTs ? 'Completed' : (task ? task.status : '—'));
+    const statusText = e.taskStatus || (e.endTs ? getDefaultCompleteStatus() : (task ? task.status : '—'));
 
     const cells = cols.map(c => {
       if (c.key === 'description') {
@@ -15160,7 +15246,34 @@ function renderListsTabHTML() {
              <button class="btn-icon btn-edit" onclick="startListItemEdit(${idx})" title="Rename"><i class="ti ti-pencil"></i></button>
              <button class="btn-icon btn-delete" onclick="deleteCustomListItem(activeListKey,${idx})" title="Delete"><i class="ti ti-x"></i></button>`}
       </div>`; }).join('') + '</div>'}
+    ${activeListKey === getStatusListKey() ? renderStatusRolesHTML(items) : ''}
   `;
+}
+
+// Status roles editor — shown under the list that the Status column uses.
+function renderStatusRolesHTML(items) {
+  if (!items.length) return '';
+  const sc = getStatusConfig();
+  const th = 'font-size:11px;color:var(--text-tertiary);font-weight:600;text-align:center;padding:4px 6px';
+  return `
+    <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border)">
+      <label class="complete-label" style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.06em;font-weight:600;display:block;margin-bottom:5px">Status roles</label>
+      <div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px">Tell the app what each status means. <strong>Closed</strong> and <strong>Blocked</strong> statuses never appear in Pending Tasks (Blocked also gets its own colour). <strong>Default</strong> is pre-selected when you complete a task.</div>
+      <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead><tr><th style="${th};text-align:left">Status</th><th style="${th}">Closed</th><th style="${th}">Blocked</th><th style="${th}">Default</th></tr></thead>
+        <tbody>${items.map((it, i) => `<tr style="border-top:1px solid var(--border)">
+          <td style="padding:6px">${esc(it)}</td>
+          <td style="text-align:center"><input type="checkbox" ${_statusIn(sc.closed, it) ? 'checked' : ''} onchange="setStatusRole('closed',${i},this.checked)" style="cursor:pointer" aria-label="${esc(it)} is closed" /></td>
+          <td style="text-align:center"><input type="checkbox" ${_statusIn(sc.blocked, it) ? 'checked' : ''} onchange="setStatusRole('blocked',${i},this.checked)" style="cursor:pointer" aria-label="${esc(it)} is blocked" /></td>
+          <td style="text-align:center"><input type="radio" name="status-default-radio" ${getDefaultCompleteStatus() === it ? 'checked' : ''} onchange="setDefaultCompleteStatus(${i})" style="cursor:pointer" aria-label="${esc(it)} is the default" /></td>
+        </tr>`).join('')}</tbody>
+      </table></div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:10px">
+        <label class="complete-label" style="margin:0;white-space:nowrap">To Do items count as</label>
+        <input class="master-add-input" type="text" value="${esc(sc.todoLabel)}" style="flex:1;min-width:0" onchange="setTodoStatusLabel(this.value)" />
+      </div>
+      <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">Only used when Pending / Search results are grouped by Status.</div>
+    </div>`;
 }
 
 function selectActiveList(listKey) {
@@ -15287,6 +15400,14 @@ function renderMastersContent() {
             onchange="setCustomFontSize(this.value)" /> <span style="font-size:12px;color:var(--text-tertiary)">% of default size (50–300)</span>
         </div>` : ''}
         <div style="font-size:11px;color:var(--text-tertiary);margin-top:6px">Changes apply immediately and are saved to this device.</div>
+      </div>
+      <div style="margin-top:18px;padding-top:16px;border-top:1px solid var(--border)">
+        <label class="complete-label" style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.06em;font-weight:600;display:block;margin-bottom:8px">Copy &amp; Email</label>
+        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;color:var(--text-primary)">
+          <input type="checkbox" id="flag-review-before-copy" ${getReviewBeforeCopy() ? 'checked' : ''} onchange="toggleReviewBeforeCopyFlag()" style="width:16px;height:16px;cursor:pointer" />
+          <span>Review &amp; select rows before copying table</span>
+        </label>
+        <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px;margin-left:26px">Applies to both Copy and Email. A review popup lets you exclude rows first; whichever you do first, the same selection is used for the next one without asking again. Copy puts the rows on the clipboard without the header; Email copies them with the header.</div>
       </div>`;
     return;
   }
@@ -15344,15 +15465,9 @@ function renderMastersContent() {
       </div>
       <div class="complete-field">
         <label class="complete-label">Body template</label>
-        <textarea class="complete-textarea et-body-tpl" id="et-body" rows="7">${esc(et.body||"Hi Akhil,\nPlease see today's tasks,\n\n{log_table}\n\nRegards,\n{user}")}</textarea>
+        <textarea class="complete-textarea et-body-tpl" id="et-body" rows="7">${esc(et.body||"Hi,\nPlease see today's tasks,\n\n{log_table}\n\nRegards,\n{user}")}</textarea>
       </div>
-      <div class="complete-field" style="margin-top:4px">
-        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;color:var(--text-primary)">
-          <input type="checkbox" id="et-review-before-copy" ${et.reviewBeforeCopy ? 'checked' : ''} style="width:16px;height:16px;cursor:pointer" />
-          <span>Review &amp; select rows before copying table</span>
-        </label>
-        <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px;margin-left:26px">When enabled, a preview modal appears so you can exclude rows before copying to clipboard.</div>
-      </div>
+      <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">&ldquo;Review &amp; select rows before copying table&rdquo; now lives in Masters &rsaquo; User and applies to both Copy and Email.</div>
       <div style="display:flex;gap:8px;margin-top:12px">
         <button class="btn btn-primary" onclick="saveEmailTemplate()"><i class="ti ti-device-floppy"></i> Save Template</button>
         <button class="btn" onclick="clearEmailTemplate()"><i class="ti ti-refresh"></i> Reset</button>
@@ -16645,7 +16760,7 @@ function groupFieldLabel(key) {
 // Value of a grouping field for a log entry (or To Do item when isTodo).
 function groupValueOfRecord(rec, key, isTodo) {
   if (!rec) return '';
-  if (key === 'status') return isTodo ? 'To Do' : (rec.taskStatus || '');
+  if (key === 'status') return isTodo ? getStatusConfig().todoLabel : (rec.taskStatus || '');
   if (key === GROUP_TASKNAME_KEY) return String((rec.heading && String(rec.heading).trim()) || (isTodo ? '' : rec.description) || '').trim();
   let v = rec[key];
   if ((v === undefined || v === null || v === '') && rec.customFields) v = rec.customFields[key];
@@ -16777,6 +16892,13 @@ function toggleShowPendingFlag() {
   masters.flags.showPending = document.getElementById('flag-show-pending').checked;
   saveState();
   applyHeaderButtonVisibility();
+}
+
+function toggleReviewBeforeCopyFlag() {
+  if (!masters.flags) masters.flags = {};
+  masters.flags.reviewBeforeCopy = document.getElementById('flag-review-before-copy').checked;
+  _reviewCarry = null;
+  saveState();
 }
 
 function toggleSleepFlag() {
@@ -17103,7 +17225,9 @@ function bulkAddCustomListItems(listKey) {
 function deleteCustomListItem(listKey, idx) {
   if (!masters.customLists[listKey]) return;
   listItemEditIdx = null;
+  const _removedVal = masters.customLists[listKey][idx];
   masters.customLists[listKey].splice(idx, 1);
+  removeStatusConfigValue(listKey, _removedVal);
   saveState();
   renderMastersContent();
   refreshAfterColumnConfigChange();
@@ -17202,6 +17326,7 @@ function commitListItemEdit(idx) {
   _listEditBusy = true;
   try {
     items[idx] = newVal;
+    renameStatusConfigValue(activeListKey, oldVal, newVal);
     const n = renameListValueInRecords(activeListKey, oldVal, newVal);
     saveState();
     listItemEditIdx = null;
@@ -17307,42 +17432,78 @@ function showConfirmChoice(title, msg, yesCb, noCb, yesLabel='Yes', noLabel='No'
 }
 function confirmYes() { document.getElementById('confirm-overlay').classList.add('hidden'); if(confirmCallback){confirmCallback();} confirmCallback=null; confirmNoCallback=null; }
 function confirmNo()  { document.getElementById('confirm-overlay').classList.add('hidden'); if(confirmNoCallback){confirmNoCallback();} confirmCallback=null; confirmNoCallback=null; }
-// ── Copy log to clipboard (data rows only, tab-separated) ───────────────────
-function copyLog() {
+// ── Shared helpers for Copy and Email ─────────────────────────────────────────
+// One flag (masters.flags.reviewBeforeCopy, Masters → User) controls the review popup for BOTH
+// actions. Falls back to the old email-template value for data saved before the flag moved.
+function getReviewBeforeCopy() {
+  const f = masters.flags && masters.flags.reviewBeforeCopy;
+  if (typeof f === 'boolean') return f;
+  return !!(masters.emailTemplate && masters.emailTemplate.reviewBeforeCopy);
+}
+// Header + data rows for the selected date, plus a stable key per row (used to recognise that the
+// same entries are still on screen when a review selection is carried to the next action).
+function _buildLogTableData() {
   const selDate = getSelectedDate();
   const filtered = logEntries.filter(e => entryMatchesDate(e, selDate));
-  if (filtered.length === 0) { alert('No entries to copy for this date.'); return; }
-
   const cols = getVisibleLogColumns();
-  const rows = filtered.map(e => {
-    const task = tasks.find(t=>t.id===e.taskId);
+  const headerRow = cols.map(c => c.label);
+  const dataRows = filtered.map(e => {
+    const task = tasks.find(t => t.id === e.taskId);
     return cols.map(c => {
       if (c.key === 'effort') {
-        const secs = e.durationSecs!==null ? e.durationSecs : (task ? liveElapsedSecs(task) : 0);
-        return Math.ceil(secs/60);
+        const secs = e.durationSecs !== null ? e.durationSecs : (task ? liveElapsedSecs(task) : 0);
+        return Math.ceil(secs / 60);
       }
-      return getExportValueForColumn(e, task, c.key);
-    }).map(tsvEscape).join('\t');
+      const v = getExportValueForColumn(e, task, c.key);
+      return v == null ? '' : v;
+    });
   });
-
-  const text = rows.join('\n');
-  navigator.clipboard.writeText(text).then(() => {
-    const btn = document.getElementById('copy-btn');
-    const orig = btn.innerHTML;
-    btn.innerHTML = '<i class="ti ti-check"></i> Copied!';
-    btn.style.color = 'var(--green-dark)';
-    setTimeout(() => { btn.innerHTML = orig; btn.style.color = ''; }, 2000);
-  }).catch(() => {
-    // Fallback
+  const rowKeys = filtered.map(e => e.taskId + '@' + e.startTs);
+  return { selDate, filtered, cols, headerRow, dataRows, rowKeys };
+}
+// The selection made in the review popup, kept for the NEXT Copy / Email action only (then dropped).
+// Valid while the date and the set of entries are unchanged; otherwise the popup is shown again.
+let _reviewCarry = null; // { date, keys: [...], selected: [bool per row] }
+let _reviewCtx = null;   // { action: 'copy'|'email', d, run } while the popup is open
+function _takeCarriedSelection(d) {
+  const c = _reviewCarry;
+  _reviewCarry = null; // one-shot: the action after this one asks again
+  if (!c || c.date !== d.selDate) return null;
+  if (JSON.stringify(c.keys) !== JSON.stringify(d.rowKeys)) return null;
+  return c.selected;
+}
+// Runs `run(rows, fromPopup)` with the rows to use: every row when review is off, the carried
+// selection when a previous action already reviewed, otherwise after the review popup.
+function _withRowSelection(action, d, run) {
+  if (!getReviewBeforeCopy()) { run(d.dataRows, false); return; }
+  const carried = _takeCarriedSelection(d);
+  if (carried && carried.some(Boolean)) { run(d.dataRows.filter((_, i) => carried[i]), false); return; }
+  _reviewCtx = { action, d, run };
+  _openEmailPreview();
+}
+// ── Copy log to clipboard (data rows only, tab-separated, no header) ────────
+async function _copyRowsNoHeader(rows) {
+  const text = rows.map(r => r.map(tsvEscape).join('\t')).join('\n');
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch (e) {
     const ta = document.createElement('textarea');
     ta.value = text; ta.style.position='fixed'; ta.style.opacity='0';
     document.body.appendChild(ta); ta.select(); document.execCommand('copy');
     document.body.removeChild(ta);
-    const btn = document.getElementById('copy-btn');
+  }
+  const btn = document.getElementById('copy-btn');
+  if (btn) {
     const orig = btn.innerHTML;
     btn.innerHTML = '<i class="ti ti-check"></i> Copied!';
-    setTimeout(() => { btn.innerHTML = orig; }, 2000);
-  });
+    btn.style.color = 'var(--green-dark)';
+    setTimeout(() => { btn.innerHTML = orig; btn.style.color = ''; }, 2000);
+  }
+}
+function copyLog() {
+  const d = _buildLogTableData();
+  if (d.filtered.length === 0) { alert('No entries to copy for this date.'); return; }
+  _withRowSelection('copy', d, rows => _copyRowsNoHeader(rows));
 }
 
 
@@ -17362,8 +17523,7 @@ function saveEmailTemplate() {
       const hex = (document.getElementById('et-header-color-hex') || {}).value?.trim();
       const cp  = (document.getElementById('et-header-color')     || {}).value?.trim();
       return /^#[0-9a-fA-F]{6}$/.test(hex) ? hex : (cp || '#ffffff');
-    })(),
-    reviewBeforeCopy: !!(document.getElementById('et-review-before-copy') || {}).checked
+    })()
   };
   saveState();
   const msg = document.getElementById('et-saved-msg');
@@ -17371,17 +17531,14 @@ function saveEmailTemplate() {
 }
 
 function clearEmailTemplate() {
-  masters.emailTemplate = { to: '', cc: '', subject: '', body: '', headerBg: '#1f4e78', headerColor: '#ffffff', reviewBeforeCopy: false };
+  masters.emailTemplate = { to: '', cc: '', subject: '', body: '', headerBg: '#1f4e78', headerColor: '#ffffff' };
   saveState();
   renderMastersContent();
 }
 
-// store data needed by preview modal
-let _emailPreviewData = null;
-
 function openMailModal() {
-  const selDate = getSelectedDate();
-  const filtered = logEntries.filter(e => entryMatchesDate(e, selDate));
+  const d = _buildLogTableData();
+  const { selDate, filtered, headerRow } = d;
   if (filtered.length === 0) { alert('No entries to email for this date.'); return; }
 
   const et = masters.emailTemplate || {};
@@ -17391,14 +17548,13 @@ function openMailModal() {
     return;
   }
 
-  const d = new Date(selDate + 'T00:00:00');
-  const dateLabel = String(d.getDate()).padStart(2,'0') + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + d.getFullYear();
-  const cols = getVisibleLogColumns();
+  const dt = new Date(selDate + 'T00:00:00');
+  const dateLabel = String(dt.getDate()).padStart(2,'0') + '-' + String(dt.getMonth()+1).padStart(2,'0') + '-' + dt.getFullYear();
 
-  const totalMins = filtered.reduce((s, e) => {
+  const totalMins = filtered.reduce((sum, e) => {
     const task = tasks.find(t => t.id === e.taskId);
     const secs = e.durationSecs !== null ? e.durationSecs : (task ? liveElapsedSecs(task) : 0);
-    return s + Math.ceil(secs / 60);
+    return sum + Math.ceil(secs / 60);
   }, 0);
 
   const rawBody = et.body || "Hi,\nPlease see today's tasks,\n\n{log_table}\n\nRegards,\n{user}";
@@ -17407,45 +17563,39 @@ function openMailModal() {
     .replace(/\{user\}/g, userName || '')
     .replace(/\{total_mins\}/g, String(totalMins));
 
-  // Build header row and data rows
-  const headerRow = cols.map(c => c.label);
-  const dataRows  = filtered.map(e => {
-    const task = tasks.find(t => t.id === e.taskId);
-    return cols.map(c => {
-      if (c.key === 'effort') {
-        const secs = e.durationSecs !== null ? e.durationSecs : (task ? liveElapsedSecs(task) : 0);
-        return Math.ceil(secs / 60);
-      }
-      return getExportValueForColumn(e, task, c.key) || '';
-    });
+  // mailto link built from the rows actually chosen (all rows, or the reviewed selection)
+  const buildMailtoHref = rows => {
+    const plainTable = [headerRow, ...rows].map(r => r.map(tsvEscape).join('\t')).join('\n');
+    const plainBody  = resolveSimpleTokens(rawBody).replace('{log_table}', plainTable);
+    return 'mailto:' + encodeURIComponent(et.to)
+      + '?cc='      + encodeURIComponent(et.cc || '')
+      + '&subject=' + encodeURIComponent(resolveSimpleTokens(et.subject || 'Status Update | {date}'))
+      + '&body='    + encodeURIComponent(plainBody);
+  };
+
+  // Email's clipboard copy includes the header row (formatted table); Copy's does not.
+  _withRowSelection('email', d, async (rows, fromPopup) => {
+    const href = buildMailtoHref(rows);
+    if (fromPopup) {
+      // Copied first, then the mail app opens (the popup's Copy button waits on this)
+      await _copyTableToClipboard(headerRow, rows);
+      window.location.href = href;
+    } else {
+      // No popup: open mail immediately and copy silently in parallel
+      window.location.href = href;
+      _copyTableToClipboard(headerRow, rows).catch(() => {});
+    }
   });
-
-  // Build plain text body for mailto
-  const plainHeader = headerRow.map(tsvEscape).join('\t');
-  const plainRows   = dataRows.map(r => r.map(tsvEscape).join('\t'));
-  const plainTable  = [plainHeader, ...plainRows].join('\n');
-  const plainBody   = resolveSimpleTokens(rawBody).replace('{log_table}', plainTable);
-
-  // Build mailto href (used immediately, or after review+copy)
-  const mailtoHref = 'mailto:' + encodeURIComponent(et.to)
-    + '?cc='      + encodeURIComponent(et.cc || '')
-    + '&subject=' + encodeURIComponent(resolveSimpleTokens(et.subject || 'Status Update | {date}'))
-    + '&body='    + encodeURIComponent(plainBody);
-
-  _emailPreviewData = { headerRow, dataRows, mailtoHref };
-
-  if (et.reviewBeforeCopy) {
-    // Review first — mail app opens only after user clicks Copy to Clipboard
-    _openEmailPreview();
-  } else {
-    // No review needed — open mail immediately and copy silently in parallel
-    window.location.href = mailtoHref;
-    _copyTableToClipboard(headerRow, dataRows);
-  }
 }
 
 function _openEmailPreview() {
-  const { headerRow, dataRows } = _emailPreviewData;
+  const { headerRow, dataRows } = _reviewCtx.d;
+  const isEmail = _reviewCtx.action === 'email';
+  const hintEl = document.getElementById('email-preview-hint');
+  if (hintEl) hintEl.textContent = (isEmail
+    ? 'Uncheck any rows you want to exclude, then click Copy to Clipboard — the table is copied with its header and your mail app opens right after.'
+    : 'Uncheck any rows you want to exclude, then click Copy to Clipboard — rows are copied without the header.')
+    + ' This selection is also used for your next Copy / Email, so you won\u2019t be asked again.';
   const et = masters.emailTemplate || {};
   const hdrBg    = et.headerBg    || '#1f4e78';
   const hdrColor = et.headerColor || '#ffffff';
@@ -17502,7 +17652,7 @@ function emailPreviewToggleAll(state) {
 
 function closeEmailPreview() {
   document.getElementById('email-preview-modal').classList.add('hidden');
-  _emailPreviewData = null;
+  _reviewCtx = null;
 }
 
 async function _copyTableToClipboard(headerRow, selectedRows) {
@@ -17552,23 +17702,25 @@ async function _copyTableToClipboard(headerRow, selectedRows) {
   ]);
 }
 
-async function copyEmailTableFromPreview() {
-  const { headerRow, dataRows, mailtoHref } = _emailPreviewData;
-  const checkboxes = [...document.querySelectorAll('#email-preview-table input[type=checkbox]')];
-  const selectedRows = dataRows.filter((_, i) => checkboxes[i]?.checked);
-  if (selectedRows.length === 0) { alert('No rows selected.'); return; }
+async function confirmReviewSelection() {
+  const ctx = _reviewCtx;
+  if (!ctx) return;
+  const boxes = [...document.querySelectorAll('#email-preview-table input[type=checkbox]')];
+  const selected = ctx.d.dataRows.map((_, i) => !!(boxes[i] && boxes[i].checked));
+  const rows = ctx.d.dataRows.filter((_, i) => selected[i]);
+  if (rows.length === 0) { alert('No rows selected.'); return; }
   try {
-    await _copyTableToClipboard(headerRow, selectedRows);
-    // Open mail app now that the table is copied
-    if (mailtoHref) window.location.href = mailtoHref;
-    const btn = document.querySelector('#email-preview-modal .btn-primary');
-    if (btn) {
-      const orig = btn.innerHTML;
-      btn.innerHTML = '<i class="ti ti-check"></i> Copied! Opening mail…';
-      btn.style.color = 'var(--green-dark)';
-      setTimeout(() => { btn.innerHTML = orig; btn.style.color = ''; closeEmailPreview(); }, 1500);
-    }
-  } catch(err) { alert('Clipboard copy failed: ' + err.message); }
+    await ctx.run(rows, true);
+  } catch (err) { alert('Clipboard copy failed: ' + err.message); return; }
+  // Remember this selection for the next Copy / Email so it isn't asked again
+  _reviewCarry = { date: ctx.d.selDate, keys: ctx.d.rowKeys.slice(), selected };
+  const btn = document.getElementById('email-preview-copy-btn');
+  if (btn) {
+    const orig = btn.innerHTML;
+    btn.innerHTML = ctx.action === 'email' ? '<i class="ti ti-check"></i> Copied! Opening mail…' : '<i class="ti ti-check"></i> Copied!';
+    btn.style.color = 'var(--green-dark)';
+    setTimeout(() => { btn.innerHTML = orig; btn.style.color = ''; closeEmailPreview(); }, 1500);
+  } else closeEmailPreview();
 }
 
 // ── Data: Backup / Restore / Cleanup ──────────────────────────────────────────
@@ -18073,11 +18225,8 @@ function renderSearchResults() {
   }
 
   // An entry/todo item matches if it contains ALL keywords (AND logic across keywords)
-  const fields = e => [e.heading, e.project, e.nature, e.ticket, e.description, e.module]
-    .map(v => (v || '').toLowerCase()).join(' ');
-  const todoFields = t => [t.heading, t.project, t.nature, t.ticket, t.module,
-      ...(t.customFields ? Object.values(t.customFields) : [])]
-    .map(v => (v || '').toLowerCase()).join(' ');
+  const fields = e => searchTextOfRecord(e);
+  const todoFields = t => searchTextOfRecord(t);
 
   const entryHits = logEntries.filter(e => {
     const text = fields(e);
@@ -18732,7 +18881,7 @@ function importParsedRows(allRows) {
           ticket: getVal('ticket'),
           description: descVal,
           remark: getVal('remark'),
-          taskStatus: getVal('status') || 'Completed',
+          taskStatus: getVal('status') || getDefaultCompleteStatus(),
           startTs, endTs: startTs + mins * 60000,
           durationSecs: mins * 60,
           customFields: {}
@@ -20171,11 +20320,44 @@ function shutdownSyncInfrastructure() {
 // ticket is present does it fall back to heading+project+module. The full
 // chronological history per group is kept so the card's hover/tap icon can
 // show a timeline of every past entry for that same task.
+// What counts as "the same task" follows the Primary / Secondary group fields (Masters → Pending & Search).
+// With nothing selected the original rule applies: ticket when present, else task name + project + module.
+function getPendingIdentity() {
+  const gp = getGroupPrefs(); // same Primary / Secondary fields that group the Pending popup and Search results
+  if (!gp.primary.length && !gp.secondary.length) return { primary: DEFAULT_PENDING_IDENTITY.primary.slice(), fallback: DEFAULT_PENDING_IDENTITY.fallback.slice() };
+  return { primary: gp.primary, fallback: gp.secondary.length ? gp.secondary : DEFAULT_PENDING_IDENTITY.fallback.slice() };
+}
+// Raw value of one identity/search field on a log entry or To Do item (top-level field, else customFields).
+function recordFieldValue(rec, key) {
+  if (!rec) return '';
+  if (key === GROUP_TASKNAME_KEY) return String(rec.heading || '');
+  if (key === 'status') return String(rec.taskStatus || '');
+  let v = rec[key];
+  if ((v === undefined || v === null || v === '') && rec.customFields) v = rec.customFields[key];
+  return v === undefined || v === null ? '' : String(v);
+}
+// Search matches every text-like column configured in Masters → Columns (custom columns included)
+// plus Task Name — there is no separate search-field list to maintain.
+function getSearchFields() {
+  return (masters.logColumns || [])
+    .filter(c => c && c.key && !c.isDateColumn && !c.isEffortColumn && !c.isEmployeeColumn && !c.isStatusColumn)
+    .map(c => c.key).concat([GROUP_TASKNAME_KEY]);
+}
+// Lower-cased searchable text of a log entry or To Do item, built from the configured fields.
+function searchTextOfRecord(rec) {
+  return getSearchFields().map(k => {
+    let v = recordFieldValue(rec, k);
+    if (v.indexOf('<') !== -1) v = richTextToPlain(v);
+    return v.toLowerCase();
+  }).join(' ');
+}
 function pendingTaskGroupKey(entry) {
-  const ticket = (entry.ticket || '').trim();
-  if (ticket) return 'tk:' + ticket.toLowerCase();
-  return 'k:' + (entry.heading || '') + '|' + (entry.project || '') + '|' +
-    (entry.module || '');
+  const cfg = getPendingIdentity();
+  if (cfg.primary.length) {
+    const vals = cfg.primary.map(k => recordFieldValue(entry, k).trim());
+    if (vals.every(Boolean)) return 'tk:' + vals.join('|').toLowerCase();
+  }
+  return 'k:' + cfg.fallback.map(k => recordFieldValue(entry, k)).join('|');
 }
 
 function getPendingTaskGroups() {
@@ -20190,7 +20372,7 @@ function getPendingTaskGroups() {
   Object.keys(groups).forEach(key => {
     const history = groups[key].slice().sort((a, b) => (b.startTs || 0) - (a.startTs || 0));
     const latest = history[0];
-    if (!latest || latest.taskStatus === 'Completed' || latest.taskStatus === 'Blocked') return;
+    if (!latest || isClosedStatus(latest.taskStatus) || isBlockedStatus(latest.taskStatus)) return;
     result.push({ key, latest, history });
   });
   result.sort((a, b) => (b.latest.startTs || 0) - (a.latest.startTs || 0));
@@ -20303,8 +20485,7 @@ function renderPendingTasksList() {
   if (allKws.length) {
     // A group matches if it contains ALL keywords (AND logic), searched across
     // ticket, heading, project, module, nature and description.
-    const fieldsOf = e => [e.heading, e.project, e.nature, e.ticket, e.description, e.module]
-      .map(v => (v || '').toLowerCase()).join(' ');
+    const fieldsOf = e => searchTextOfRecord(e);
     groups = groups.filter(g => {
       const text = fieldsOf(g.latest);
       return allKws.every(kw => text.includes(kw));
@@ -20332,7 +20513,7 @@ function renderPendingTasksList() {
     const e = g.latest;
     const desc = e.description || '';
     const name = (e.heading && e.heading.trim()) ? e.heading.trim() : desc;
-    const statusClass = e.taskStatus === 'Blocked' ? 'pending-card-status-blocked' : 'pending-card-status-pending';
+    const statusClass = isBlockedStatus(e.taskStatus) ? 'pending-card-status-blocked' : 'pending-card-status-pending';
     const chips = [
       '<span class="pending-card-chip ' + statusClass + '">' + esc(e.taskStatus || '') + '</span>',
       e.project ? '<span class="pending-card-chip">' + highlight(e.project) + '</span>' : '',
