@@ -278,6 +278,7 @@ body {
    existing design; this state means "there are significant local changes waiting to
    be synced", not "something is happening right now", so it must never blink. */
 .sync-dot.sync-required { background: var(--amber-mid); }
+.sync-dot.sync-conflict { background: var(--red-mid); box-shadow: 0 0 0 2px var(--amber-mid); }
 .sync-dot.sync-neutral { background: var(--text-tertiary); }
 @keyframes syncDotBlink { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
 
@@ -999,14 +1000,25 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
    workspace scrolls. See PHASE_24_RESPONSIVE_UI_RESULT.md for the full
    before/after writeup. */
 .master-modal {
-  width: min(920px, calc(100vw - 32px));
-  height: min(640px, calc(100vh - 64px));
-  height: min(640px, calc(100dvh - 64px)); /* progressive enhancement; ignored where unsupported */
+  /* Wider/taller on desktop and tablet. max-width:none is required: the base
+     .modal rule caps width at 520px, which silently overrode the width below. */
+  width: min(1320px, calc(100vw - 32px));
+  max-width: none;
+  height: min(900px, calc(100vh - 48px));
+  height: min(900px, calc(100dvh - 48px)); /* progressive enhancement; ignored where unsupported */
   max-height: none; /* height above already accounts for viewport margins */
+}
+/* Tablet: use almost the whole screen. */
+@media (min-width: 761px) and (max-width: 1100px) {
+  .master-modal {
+    width: calc(100vw - 20px);
+    height: calc(100vh - 20px);
+    height: calc(100dvh - 20px);
+  }
 }
 .master-modal .modal-header { flex-shrink: 0; }
 .master-header-actions { display: flex; align-items: center; gap: 4px; }
-.master-nav-toggle { display: none; } /* phone-only, see breakpoint below */
+.master-nav-toggle { display: inline-flex; } /* menu button: available on every screen size */
 
 .master-body {
   display: flex;
@@ -1024,6 +1036,14 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
   display: flex;
   flex-direction: column;
   gap: 4px;
+  transition: flex-basis .18s ease, width .18s ease, padding .18s ease, opacity .18s ease;
+}
+/* Desktop/tablet: the menu button collapses/expands the sidebar to give the workspace the full width. */
+@media (min-width: 761px) {
+  .master-body.nav-collapsed .master-nav {
+    flex-basis: 0; width: 0; padding-left: 0; padding-right: 0;
+    border-right-width: 0; opacity: 0; overflow: hidden; pointer-events: none;
+  }
 }
 .master-nav .tab-btn {
   width: 100%;
@@ -1055,7 +1075,6 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
     height: calc(100vh - 24px);
     height: calc(100dvh - 24px);
   }
-  .master-nav-toggle { display: inline-flex; }
   .master-nav {
     position: absolute; top: 0; left: 0; bottom: 0; z-index: 20;
     width: min(78vw, 280px);
@@ -1717,8 +1736,8 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
     <div class="modal-body">
       <div class="timer-summary">
         <div style="flex:1">
-          <div class="timer-summary-time" id="cm-timer" style="font-variant-numeric:tabular-nums">00:00</div>
-          <div class="timer-summary-label" id="cm-timer-label">Time tracked (live)</div>
+          <div class="timer-summary-time" id="cm-timer" style="font-variant-numeric:tabular-nums">0 min</div>
+          <div class="timer-summary-label" id="cm-timer-label">Effort in minutes (live)</div>
         </div>
         <div class="complete-field" style="min-width:160px">
           <label class="complete-label">Adjust duration (min)</label>
@@ -1980,11 +1999,49 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
         <label class="complete-label">Target date</label>
         <input class="complete-input" id="todo-plan-date" type="date" style="width:100%" />
       </div>
-      <div style="font-size:11px;color:var(--text-tertiary);margin-top:6px">The task stays in your To Do list — this just sets a target date to plan for.</div>
+      <div style="font-size:11px;color:var(--text-tertiary);margin-top:6px">A task is added on that day. Starting it removes this To Do; deleting it from that day makes this To Do unplanned again.</div>
     </div>
     <div class="modal-footer">
       <button class="btn" onclick="clearTodoPlanDate()">Clear date</button>
       <button class="btn btn-primary" onclick="confirmTodoPlanDate()"><i class="ti ti-check"></i> Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Reset modal — Settings → Data → Reset -->
+<div class="modal-overlay hidden" id="reset-modal" style="z-index:300">
+  <div class="modal" style="max-width:460px">
+    <div class="modal-header">
+      <div class="modal-title"><i class="ti ti-refresh-alert" style="vertical-align:-2px;margin-right:6px;color:var(--red-mid)"></i>Reset</div>
+      <button class="btn-icon" onclick="closeResetModal()"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="modal-body">
+      <label style="display:flex;gap:10px;align-items:flex-start;border:1px solid var(--border-md);border-radius:var(--radius-md);padding:10px 12px;margin-bottom:8px;cursor:pointer">
+        <input type="radio" name="reset-mode" value="data" checked style="margin-top:3px">
+        <span><span style="font-size:13px;font-weight:600;color:var(--text-primary)">Reset data only</span><br>
+        <span style="font-size:12px;color:var(--text-secondary)">Deletes tasks, effort logs, To Do items, recurring plans, break and weekend records. Keeps your masters, columns, theme and name.</span></span>
+      </label>
+      <label style="display:flex;gap:10px;align-items:flex-start;border:1px solid var(--border-md);border-radius:var(--radius-md);padding:10px 12px;margin-bottom:10px;cursor:pointer">
+        <input type="radio" name="reset-mode" value="all" style="margin-top:3px">
+        <span><span style="font-size:13px;font-weight:600;color:var(--red-dark)">Reset configuration and data</span><br>
+        <span style="font-size:12px;color:var(--text-secondary)">Deletes everything above <strong>plus</strong> masters, columns, settings, theme, name and sync sign-in. The app returns to its first-run state.</span></span>
+      </label>
+      <label id="reset-cloud-option" style="display:flex;gap:10px;align-items:flex-start;border:1px solid var(--border-md);border-radius:var(--radius-md);padding:10px 12px;margin-bottom:10px;cursor:pointer">
+        <input type="radio" name="reset-mode" value="cloud" id="reset-mode-cloud" style="margin-top:3px">
+        <span><span style="font-size:13px;font-weight:600;color:var(--red-dark)">Reset everything, including the cloud copy</span><br>
+        <span style="font-size:12px;color:var(--text-secondary)">Same as above, and also permanently deletes your synced copy on Google Drive. <span id="reset-cloud-hint"></span></span></span>
+      </label>
+      <div id="reset-sync-note" style="display:none;font-size:12px;color:var(--text-secondary);background:var(--bg-secondary);border-radius:var(--radius-md);padding:8px 10px;margin-bottom:10px"><i class="ti ti-cloud" style="vertical-align:-2px"></i> Cloud sync is on. Your Google Drive copy is <strong>not</strong> deleted by the first two options and can sync back down afterwards. Other devices still signed in will also upload their own copy again unless you reset them too.</div>
+      <div id="reset-status" style="display:none;font-size:12px;margin-bottom:10px"></div>
+      <div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px">This cannot be undone. <a href="#" onclick="event.preventDefault();exportBackup()" style="color:var(--blue-mid)">Download a backup first</a>.</div>
+      <div class="complete-field">
+        <label class="complete-label">Type <strong>reset ttl</strong> to confirm</label>
+        <input class="complete-input" id="reset-confirm-input" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="reset ttl" style="width:100%" oninput="updateResetConfirmState()" />
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeResetModal()">Cancel</button>
+      <button class="btn btn-primary" id="reset-confirm-btn" disabled style="background:var(--red-mid);border-color:var(--red-mid)" onclick="performReset()"><i class="ti ti-refresh-alert"></i> Reset</button>
     </div>
   </div>
 </div>
@@ -2429,7 +2486,9 @@ let expandedTaskCardFields = new Set();
 let masters = {
   weekendDays: [...DEFAULT_WEEKEND_DAYS],
   workHours: { startH: DEFAULT_WORK_START_H, startM: DEFAULT_WORK_START_M, endH: DEFAULT_WORK_END_H, endM: DEFAULT_WORK_END_M },
-  flags: { sleepAutoPause: true, backgroundSyncEnabled: true, showPending: true }, // future flags can be added here
+  // First load: Pending and Synchronization start OFF; the user can enable either later
+  // (Masters → User → Show Pending / Masters → Synchronization → Enable Synchronization).
+  flags: { sleepAutoPause: true, backgroundSyncEnabled: false, showPending: false }, // future flags can be added here
   fontPrefs: { family: 'default', size: 'md' }, // 'default' = built-in IBM Plex Sans stack, unscaled
   logColumns: DEFAULT_LOG_COLUMNS.map(c => ({ ...c })),
   // Single consolidated store for every list-type column's options — Projects, Nature of
@@ -3318,7 +3377,7 @@ function applyRemoteMastersIfNewer(remoteParsed) {
   // part of masters on the other device can be overwritten by this. Documented
   // limitation, not silently accepted — see PHASE_19E_RESULT.md §10.
   masters = remoteParsed.masters;
-  _lastMastersHash = simpleHash(stableStringify(masters));
+  _lastMastersHash = simpleHash(stableStringify(mastersForSync(masters)));
   adoptRemoteDomainMeta('masters', remoteMeta);
   return true;
 }
@@ -3581,22 +3640,23 @@ function applyRemoteWeekendOverrides(remoteParsed) {
 // which already downloads once for task planning, and the manual Batch Cloud Merge
 // button, which does its own separate download) gets the exact same merge logic
 // with zero duplicated code, and this never triggers a second network read.
-function mergeNonTaskDomains(remoteParsed) {
+function mergeNonTaskDomains(remoteParsed, opts) {
+  const skip = !!(opts && opts.skipReconciled);
   if (!remoteParsed || typeof remoteParsed !== 'object') return { changed: [] };
   const changed = [];
   try {
-    if (applyRemoteMastersIfNewer(remoteParsed)) changed.push('masters');
-    if (applyRemoteThemeIfNewer(remoteParsed)) changed.push('theme');
+    if (!skip && applyRemoteMastersIfNewer(remoteParsed)) changed.push('masters');
+    if (!skip && applyRemoteThemeIfNewer(remoteParsed)) changed.push('theme');
     if (applyRemoteBreakDataIfNewer(remoteParsed)) changed.push('breakData');
-    if (applyRemoteUserNameIfNewer(remoteParsed)) changed.push('userName');
+    if (!skip && applyRemoteUserNameIfNewer(remoteParsed)) changed.push('userName');
     if (applyRemoteCountersIfHigher(remoteParsed)) changed.push('counters');
     if (applyRemoteWeekendOverrides(remoteParsed)) changed.push('weekendOverrides');
     // Phase 21: the two remaining upload-only riders now get their download/
     // merge half, via the exact same call/push-to-`changed` pattern as the
     // six domains above — no change to this function's own shape.
-    if (applyRemoteLogEntriesIfNewer(remoteParsed)) changed.push('logEntries');
-    if (applyRemoteRecurringPlansIfNewer(remoteParsed)) changed.push('recurringPlans');
-    if (applyRemoteTodoItems(remoteParsed)) changed.push('todoItems');
+    if (!skip && applyRemoteLogEntriesIfNewer(remoteParsed)) changed.push('logEntries');
+    if (!skip && applyRemoteRecurringPlansIfNewer(remoteParsed)) changed.push('recurringPlans');
+    if (!skip && applyRemoteTodoItems(remoteParsed)) changed.push('todoItems');
   } catch (e) {}
   if (changed.length > 0) {
     saveState();
@@ -3671,7 +3731,7 @@ function mergeNonTaskDomains(remoteParsed) {
 // every mutation function's own body.
 function trackNonTaskDomainChangesOnSave() {
   try {
-    const mHash = simpleHash(stableStringify(masters));
+    const mHash = simpleHash(stableStringify(mastersForSync(masters)));
     if (_lastMastersHash !== null && mHash !== _lastMastersHash) recordSyncChange('masters', null, 'update');
     _lastMastersHash = mHash;
 
@@ -3693,7 +3753,7 @@ function trackNonTaskDomainChangesOnSave() {
 // this phase, not as the normal path.
 function primeNonTaskDomainHashes() {
   try {
-    _lastMastersHash = simpleHash(stableStringify(masters));
+    _lastMastersHash = simpleHash(stableStringify(mastersForSync(masters)));
     _lastCountersHash = simpleHash(stableStringify({ taskIdCounter: taskIdCounter, importIdCounter: importIdCounter, recurringPlanIdCounter: recurringPlanIdCounter }));
     _lastUserNameHash = simpleHash(String(userName || ''));
   } catch (e) {}
@@ -3766,7 +3826,7 @@ const LocalSyncManager = (function () {
       if (!Array.isArray(q)) { errors.push(`Queue "${name}" is not a valid array.`); return; }
       q.forEach(entry => {
         if (!entry || !entry.syncId) { errors.push(`Queue "${name}" contains an entry with no Sync ID.`); return; }
-        if (!knownSyncIds.has(entry.syncId)) orphanEntries.push({ queue: name, syncId: entry.syncId });
+        if (!knownSyncIds.has(entry.syncId) && String(entry.syncId).indexOf('m:') !== 0) orphanEntries.push({ queue: name, syncId: entry.syncId });
       });
     });
     if (orphanEntries.length > 0) {
@@ -5396,24 +5456,8 @@ const GoogleDriveWorkspace = (function () {
     // before this phase (SYNC_STATE_INVENTORY.md's ❌ rows) — masters/counters/
     // userName were already here (⬆️ upload-only rows), unchanged by this addition.
     const weekendOverrides = collectWeekendOverrides();
-    const business = {
-      tasks: tasks,
-      logEntries: logEntries,
-      masters: masters,
-      taskIdCounter: taskIdCounter,
-      importIdCounter: importIdCounter,
-      recurringPlans: recurringPlans,
-      recurringPlanIdCounter: recurringPlanIdCounter,
-      userName: userName,
-      theme: getStoredTheme(),
-      // Break sync fix: only closed segments of days this device actually worked on —
-      // never the live `currentStart`, never an idle-device's auto-opened break.
-      breakData: getBreakDataForSync(),
-      todoItems: todoItems,
-      todoTombstones: todoTombstones,
-      todoIdCounter: todoIdCounter,
-      weekendOverrides: weekendOverrides
-    };
+    // Same builder the merge engine digests, so what is compared is exactly what is written.
+    const business = buildLocalBusinessState();
     const nowIso = new Date().toISOString();
     const meta = {
       syncId: _stateSyncId,
@@ -5903,7 +5947,35 @@ const GoogleDriveWorkspace = (function () {
     _lastWorkspaceRecoveryEvent = null;
   }
 
+  // Reset → "…and cloud copy": permanently deletes Tasks/state.json (every duplicate of it)
+  // from this account's Drive app-data space. Resolves { ok, deleted } or { ok:false, error }.
+  // Never touches local data — the caller wipes that only after this succeeds.
+  function deleteCloudStateFile() {
+    if (typeof GoogleAuthManager === 'undefined' || !GoogleAuthManager.isAuthenticated()) {
+      return Promise.resolve({ ok: false, error: 'Not signed in to Google Drive.' });
+    }
+    let deleted = 0;
+    const deleteOne = () => findStateFile('reset: locate state.json to delete').then(f => {
+      if (!f) return null;
+      return driveFetch(GOOGLE_DRIVE_FILES_ENDPOINT + '/' + encodeURIComponent(f.id), { method: 'DELETE' },
+        { operation: 'files.delete', purpose: 'reset: delete state.json' })
+        .catch(err => { if (!err || err.httpStatus !== 404) throw err; })
+        .then(() => { deleted++; });
+    });
+    return initializeWorkspace().then(st => {
+      if (!st || !st.ready) throw new Error((st && st.error) || 'Google Drive workspace is not ready.');
+      let chain = Promise.resolve();
+      for (let i = 0; i < 5; i++) chain = chain.then(deleteOne); // duplicates, if any
+      return chain;
+    }).then(() => findStateFile('reset: verify state.json is gone')).then(left => {
+      if (left) throw new Error('state.json is still present on Drive after deleting.');
+      _stateFileId = null; _stateFileRevision = null; _stateSyncId = null; _lastPushedVersion = 0;
+      return { ok: true, deleted };
+    }).catch(err => ({ ok: false, error: (err && err.message) || String(err) }));
+  }
+
   return {
+    deleteCloudStateFile,
     initializeWorkspace,
     findRootFolder,
     createRootFolder,
@@ -7058,7 +7130,8 @@ const BatchCloudMerge = (function () {
     // Phase 19F: read-only helper so BackgroundScheduler / refreshSyncTabIfOpen
     // can ask "which task ids actually need a card update" without
     // re-deriving the comparison themselves.
-    getChangedTaskIdsFromResults
+    getChangedTaskIdsFromResults,
+    mergeOneRemoteTask
   };
 })();
 // ── End Batch Cloud Merge (Phase 11) ──────────────────────────────────────────
@@ -7325,7 +7398,7 @@ const IncrementalSyncEngine = (function () {
       // separate Conflict Queue, never change `plan`/`statistics` themselves
       // or anything else already computed above.
       try {
-        if (Extensions.ConflictDetector && typeof Extensions.ConflictDetector.scanForConflicts === 'function') {
+        if (typeof SyncMerge === 'undefined' && Extensions.ConflictDetector && typeof Extensions.ConflictDetector.scanForConflicts === 'function') {
           Extensions.ConflictDetector.scanForConflicts(plan, localBySyncId, remoteBySyncId, remoteTasks);
         }
       } catch (err) {
@@ -7343,7 +7416,7 @@ const IncrementalSyncEngine = (function () {
       // reason as Phase 14's own call just above: a resolution failure of
       // any kind must never break synchronization for the rest of the plan.
       try {
-        if (typeof ConflictResolver !== 'undefined' && typeof ConflictResolver.autoResolvePendingConflicts === 'function') {
+        if (typeof SyncMerge === 'undefined' && typeof ConflictResolver !== 'undefined' && typeof ConflictResolver.autoResolvePendingConflicts === 'function') {
           ConflictResolver.autoResolvePendingConflicts();
         }
       } catch (err) {
@@ -8305,6 +8378,910 @@ const ConflictResolver = (function () {
 })();
 // ── End Conflict Resolution (Phase 15) ────────────────────────────────────────
 
+// ── Sync Merge Engine (conflict-aware, field-level three-way merge) ───────────────
+// Incremental addition to the existing sync architecture — NOT a second engine. It runs
+// inside BackgroundScheduler.runSynchronizationPass() (manual Sync only), between the
+// download that buildSyncPlan() already performs and the single whole-state push that
+// pushStateToStateFile() already performs. It decides, per logical record, what each
+// device changed since the last state both devices agreed on ("base"), and:
+//   • merges independent changes automatically (different records, or different fields),
+//   • treats only genuine same-field / delete-vs-edit collisions as conflicts,
+//   • applies the user's Sync Merge Conflict Handling policy to those conflicts.
+// "Base" = ttl_sync_base: per-record, per-field content hashes (masters: full values)
+// captured after every successful pass. Hashes only — no second copy of user data.
+// Device-local: masters.flags.syncConflictPolicy and masters.flags.backgroundSyncEnabled
+// (see mastersForSync()). Never synced: auth tokens, device id, queues, UI state.
+const SYNC_POLICIES = ['ask', 'local', 'remote', 'newest'];
+const SYNC_DEVICE_LOCAL_FLAGS = ['syncConflictPolicy', 'backgroundSyncEnabled'];
+
+function mastersForSync(m) {
+  const c = JSON.parse(JSON.stringify(m || {}));
+  if (c.flags) SYNC_DEVICE_LOCAL_FLAGS.forEach(k => { delete c.flags[k]; });
+  return c;
+}
+function getSyncConflictPolicy() {
+  const p = masters && masters.flags && masters.flags.syncConflictPolicy;
+  return SYNC_POLICIES.indexOf(p) !== -1 ? p : 'ask';
+}
+function setSyncConflictPolicy(p) {
+  if (SYNC_POLICIES.indexOf(p) === -1) return;
+  if (!masters.flags) masters.flags = {};
+  masters.flags.syncConflictPolicy = p;
+  saveState();
+  if (typeof activeMastersTab !== 'undefined' && activeMastersTab === 'sync' && typeof renderMastersContent === 'function') renderMastersContent();
+}
+// The exact business payload written to state.json (also used for the no-op digest).
+function buildLocalBusinessState() {
+  const business = {
+    tasks: tasks, logEntries: logEntries, masters: mastersForSync(masters),
+    taskIdCounter: taskIdCounter, importIdCounter: importIdCounter,
+    recurringPlans: recurringPlans, recurringPlanIdCounter: recurringPlanIdCounter,
+    userName: userName, theme: getStoredTheme(),
+    breakData: getBreakDataForSync(),
+    todoItems: todoItems, todoTombstones: todoTombstones, todoIdCounter: todoIdCounter,
+    weekendOverrides: collectWeekendOverrides()
+  };
+  return (typeof SyncMerge !== 'undefined') ? SyncMerge.applyPendingOverrides(business) : business;
+}
+
+const SyncMerge = (function () {
+  const BASE_KEY = 'ttl_sync_base';
+  const BASE_VERSION = 1;
+  const SEP = '\u241F';
+  const NEWEST_SKEW_MS = 5 * 60 * 1000;
+  const NEWEST_MIN_GAP_MS = 2000;
+  const HANDLED_DOMAINS = ['masters', 'theme', 'userName', 'logEntries', 'recurringPlans', 'todoItems'];
+
+  let base = emptyBase();
+  function emptyBase() { return { v: BASE_VERSION, tasks: {}, todos: {}, logs: {}, plans: {}, doc: null }; }
+  function loadBase() {
+    try {
+      const raw = localStorage.getItem(BASE_KEY);
+      if (!raw) return;
+      const p = JSON.parse(raw);
+      if (p && p.v === BASE_VERSION) base = Object.assign(emptyBase(), p);
+    } catch (e) {}
+  }
+  function saveBase() { try { localStorage.setItem(BASE_KEY, JSON.stringify(base)); } catch (e) {} }
+  function clearBase() { base = emptyBase(); try { localStorage.removeItem(BASE_KEY); } catch (e) {} }
+
+  // ── helpers ───────────────────────────────────────────────────────────────────
+  const h = v => (v === undefined ? '~' : simpleHash(stableStringify(v)));
+  const same = (a, b) => stableStringify(a) === stableStringify(b);
+  const clone = v => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
+  const isObj = v => !!v && typeof v === 'object' && !Array.isArray(v);
+  const isPrimArr = a => Array.isArray(a) && a.every(x => x === null || typeof x !== 'object');
+
+  // customFields is expanded one level so two devices editing DIFFERENT custom columns
+  // do not collide; applyFields() collapses it back.
+  function expandFields(rec, excl) {
+    const o = {};
+    Object.keys(rec).forEach(k => {
+      if (excl.indexOf(k) !== -1) return;
+      const v = rec[k];
+      if (k === 'customFields' && isObj(v)) Object.keys(v).forEach(ck => { o['customFields.' + ck] = v[ck]; });
+      else o[k] = v;
+    });
+    return o;
+  }
+  function applyFields(rec, merged, excl) {
+    const hadCf = isObj(rec.customFields);
+    Object.keys(rec).forEach(k => { if (excl.indexOf(k) === -1) delete rec[k]; });
+    const cf = {}; let anyCf = false;
+    Object.keys(merged).forEach(n => {
+      if (n === '__deleted' || merged[n] === undefined) return;
+      if (n.indexOf('customFields.') === 0) { cf[n.slice(13)] = clone(merged[n]); anyCf = true; }
+      else rec[n] = clone(merged[n]);
+    });
+    if (anyCf || (hadCf && !('customFields' in merged))) rec.customFields = cf;
+  }
+  const hashMap = fm => { const o = {}; Object.keys(fm).forEach(k => { o[k] = h(fm[k]); }); return o; };
+  const unionSorted = (a, b) => Array.from(new Set([].concat(a || [], b || []))).sort();
+
+  function logKey(r) { return r && r.startTs !== undefined ? ((r.taskSyncId || ('legacy:' + (r.heading || ''))) + '@' + r.startTs) : null; }
+  function planSig(p) { return p.id + '|' + p.startDate; }
+  function trunc(v) {
+    let s; try { s = (typeof v === 'string') ? v : JSON.stringify(v); } catch (e) { s = String(v); }
+    if (s === undefined) return '(none)';
+    return s.length > 300 ? s.slice(0, 300) + '…' : s;
+  }
+
+  // ── kinds ─────────────────────────────────────────────────────────────────────
+  const KINDS = {
+    task: {
+      label: 'Task', baseKey: 'tasks', excl: ['_sync', 'id'],
+      key: r => r && r._sync && r._sync.syncId,
+      fields: r => { const f = expandFields(r, ['_sync', 'id']); f.__deleted = !!(r._sync && r._sync.deleted); return f; },
+      title: r => (r.heading || (r.customFields && r.customFields.description) || 'Untitled task'),
+      stamp: r => r._sync && r._sync.modifiedAt, created: r => r._sync && r._sync.createdAt,
+      by: r => r._sync && r._sync.deviceId, isDeleted: r => !!(r._sync && r._sync.deleted)
+    },
+    todo: {
+      label: 'To-Do', baseKey: 'todos', excl: ['id', 'updatedAt', 'resolved'],
+      key: r => r && r.uid,
+      fields: r => expandFields(r, ['id', 'updatedAt', 'resolved']),
+      title: r => r.heading || 'Untitled To-Do',
+      stamp: r => r.updatedAt || r.createdAt, created: r => r.createdAt, by: () => null, isDeleted: () => false
+    },
+    log: {
+      label: 'Effort log', baseKey: 'logs', excl: ['taskId'],
+      key: logKey, fields: r => expandFields(r, ['taskId']),
+      title: r => (r.heading || 'Untitled') + ' — ' + (isFinite(r.startTs) ? new Date(r.startTs).toLocaleString() : ''),
+      stamp: () => null, created: () => null, by: () => null, isDeleted: () => false
+    },
+    plan: {
+      label: 'Recurring plan', baseKey: 'plans', excl: ['id', 'syncUid'], setFields: ['generatedDates'],
+      key: p => p && p.syncUid, fields: r => expandFields(r, ['id', 'syncUid']),
+      title: r => r.heading || 'Untitled plan', stamp: () => null, created: () => null, by: () => null, isDeleted: () => false
+    }
+  };
+
+  // ── policy ────────────────────────────────────────────────────────────────────
+  function newestWinner(ls, rs, lc, rc) {
+    const now = Date.now();
+    const ok = t => typeof t === 'number' && isFinite(t) && t > 0 && t <= now + NEWEST_SKEW_MS;
+    if (!ok(ls) || !ok(rs)) return null;
+    if (typeof lc === 'number' && ls < lc) return null;
+    if (typeof rc === 'number' && rs < rc) return null;
+    if (Math.abs(ls - rs) < NEWEST_MIN_GAP_MS) return null;
+    return ls > rs ? 'local' : 'remote';
+  }
+  // → 'local' | 'remote' | 'ask'
+  function decide(info) {
+    const p = getSyncConflictPolicy();
+    if (p === 'local') return 'local';
+    if (p === 'remote') return 'remote';
+    if (p === 'newest') return newestWinner(info.ls, info.rs, info.lc, info.rc) || 'ask';
+    return 'ask';
+  }
+
+  // ── conflict queue plumbing (reuses the existing 'conflict' queue + history) ───
+  const entryId = (kind, key) => 'm:' + kind + ':' + key;
+  const isMine = e => !!(e && e.kind && String(e.syncId).indexOf('m:') === 0);
+  function pendingEntries() { return syncQueues.conflict.filter(e => isMine(e) && e.status !== 'completed'); }
+  function pendingCount() { return pendingEntries().length; }
+
+  function enqueue(kind, key, type, label, fields, linfo, rinfo, snapshot, extra) {
+    const id = entryId(kind, key);
+    upsertQueueEntry('conflict', id, Object.assign({
+      conflictType: type, kind: kind, key: key, label: label,
+      fields: fields.map(f => ({ path: f.path, local: trunc(f.local), remote: trunc(f.remote), rawLocalAbsent: f.local === undefined, rawRemoteAbsent: f.remote === undefined })),
+      localInfo: linfo, remoteInfo: rinfo, remoteSnapshot: snapshot,
+      status: 'manual_pending', detectedAt: Date.now(), resolvedAt: null
+    }, extra || {}));
+  }
+  function recordPolicyDecision(kind, key, type, label, fields, side, extra) {
+    const loser = side === 'local' ? 'remote' : 'local';
+    let detail = 'Policy ' + getSyncConflictPolicy() + ' → ' + side + ' won. "' + label + '". Discarded ' + loser + ' values: ' +
+      fields.map(f => f.path + '=' + trunc(side === 'local' ? f.remote : f.local)).join('; ');
+    if (detail.length > 1500) detail = detail.slice(0, 1500) + '…';
+    appendConflictHistory(Object.assign({
+      conflictId: entryId(kind, key), conflictType: type, resolutionType: 'policy-keep-' + side,
+      automatic: true, outcome: 'resolved', detail: detail
+    }, extra || {}));
+  }
+
+  // ── generic keyed three-way merge ─────────────────────────────────────────────
+  // H = per-kind hooks: takeRemote(l,r) adoptAsMerged(l,mergedFields,r,flags) createLocal(r)
+  //     removeLocal(l,key) remoteDeleted(key) localDeleted(key) receiptMatches(l,r)
+  function core(kn, L, R, H, ctx) {
+    const K = KINDS[kn], B = base[K.baseKey] || {};
+    const lMap = new Map(), rMap = new Map();
+    L.forEach(r => { const k = K.key(r); if (k) lMap.set(k, r); });
+    R.forEach(r => { const k = K.key(r); if (k) rMap.set(k, r); });
+    const keys = new Set(Array.from(lMap.keys()).concat(Array.from(rMap.keys())));
+    const out = { created: 0, adopted: 0, merged: 0, removed: 0, conflicts: 0, autoResolved: 0, changedIds: [] };
+
+    function conflict(key, l, r, type, fields, extraSnapshot) {
+      const label = K.title(l || r);
+      const ls = l ? K.stamp(l) : H.localDeletedAt && H.localDeletedAt(key);
+      const rs = r ? K.stamp(r) : H.remoteDeletedAt && H.remoteDeletedAt(key);
+      const side = decide({ ls: ls, rs: rs, lc: l && K.created(l), rc: r && K.created(r) });
+      if (side !== 'ask') {
+        recordPolicyDecision(kn, key, type, label, fields, side, { taskId: (l && typeof l.id === 'number') ? l.id : null });
+        out.autoResolved++;
+        return side;
+      }
+      enqueue(kn, key, type, label, fields,
+        { updatedAt: ls || null, by: l ? K.by(l) : null, deleted: !l || K.isDeleted(l) },
+        { updatedAt: rs || null, by: r ? K.by(r) : null, deleted: !r || K.isDeleted(r) },
+        r ? clone(r) : { __absent: true, tomb: H.remoteTomb ? (H.remoteTomb(key) || null) : null },
+        { taskId: (l && typeof l.id === 'number') ? l.id : null });
+      ctx.seen.add(entryId(kn, key));
+      ctx.pendingKeys[kn][key] = true;
+      out.conflicts++;
+      return 'ask';
+    }
+
+    keys.forEach(key => {
+      const l = lMap.get(key), r = rMap.get(key), b = B[key];
+      try {
+        if (l && r) {
+          const lf = K.fields(l), rf = K.fields(r);
+          if (same(lf, rf)) { if (H.aligned) H.aligned(l, r); return; }
+          if (H.receiptMatches && H.receiptMatches(l, r)) { H.takeRemote(l, r); out.adopted++; out.changedIds.push(l.id); return; }
+          if (!b) {                                   // no common ancestor yet (first pass after upgrade)
+            if (H.noBaseWinner(l, r) === 'remote') { H.takeRemote(l, r); out.adopted++; out.changedIds.push(l.id); }
+            return;
+          }
+          const bh = n => (b[n] === undefined ? '~' : b[n]);
+          // deletion collision (tasks carry deletion as a flag). Only the side that actually CHANGED the
+          // flag since the base is a "deleter"; a side that merely still carries the old flag is not.
+          if (!!lf.__deleted !== !!rf.__deleted) {
+            const lDel = !!lf.__deleted;
+            const deleterChanged = h(lDel ? lf.__deleted : rf.__deleted) !== bh('__deleted');
+            if (deleterChanged) {
+              const otherF = lDel ? rf : lf;
+              const otherChanged = Object.keys(otherF).some(n => n !== '__deleted' && h(otherF[n]) !== bh(n));
+              if (!otherChanged) {
+                if (!lDel) { H.takeRemote(l, r); out.adopted++; out.changedIds.push(l.id); }
+                return;
+              }
+              const side = conflict(key, l, r, 'DELETE_VS_EDIT', [{ path: '(record)', local: lDel ? '(deleted)' : '(edited)', remote: lDel ? '(edited)' : '(deleted)' }]);
+              if (side === 'remote') { H.takeRemote(l, r); out.adopted++; out.changedIds.push(l.id); }
+              else if (side === 'local') { H.keepLocalResolved(l, r, 'DELETE_VS_EDIT'); out.merged++; out.changedIds.push(l.id); }
+              return;
+            }
+          }
+          const names = new Set(Object.keys(lf).concat(Object.keys(rf)));
+          const merged = {}, conf = [];
+          names.forEach(n => {
+            const lv = lf[n], rv = rf[n];
+            if (same(lv, rv)) { if (lv !== undefined) merged[n] = lv; return; }
+            const lch = h(lv) !== bh(n), rch = h(rv) !== bh(n);
+            if (lch && !rch) merged[n] = lv;
+            else if (rch && !lch) merged[n] = rv;
+            else if (K.setFields && K.setFields.indexOf(n) !== -1) merged[n] = unionSorted(lv, rv);
+            else { merged[n] = lv; conf.push({ path: n, local: lv, remote: rv }); }
+          });
+          if (conf.length === 0) {
+            const m0 = H.applyMerged(l, merged, r, { pending: false });
+            if (m0 === 'new') out.merged++; else if (m0 === 'remote') out.adopted++;
+            return;
+          }
+          const side = conflict(key, l, r, 'FIELD_CONFLICT', conf);
+          if (side === 'remote') conf.forEach(c => { merged[c.path] = c.remote; if (c.remote === undefined) delete merged[c.path]; });
+          const stampResolution = side !== 'ask';
+          const m1 = H.applyMerged(l, merged, r, { pending: side === 'ask', resolved: stampResolution });
+          if (m1 === 'new') out.merged++; else if (m1 === 'remote') out.adopted++;
+          return;
+        }
+        if (l && !r) {                                  // exists only here
+          if (H.remoteDeleted && H.remoteDeleted(key, l)) {
+            const lf = K.fields(l);
+            const unchanged = b && Object.keys(lf).every(n => h(lf[n]) === (b[n] === undefined ? '~' : b[n])) && Object.keys(b).every(n => n in lf);
+            const legacyDeleted = !b && H.remoteDeletedAfterEdit && H.remoteDeletedAfterEdit(key, l);
+            if (unchanged || legacyDeleted) { H.removeLocal(l, key); out.removed++; out.changedIds.push(l.id); return; }
+            if (!b) return;                             // legacy: edited after the remote delete → keep
+            const side = conflict(key, l, null, 'DELETE_VS_EDIT', [{ path: '(record)', local: '(edited)', remote: '(deleted)' }]);
+            if (side === 'remote') { H.removeLocal(l, key); out.removed++; out.changedIds.push(l.id); }
+            else if (side === 'local') { H.keepLocalResolved(l, null, 'DELETE_VS_EDIT'); }
+            return;
+          }
+          if (b && H.absenceMeansDeleted) {             // logs/plans: no tombstones — absence vs base is the signal
+            const lf = K.fields(l);
+            const unchanged = Object.keys(lf).every(n => h(lf[n]) === (b[n] === undefined ? '~' : b[n])) && Object.keys(b).every(n => n in lf);
+            if (unchanged) { H.removeLocal(l, key); out.removed++; return; }
+            const side = conflict(key, l, null, 'DELETE_VS_EDIT', [{ path: '(record)', local: '(edited)', remote: '(deleted)' }]);
+            if (side === 'remote') { H.removeLocal(l, key); out.removed++; }
+          }
+          return;                                       // else: new here (or lost remotely) → keep, will upload
+        }
+        if (r && !l) {                                  // exists only there
+          if (H.localDeleted && H.localDeleted(key)) {
+            const rf = K.fields(r);
+            const unchanged = b && Object.keys(rf).every(n => h(rf[n]) === (b[n] === undefined ? '~' : b[n])) && Object.keys(b).every(n => n in rf);
+            const legacyDeleted = !b && H.localDeletedAfterEdit && H.localDeletedAfterEdit(key, r);
+            if (unchanged || legacyDeleted) return;     // stays deleted; push will drop it remotely
+            if (!b) { H.createLocal(r); out.created++; return; }   // legacy: edited after local delete → restore
+            if (H.receiptMatchesAbsent && H.receiptMatchesAbsent(key, r)) { H.createLocal(r); out.created++; return; }
+            const side = conflict(key, null, r, 'DELETE_VS_EDIT', [{ path: '(record)', local: '(deleted)', remote: '(edited)' }]);
+            if (side === 'remote') { H.createLocal(r); out.created++; }
+            return;
+          }
+          if (b && H.absenceMeansDeleted) {
+            const rf = K.fields(r);
+            const unchanged = Object.keys(rf).every(n => h(rf[n]) === (b[n] === undefined ? '~' : b[n])) && Object.keys(b).every(n => n in rf);
+            if (unchanged) return;                      // deleted here, untouched there → deletion wins
+            const side = conflict(key, null, r, 'DELETE_VS_EDIT', [{ path: '(record)', local: '(deleted)', remote: '(edited)' }]);
+            if (side === 'remote') { H.createLocal(r); out.created++; }
+            return;
+          }
+          if (H.createLocal(r)) { out.created++; if (r && typeof r.id === 'number') out.changedIds.push(r.id); }
+        }
+      } catch (err) { console.warn('[SYNC-MERGE]', kn, key, err); out.error = (err && err.message) || String(err); }
+    });
+    return out;
+  }
+
+  // ── tasks ─────────────────────────────────────────────────────────────────────
+  function finishTaskAdopt(l) {
+    const s = l._sync;
+    s.lastSync = Date.now(); s.syncStatus = 'synced'; s.dirty = false;
+    removeQueueEntry(s.syncId, 'upload');
+  }
+  const taskHooks = {
+    takeRemote: function (l, r) {
+      Object.keys(l).forEach(k => { if (k !== '_sync' && k !== 'id' && !(k in r)) delete l[k]; });
+      SingleTaskMerge.mergeRemoteTask(l, r);
+      if (r._sync.resolved) l._sync.resolved = clone(r._sync.resolved); else delete l._sync.resolved;
+      finishTaskAdopt(l);
+    },
+    aligned: function (l, r) {
+      // identical content: adopt the higher version so both sides report the same bookkeeping
+      const s = l._sync, rs = r._sync;
+      if (rs.version > s.version) { s.version = rs.version; s.checksum = computeTaskChecksum(l); s.contentHash = computeTaskContentHash(l); }
+      if (s.dirty) finishTaskAdopt(l);
+    },
+    noBaseWinner: function (l, r) {
+      if (isTaskDirty(l)) return 'local';
+      return SingleTaskMerge.isRemoteNewer(l, r) ? 'remote' : 'local';
+    },
+    receiptMatches: function (l, r) {
+      const res = r._sync.resolved;
+      return !!(res && res.against === l._sync.version && res.deviceId === l._sync.deviceId);
+    },
+    // merged = chosen field values. Returns true when the result is a NEW state (neither side's).
+    applyMerged: function (l, merged, r, flags) {
+      const rf = KINDS.task.fields(r), lf = KINDS.task.fields(l);
+      const mf = Object.assign({}, merged);
+      if (same(mf, rf)) { taskHooks.takeRemote(l, r); return 'remote'; }
+      if (same(mf, lf) && !flags.resolved) return 'none';   // remote added nothing: do not re-stamp the record
+      const s = l._sync, lv = s.version, rv = r._sync.version;
+      if (!same(mf, lf)) { applyFields(l, mf, ['_sync', 'id']); s.deleted = !!mf.__deleted; }
+      s.version = Math.max(lv, rv) + 1; s.modifiedAt = Date.now(); s.deviceId = getDeviceId();
+      if (flags.resolved) s.resolved = { against: rv, deviceId: r._sync.deviceId, at: Date.now() };
+      s.checksum = computeTaskChecksum(l); s.contentHash = computeTaskContentHash(l);
+      s.dirty = true; s.syncStatus = 'dirty'; enqueueTask(l);
+      return 'new';
+    },
+    keepLocalResolved: function (l, r, type) {
+      const s = l._sync, rv = r ? r._sync.version : 0;
+      s.version = Math.max(s.version, rv) + 1; s.modifiedAt = Date.now(); s.deviceId = getDeviceId();
+      if (r) s.resolved = { against: rv, deviceId: r._sync.deviceId, at: Date.now() };
+      s.checksum = computeTaskChecksum(l); s.contentHash = computeTaskContentHash(l);
+      s.dirty = true; s.syncStatus = 'dirty'; enqueueTask(l);
+    },
+    createLocal: function (r) {
+      if (r._sync && r._sync.deleted) return false;
+      const res = BatchCloudMerge.mergeOneRemoteTask(r);
+      return res && (res.outcome === 'created' || res.outcome === 'updated');
+    }
+  };
+
+  // ── to-dos ────────────────────────────────────────────────────────────────────
+  function todoHooks(remote) {
+    const rTombs = (remote.todoTombstones && typeof remote.todoTombstones === 'object') ? remote.todoTombstones : {};
+    return {
+      takeRemote: function (l, r) { const id = l.id; Object.keys(l).forEach(k => delete l[k]); Object.assign(l, clone(r), { id: id }); },
+      noBaseWinner: function (l, r) { return (r.updatedAt || r.createdAt || 0) > (l.updatedAt || l.createdAt || 0) ? 'remote' : 'local'; },
+      receiptMatches: function (l, r) { const res = r.resolved; return !!(res && res.against === (l.updatedAt || l.createdAt || 0)); },
+      applyMerged: function (l, merged, r, flags) {
+        const rf = KINDS.todo.fields(r);
+        if (same(merged, rf)) { taskHooksTodoTake(l, r); return 'remote'; }
+        if (same(merged, KINDS.todo.fields(l)) && !flags.resolved) return 'none';
+        applyFields(l, merged, ['id', 'updatedAt', 'resolved']);
+        l.updatedAt = Date.now();
+        if (flags.resolved) l.resolved = { against: r.updatedAt || r.createdAt || 0, at: Date.now() };
+        return 'new';
+      },
+      keepLocalResolved: function (l, r) { l.updatedAt = Date.now(); if (r) l.resolved = { against: r.updatedAt || r.createdAt || 0, at: Date.now() }; },
+      createLocal: function (r) {
+        const it = Object.assign(clone(r), { id: ++todoIdCounter });
+        todoItems.push(it); delete todoTombstones[it.uid]; return true;
+      },
+      removeLocal: function (l, key) { todoItems = todoItems.filter(t => t.uid !== key); todoTombstones[key] = rTombs[key] || Date.now(); },
+      remoteDeleted: function (key) { return !!rTombs[key]; },
+      remoteDeletedAfterEdit: function (key, l) { return rTombs[key] >= (l.updatedAt || l.createdAt || 0); },
+      localDeleted: function (key) { return !!todoTombstones[key]; },
+      localDeletedAfterEdit: function (key, r) { return todoTombstones[key] >= (r.updatedAt || r.createdAt || 0); },
+      localDeletedAt: function (key) { return todoTombstones[key] || null; },
+      remoteDeletedAt: function (key) { return rTombs[key] || null; },
+      remoteTomb: function (key) { return rTombs[key]; },
+      receiptMatchesAbsent: function () { return false; }
+    };
+  }
+  function taskHooksTodoTake(l, r) { const id = l.id; Object.keys(l).forEach(k => delete l[k]); Object.assign(l, clone(r), { id: id }); }
+
+  // ── logs & plans ──────────────────────────────────────────────────────────────
+  function plainHooks(kn, arrGet, arrSet, nextId) {
+    const K = KINDS[kn];
+    return {
+      takeRemote: function (l, r) { const keep = {}; K.excl.forEach(k => { if (k in l) keep[k] = l[k]; }); Object.keys(l).forEach(k => delete l[k]); Object.assign(l, clone(r), keep); },
+      noBaseWinner: function () { return 'local'; },
+      applyMerged: function (l, merged, r, flags) {
+        const rf = K.fields(r);
+        if (same(merged, rf)) { plainHooks(kn).takeRemote(l, r); return 'remote'; }
+        if (same(merged, K.fields(l))) return 'none';
+        applyFields(l, merged, K.excl); return 'new';
+      },
+      keepLocalResolved: function () {},
+      createLocal: function (r) { const it = clone(r); if (nextId) nextId(it); arrGet().push(it); return true; },
+      removeLocal: function (l, key) { arrSet(arrGet().filter(x => K.key(x) !== key)); },
+      absenceMeansDeleted: true
+    };
+  }
+
+  // ── masters + settings document ───────────────────────────────────────────────
+  function buildDoc(p) { return { masters: mastersForSync(p.masters || {}), userName: p.userName, theme: p.theme }; }
+  function flatten(doc) {
+    const out = {};
+    (function walk(v, toks) {
+      if (isObj(v)) {
+        const ks = Object.keys(v);
+        if (ks.length === 0) { out[toks.join(SEP)] = {}; return; }
+        ks.forEach(k => walk(v[k], toks.concat(k)));
+      } else if (Array.isArray(v) && v.length && v.every(x => isObj(x) && typeof x.key === 'string')) {
+        out[toks.concat('#order').join(SEP)] = v.map(x => x.key);
+        v.forEach(x => walk(x, toks.concat('@k:' + x.key)));
+      } else if (v !== undefined) out[toks.join(SEP)] = v;
+    })(doc, []);
+    return out;
+  }
+  function unflatten(flat) {
+    const root = {}, orders = {};
+    Object.keys(flat).forEach(p => {
+      if (p === '') return;
+      const toks = p.split(SEP);
+      if (toks[toks.length - 1] === '#order') { orders[toks.slice(0, -1).join(SEP)] = flat[p]; return; }
+      let cur = root;
+      for (let i = 0; i < toks.length - 1; i++) { if (!isObj(cur[toks[i]])) cur[toks[i]] = {}; cur = cur[toks[i]]; }
+      cur[toks[toks.length - 1]] = clone(flat[p]);
+    });
+    function conv(o, pt) {
+      if (!isObj(o)) return o;
+      const ks = Object.keys(o);
+      if (ks.length && ks.every(k => k.indexOf('@k:') === 0)) {
+        const order = orders[pt.join(SEP)], keys = ks.map(k => k.slice(3));
+        const sorted = Array.isArray(order) ? order.filter(k => keys.indexOf(k) !== -1).concat(keys.filter(k => order.indexOf(k) === -1)) : keys;
+        return sorted.map(k => conv(o['@k:' + k], pt.concat('@k:' + k)));
+      }
+      const r = {}; ks.forEach(k => { r[k] = conv(o[k], pt.concat(k)); }); return r;
+    }
+    return conv(root, []);
+  }
+  const prettyPath = p => p.split(SEP).map(t => t.replace(/^@k:/, '')).join(' › ');
+  const groupOf = p => { const t = p.split(SEP); return t.slice(0, t[0] === 'masters' ? 2 : 1).join(SEP); };
+
+  function mergeFlat(lf, rf, bf) {
+    const names = new Set(Object.keys(lf).concat(Object.keys(rf)));
+    const merged = {}, conflicts = [];
+    names.forEach(p => {
+      const lv = lf[p], rv = rf[p];
+      if (same(lv, rv)) { if (lv !== undefined) merged[p] = lv; return; }
+      const bv = bf[p], lch = !same(lv, bv), rch = !same(rv, bv);
+      const isOrder = p.slice(-6) === '#order';
+      if (lch && !rch) { if (lv !== undefined) merged[p] = lv; return; }
+      if (rch && !lch) { if (rv !== undefined) merged[p] = rv; return; }
+      if ((isPrimArr(lv) || lv === undefined) && (isPrimArr(rv) || rv === undefined) && (isPrimArr(bv) || bv === undefined)) {
+        const B = bv || [], L = lv || [], R = rv || [];
+        const rAdd = R.filter(x => B.indexOf(x) === -1), rDel = B.filter(x => R.indexOf(x) === -1);
+        const lAdd = L.filter(x => B.indexOf(x) === -1), lDel = B.filter(x => L.indexOf(x) === -1);
+        const sameRemoved = lDel.filter(x => rDel.indexOf(x) !== -1);
+        if (!isOrder && sameRemoved.length && lAdd.length && rAdd.length && !same(lAdd.slice().sort(), rAdd.slice().sort())) {
+          merged[p] = lv; conflicts.push({ path: p, local: lv, remote: rv }); return;   // same entry renamed differently
+        }
+        merged[p] = L.filter(x => rDel.indexOf(x) === -1).concat(rAdd.filter(x => L.indexOf(x) === -1));
+        return;
+      }
+      merged[p] = lv; conflicts.push({ path: p, local: lv, remote: rv });
+    });
+    return { merged: merged, conflicts: conflicts };
+  }
+  function applyDoc(flat) {
+    const nd = unflatten(flat);
+    if (nd.masters) {
+      const flags = Object.assign({}, nd.masters.flags || {});
+      const lfl = (masters && masters.flags) || {};
+      SYNC_DEVICE_LOCAL_FLAGS.forEach(k => { if (lfl[k] !== undefined) flags[k] = lfl[k]; });
+      nd.masters.flags = flags; masters = nd.masters;
+      _lastMastersHash = simpleHash(stableStringify(mastersForSync(masters)));
+    }
+    if (typeof nd.userName === 'string') { userName = nd.userName; _lastUserNameHash = simpleHash(String(userName || '')); }
+    if (typeof nd.theme === 'string' && nd.theme !== getStoredTheme()) {
+      try { localStorage.setItem('ttl_theme', nd.theme); } catch (e) {}
+      if (typeof applyTheme === 'function') applyTheme(nd.theme);
+      if (typeof updateFsChipThemeIcon === 'function') setTimeout(updateFsChipThemeIcon, 0);
+    }
+  }
+  const GROUP_LABELS = { masters: 'Masters', userName: 'User name', theme: 'Theme' };
+  function groupLabel(g) { const t = g.split(SEP); return (GROUP_LABELS[t[0]] || t[0]) + (t[1] ? ' › ' + t[1] : ''); }
+  function domainStamp(rec, name) { const r = domainSyncState.domains[name]; return r ? r.lastChangeAt : null; }
+
+  function mergeDocument(remote, ctx, res) {
+    const localDoc = buildDoc({ masters: masters, userName: userName, theme: getStoredTheme() });
+    const rd = { masters: remote.masters && typeof remote.masters === 'object' ? mastersForSync(remote.masters) : undefined,
+                 userName: (typeof remote.userName === 'string' && remote.userName) ? remote.userName : undefined,
+                 theme: typeof remote.theme === 'string' ? remote.theme : undefined };
+    const lf = flatten(localDoc), rf = {};
+    const rflat = flatten(rd);
+    Object.keys(rflat).forEach(p => { rf[p] = rflat[p]; });
+    // only compare sections the remote file actually carries
+    const lfc = {}; Object.keys(lf).forEach(p => { const top = p.split(SEP)[0]; if (rd[top] !== undefined) lfc[p] = lf[p]; });
+    if (same(lfc, rf)) { res.doc = { changed: false }; return; }
+    const dm = (remote._syncMeta && remote._syncMeta.domainMeta) || {};
+    let merged, conflicts;
+    if (base.doc) {
+      const m = mergeFlat(lfc, rf, base.doc); merged = m.merged; conflicts = m.conflicts;
+    } else {                                           // legacy fallback (no common ancestor): domain timestamps
+      merged = {}; conflicts = [];
+      ['masters', 'userName', 'theme'].forEach(top => {
+        if (rd[top] === undefined) return;
+        const lp = Object.keys(lfc).filter(p => p.split(SEP)[0] === top), rp = Object.keys(rf).filter(p => p.split(SEP)[0] === top);
+        const lsub = {}, rsub = {}; lp.forEach(p => { lsub[p] = lfc[p]; }); rp.forEach(p => { rsub[p] = rf[p]; });
+        if (same(lsub, rsub)) { Object.assign(merged, lsub); return; }
+        // No common ancestor yet: lists are unioned (never drop an entry), scalars use domain timestamps.
+        const mm = mergeFlat(lsub, rsub, {});
+        Object.assign(merged, mm.merged);
+        const remoteAt = dm[top] && dm[top].modifiedAt, localAt = domainStamp(null, top), localDirty = isDomainDirty(top);
+        mm.conflicts.forEach(c => {
+          if (remoteAt && !localDirty && (!localAt || remoteAt > localAt)) { if (c.remote === undefined) delete merged[c.path]; else merged[c.path] = c.remote; }
+          else if (remoteAt && localDirty) conflicts.push(c);
+        });
+      });
+    }
+    // group conflicts, apply policy per group
+    const groups = {};
+    conflicts.forEach(c => { (groups[groupOf(c.path)] = groups[groupOf(c.path)] || []).push(c); });
+    Object.keys(groups).forEach(g => {
+      const fields = groups[g].map(c => ({ path: prettyPath(c.path), rawPath: c.path, local: c.local, remote: c.remote }));
+      const top = g.split(SEP)[0];
+      const ls = domainStamp(null, top), rs = dm[top] && dm[top].modifiedAt;
+      const side = decide({ ls: ls, rs: rs });
+      if (side !== 'ask') {
+        recordPolicyDecision('doc', g, 'FIELD_CONFLICT', groupLabel(g), fields, side);
+        res.autoResolved++;
+        if (side === 'remote') groups[g].forEach(c => { if (c.remote === undefined) delete merged[c.path]; else merged[c.path] = c.remote; });
+        return;
+      }
+      const snap = {}; groups[g].forEach(c => { snap[c.path] = c.remote === undefined ? { __absent: true } : { v: clone(c.remote) }; });
+      enqueue('doc', g, 'FIELD_CONFLICT', groupLabel(g) + ' (settings)', fields.map(f => ({ path: f.path, local: f.local, remote: f.remote })),
+        { updatedAt: ls || null, by: null }, { updatedAt: rs || null, by: (dm[top] && dm[top].deviceId) || null }, snap, { paths: groups[g].map(c => c.path) });
+      ctx.seen.add(entryId('doc', g)); ctx.pendingDoc[g] = groups[g].map(c => c.path);
+      res.conflictsNew++;
+    });
+    // keep local-only sections the remote file does not carry
+    Object.keys(lf).forEach(p => { if (!(p in lfc)) merged[p] = lf[p]; });
+    const before = JSON.stringify(lf);
+    const after = Object.assign({}, merged);
+    if (JSON.stringify(flatten(unflatten(after))) !== before) { applyDoc(after); res.doc = { changed: true }; }
+    else res.doc = { changed: false };
+  }
+
+  // ── pass orchestration ────────────────────────────────────────────────────────
+  function ensurePlanUids(remotePlans) {
+    recurringPlans.forEach(p => { if (p && !p.syncUid) p.syncUid = generateSyncId(); });
+    const bySig = {}; recurringPlans.forEach(p => { if (p) bySig[planSig(p)] = p; });
+    const localUids = new Set(recurringPlans.map(p => p.syncUid));
+    return remotePlans.filter(p => p && typeof p === 'object').map(rp => {
+      rp = clone(rp);
+      if (!rp.syncUid || !localUids.has(rp.syncUid)) {
+        const lp = bySig[planSig(rp)];
+        if (lp && !base.plans[lp.syncUid]) { if (rp.syncUid) lp.syncUid = rp.syncUid; else rp.syncUid = lp.syncUid; }
+        else if (!rp.syncUid) rp.syncUid = generateSyncId();
+      }
+      return rp;
+    });
+  }
+
+  function digestOf(p) {
+    const t = {}; (p.tasks || []).forEach(r => { const k = KINDS.task.key(r); if (k) t[k] = h(KINDS.task.fields(r)); });
+    const td = {}; (p.todoItems || []).forEach(r => { if (r && r.uid) td[r.uid] = h(KINDS.todo.fields(r)); });
+    const lg = {}; (p.logEntries || []).forEach(r => { const k = logKey(r); if (k) lg[k] = h(KINDS.log.fields(r)); });
+    const pl = {}; (p.recurringPlans || []).forEach(r => { if (r && r.syncUid) pl[r.syncUid] = h(KINDS.plan.fields(r)); });
+    const doc = flatten(buildDoc(p));
+    return simpleHash(stableStringify({ t: t, td: td, tomb: Object.keys(p.todoTombstones || {}).sort(), lg: lg, pl: pl, doc: h(doc), br: h(p.breakData || {}), wk: h(p.weekendOverrides || {}) }));
+  }
+
+  function reconcile(remote) {
+    const ctx = { seen: new Set(), pendingKeys: { task: {}, todo: {}, log: {}, plan: {} }, pendingDoc: {} };
+    const res = { ok: true, autoResolved: 0, conflictsNew: 0, results: [], summary: {} };
+    try {
+      const rTasks = Array.isArray(remote.tasks) ? remote.tasks.filter(t => { const ok = SingleTaskMerge.validateRemoteTask(t); if (!ok && t) res.summary.invalidRemoteTasks = (res.summary.invalidRemoteTasks || 0) + 1; return ok; }) : [];
+      tasks.forEach(ensureSyncMetadata);
+      const o1 = core('task', tasks, rTasks, taskHooks, ctx);
+      const rTodos = Array.isArray(remote.todoItems) ? remote.todoItems.filter(t => t && typeof t === 'object' && t.uid) : [];
+      const o2 = core('todo', todoItems, rTodos, todoHooks(remote), ctx);
+      Object.keys(todoTombstones).forEach(u => { /* keep */ });
+      const rt = (remote.todoTombstones && typeof remote.todoTombstones === 'object') ? remote.todoTombstones : {};
+      Object.keys(rt).forEach(u => { if ((Number(rt[u]) || 0) > (todoTombstones[u] || 0) && !todoItems.some(t => t.uid === u) && !ctx.pendingKeys.todo[u]) todoTombstones[u] = Number(rt[u]); });
+      const cutoff = Date.now() - 180 * 86400000; Object.keys(todoTombstones).forEach(u => { if (todoTombstones[u] < cutoff) delete todoTombstones[u]; });
+      todoItems.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      const rLogs = Array.isArray(remote.logEntries) ? remote.logEntries.filter(e => e && typeof e === 'object') : [];
+      const o3 = Array.isArray(remote.logEntries) ? core('log', logEntries, rLogs, plainHooks('log', () => logEntries, a => { logEntries = a; }), ctx) : {};
+      const rPlans = Array.isArray(remote.recurringPlans) ? ensurePlanUids(remote.recurringPlans) : null;
+      const o4 = rPlans ? core('plan', recurringPlans, rPlans, plainHooks('plan', () => recurringPlans, a => { recurringPlans = a; }, it => { it.id = ++recurringPlanIdCounter; }), ctx) : {};
+      mergeDocument(remote, ctx, res);
+      res.summary.tasks = o1; res.summary.todos = o2; res.summary.logs = o3; res.summary.plans = o4;
+      res.autoResolved += (o1.autoResolved || 0) + (o2.autoResolved || 0) + (o3.autoResolved || 0) + (o4.autoResolved || 0);
+      res.conflictsNew += (o1.conflicts || 0) + (o2.conflicts || 0) + (o3.conflicts || 0) + (o4.conflicts || 0);
+      // conflicts that disappeared on their own (remote reverted, etc.) are withdrawn, not left dangling
+      pendingEntries().forEach(e => { if (!ctx.seen.has(e.syncId)) removeQueueEntry(e.syncId, 'conflict'); });
+      ctx.res = res; _ctx = ctx;
+      if (typeof dedupeRecurringOccurrences === 'function') dedupeRecurringOccurrences();
+      if (typeof reconcileLogEntryTaskLinkage === 'function') reconcileLogEntryTaskLinkage();
+      saveState(); saveQueues(); saveDomainSyncState();
+      res.pending = pendingCount();
+      res.needsUpload = computeNeedsUpload(remote);
+    } catch (err) {
+      console.warn('[SYNC-MERGE] reconcile failed', err);
+      return { ok: false, reason: 'merge-error', error: (err && err.message) || String(err) };
+    }
+    return res;
+  }
+  let _ctx = null;
+
+  function computeNeedsUpload(remote) {
+    const local = buildLocalBusinessState();
+    return digestOf(local) !== digestOf(remote);
+  }
+
+  // Payload override: entities with an unresolved conflict are written to state.json with
+  // the REMOTE value, so the remote copy is never silently lost while the user decides.
+  function applyPendingOverrides(business) {
+    const pend = pendingEntries();
+    if (pend.length === 0) return business;
+    const out = Object.assign({}, business);
+    let docFlat = null;
+    pend.forEach(e => {
+      const snap = e.remoteSnapshot;
+      if (e.kind === 'task') {
+        out.tasks = (out.tasks === business.tasks ? business.tasks.slice() : out.tasks);
+        const i = out.tasks.findIndex(t => t && t._sync && t._sync.syncId === e.key);
+        if (i !== -1 && snap && !snap.__absent) out.tasks[i] = snap;
+      } else if (e.kind === 'todo') {
+        out.todoItems = (out.todoItems === business.todoItems ? business.todoItems.slice() : out.todoItems);
+        out.todoTombstones = Object.assign({}, out.todoTombstones);
+        out.todoItems = out.todoItems.filter(t => t.uid !== e.key);
+        if (snap && !snap.__absent) { out.todoItems.push(snap); delete out.todoTombstones[e.key]; }
+        else if (snap && snap.tomb) out.todoTombstones[e.key] = snap.tomb;
+      } else if (e.kind === 'log' || e.kind === 'plan') {
+        const field = e.kind === 'log' ? 'logEntries' : 'recurringPlans', K = KINDS[e.kind];
+        out[field] = out[field].filter(x => K.key(x) !== e.key);
+        if (snap && !snap.__absent) out[field].push(snap);
+      } else if (e.kind === 'doc') {
+        if (!docFlat) docFlat = flatten(buildDoc(out));
+        Object.keys(snap || {}).forEach(p => { if (snap[p].__absent) delete docFlat[p]; else docFlat[p] = snap[p].v; });
+      }
+    });
+    if (docFlat) {
+      const nd = unflatten(docFlat);
+      if (nd.masters) out.masters = nd.masters;
+      if (nd.userName !== undefined) out.userName = nd.userName;
+      if (nd.theme !== undefined) out.theme = nd.theme;
+    }
+    return out;
+  }
+
+  // ── push + base commit ────────────────────────────────────────────────────────
+  function pendingKeySet(kind) {
+    const s = {}; pendingEntries().forEach(e => { if (e.kind === kind) s[e.key] = true; }); return s;
+  }
+  function clearDirtyExceptPending() {
+    const pt = pendingKeySet('task');
+    tasks.forEach(t => {
+      if (isTaskDirty(t) && !pt[t._sync.syncId]) { clearTaskDirty(t); t._sync.lastSync = Date.now(); t._sync.syncStatus = 'synced'; removeQueueEntry(t._sync.syncId, 'upload'); }
+    });
+    getDirtyDomains().forEach(clearDomainDirty);
+    saveState(); saveQueues();
+  }
+  function push() {
+    return GoogleDriveWorkspace.pushStateToStateFile().then(pr => {
+      if (pr && pr.ok) {
+        tasks.forEach(t => { if (isTaskDirty(t) && t._sync) t._sync.cloudId = pr.fileId; });
+        clearDirtyExceptPending();
+      }
+      return pr;
+    });
+  }
+  function commitBase() {
+    const nb = emptyBase();
+    const pend = { task: pendingKeySet('task'), todo: pendingKeySet('todo'), log: pendingKeySet('log'), plan: pendingKeySet('plan') };
+    const put = (kn, arr) => {
+      const K = KINDS[kn];
+      arr.forEach(r => { const k = K.key(r); if (!k) return; nb[K.baseKey][k] = (pend[kn][k] && base[K.baseKey][k]) ? base[K.baseKey][k] : hashMap(K.fields(r)); });
+    };
+    put('task', tasks); put('todo', todoItems); put('log', logEntries); put('plan', recurringPlans);
+    // pending conflicts on records this device no longer holds keep their old base entry
+    Object.keys(pend).forEach(kn => Object.keys(pend[kn]).forEach(k => { const bk = KINDS[kn].baseKey; if (!nb[bk][k] && base[bk][k]) nb[bk][k] = base[bk][k]; }));
+    const docNow = flatten(buildDoc({ masters: masters, userName: userName, theme: getStoredTheme() }));
+    const pd = pendingEntries().filter(e => e.kind === 'doc');
+    if (pd.length && base.doc) { pd.forEach(e => (e.paths || []).forEach(p => { if (p in base.doc) docNow[p] = base.doc[p]; else delete docNow[p]; })); }
+    nb.doc = docNow;
+    base = nb; saveBase();
+  }
+
+  // ── resolution ────────────────────────────────────────────────────────────────
+  function resolve(id, choice, picks) {
+    const e = findQueueEntry(id, 'conflict');
+    if (!e || !isMine(e) || e.status === 'completed') return { ok: false, reason: 'invalid-conflict' };
+    if (['keep-local', 'keep-remote', 'merge'].indexOf(choice) === -1) return { ok: false, reason: 'invalid-choice' };
+    const pick = path => choice === 'keep-local' ? 'local' : choice === 'keep-remote' ? 'remote' : ((picks && picks[path]) || 'local');
+    try {
+      if (e.kind === 'doc') resolveDoc(e, pick);
+      else resolveRecord(e, pick, choice);
+    } catch (err) { return { ok: false, reason: 'resolution-error', error: (err && err.message) || String(err) }; }
+    const winners = e.fields.map(f => f.path + '→' + pick(f.path)).join('; ');
+    ConflictResolver.completeConflict(e.syncId, {
+      resolutionType: choice, automatic: false, taskId: e.taskId, previousLocalVersion: null, previousRemoteVersion: null, finalVersion: null,
+      conflictType: e.conflictType, detail: ('"' + e.label + '" ' + winners).slice(0, 1500)
+    });
+    const keptLocal = e.fields.some(f => pick(f.path) === 'local');
+    if (keptLocal && e.kind !== 'task') {
+      const dom = e.kind === 'todo' ? 'todoItems' : e.kind === 'log' ? 'logEntries' : e.kind === 'plan' ? 'recurringPlans' : null;
+      if (dom) recordSyncChange(dom, null, 'update');
+      else (e.paths || []).forEach(pth => recordSyncChange(pth.split(SEP)[0], null, 'update'));
+    }
+    saveBase(); saveState(); saveQueues();
+    if (typeof refreshTopSyncIndicator === 'function') refreshTopSyncIndicator();
+    return { ok: true };
+  }
+  function setBaseFromRemote(e) {
+    const snap = e.remoteSnapshot;
+    if (e.kind === 'doc') return;
+    const K = KINDS[e.kind];
+    if (snap && !snap.__absent) base[K.baseKey][e.key] = hashMap(K.fields(snap));
+    else delete base[K.baseKey][e.key];
+  }
+  function resolveRecord(e, pick, choice) {
+    const K = KINDS[e.kind], snap = e.remoteSnapshot, remoteAbsent = !snap || snap.__absent;
+    const arr = e.kind === 'task' ? tasks : e.kind === 'todo' ? todoItems : e.kind === 'log' ? logEntries : recurringPlans;
+    const l = arr.find(x => K.key(x) === e.key) || null;
+    if (e.conflictType === 'DELETE_VS_EDIT') {
+      const side = pick('(record)');
+      if (e.kind === 'task') {
+        if (side === 'remote') { if (l && !remoteAbsent) taskHooks.takeRemote(l, snap); else if (!l && !remoteAbsent) taskHooks.createLocal(snap); }
+        else if (l) taskHooks.keepLocalResolved(l, remoteAbsent ? null : snap, 'DELETE_VS_EDIT');
+      } else if (e.kind === 'todo') {
+        if (side === 'remote') {
+          if (remoteAbsent) { todoItems = todoItems.filter(t => t.uid !== e.key); todoTombstones[e.key] = (snap && snap.tomb) || Date.now(); }
+          else if (l) todoHooksTake(l, snap); else { todoItems.push(Object.assign(clone(snap), { id: ++todoIdCounter })); delete todoTombstones[e.key]; }
+        } else if (l) { l.updatedAt = Date.now(); l.resolved = { against: (snap && (snap.updatedAt || snap.createdAt)) || 0, at: Date.now() }; delete todoTombstones[e.key]; }
+        else if (!remoteAbsent) { todoTombstones[e.key] = Date.now(); }
+      } else {
+        const side2 = side;
+        if (side2 === 'remote') { if (remoteAbsent) { const a = arr.filter(x => K.key(x) !== e.key); if (e.kind === 'log') logEntries = a; else recurringPlans = a; } else if (!l) arr.push(clone(snap)); else plainHooks(e.kind).takeRemote(l, snap); }
+      }
+      setBaseFromRemote(e); return;
+    }
+    // FIELD_CONFLICT
+    if (!l) return;
+    const lf = K.fields(l), rf = K.fields(snap), merged = Object.assign({}, lf);
+    e.fields.forEach(f => { if (pick(f.path) === 'remote') { if (rf[f.path] === undefined) delete merged[f.path]; else merged[f.path] = rf[f.path]; } });
+    if (e.kind === 'task') {
+      if (same(merged, rf)) taskHooks.takeRemote(l, snap);
+      else { taskHooks.applyMerged(l, merged, snap, { pending: false, resolved: true }); }
+    } else if (e.kind === 'todo') {
+      if (same(merged, rf)) todoHooksTake(l, snap); else { applyFields(l, merged, ['id', 'updatedAt', 'resolved']); l.updatedAt = Date.now(); l.resolved = { against: snap.updatedAt || snap.createdAt || 0, at: Date.now() }; }
+    } else {
+      if (same(merged, rf)) plainHooks(e.kind).takeRemote(l, snap); else applyFields(l, merged, K.excl);
+    }
+    setBaseFromRemote(e);
+  }
+  function todoHooksTake(l, r) { taskHooksTodoTake(l, r); }
+  function resolveDoc(e, pick) {
+    const flat = flatten(buildDoc({ masters: masters, userName: userName, theme: getStoredTheme() }));
+    (e.paths || []).forEach((p, i) => {
+      const f = e.fields[i], s = e.remoteSnapshot[p];
+      if (pick(f.path) === 'remote' && s) { if (s.__absent) delete flat[p]; else flat[p] = s.v; }
+      // the remote value has now been seen: record it as base so a kept local value uploads cleanly next sync
+      if (base.doc) { if (s && !s.__absent) base.doc[p] = clone(s.v); else if (s) delete base.doc[p]; }
+    });
+    applyDoc(flat);
+  }
+
+  function refreshUI(rec, dom) {
+    const s = (rec && rec.summary) || {};
+    const touched = ['tasks', 'todos', 'logs', 'plans'].some(k => s[k] && (s[k].created || s[k].adopted || s[k].merged || s[k].removed)) || (rec.doc && rec.doc.changed);
+    if (!touched && !(dom && dom.changed && dom.changed.length)) return;
+    const call = n => { try { if (typeof window[n] === 'function') window[n](); } catch (e) {} };
+    ['renderList', 'updateLogPanel', 'renderTodoList', 'updatePendingMenuCounts', 'updatePendingTasksBadge', 'renderBreakWidget', 'renderWorkWidget'].forEach(call);
+    if (typeof activeMastersTab !== 'undefined' && activeMastersTab !== 'sync') call('renderMastersContent');
+  }
+  function resetForAccountChange() { clearBase(); }
+  function init() { loadBase(); }
+
+  return {
+    HANDLED_DOMAINS: HANDLED_DOMAINS, init: init, reconcile: reconcile, push: push, commitBase: commitBase,
+    applyPendingOverrides: applyPendingOverrides, pendingCount: pendingCount, pendingEntries: pendingEntries,
+    resolve: resolve, refreshUI: refreshUI, resetForAccountChange: resetForAccountChange, digestOf: digestOf, clearDirtyExceptPending: clearDirtyExceptPending,
+    _debug: { getBase: () => base, flatten: flatten, unflatten: unflatten, mergeFlat: mergeFlat }
+  };
+})();
+
+
+// ── Sync conflict UI + policy setting (uses the existing modal/card styles) ──────────
+let _syncMergeOpen = {};   // conflict id → true while its per-field Merge chooser is expanded
+function fmtConflictTime(ts) { return ts ? new Date(ts).toLocaleString() : 'unknown'; }
+const SYNC_KIND_LABELS = { task: 'Task', todo: 'To-Do', log: 'Effort log', plan: 'Recurring plan', doc: 'Master / setting' };
+const SYNC_POLICY_LABELS = {
+  ask: ['Ask Me', 'Show each conflict and let me choose Keep Local, Keep Remote or Merge.'],
+  local: ['Keep Local', 'This device wins. The discarded remote values are recorded in Conflict History.'],
+  remote: ['Keep Remote', 'The other device wins. The discarded local values are recorded in Conflict History.'],
+  newest: ['Newest Change Wins', 'The most recently modified side wins when both timestamps are trustworthy; otherwise TTL asks you.']
+};
+function renderSyncPolicyCard() {
+  const cur = getSyncConflictPolicy();
+  const rows = SYNC_POLICIES.map(p => `<label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;color:var(--text-secondary);margin-top:8px">
+      <input type="radio" name="sync-policy" value="${p}" ${cur === p ? 'checked' : ''} onchange="setSyncConflictPolicy('${p}')" style="margin-top:3px" />
+      <span><b style="color:var(--text-primary)">${esc(SYNC_POLICY_LABELS[p][0])}</b><br><span style="font-size:11px;color:var(--text-tertiary)">${esc(SYNC_POLICY_LABELS[p][1])}</span></span></label>`).join('');
+  return `<div style="border:1px solid var(--border-md);border-radius:var(--radius-md);padding:14px;margin-bottom:14px">
+    <div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:4px"><i class="ti ti-git-merge" style="vertical-align:-2px;margin-right:5px;color:var(--blue-mid)"></i>Sync Merge Conflict Handling</div>
+    <div style="font-size:11px;color:var(--text-tertiary)">Applies only when the same record or setting was changed differently on two devices. Changes to different records or different fields are merged automatically. This choice is kept per device.</div>
+    ${rows}</div>`;
+}
+function renderSyncConflictSummaryCard() {
+  const n = SyncMerge.pendingCount();
+  return `<div style="border:1px solid ${n ? 'var(--amber-mid)' : 'var(--border-md)'};border-radius:var(--radius-md);padding:14px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+    <div style="font-size:13px;color:var(--text-primary)"><b>Sync conflicts</b><div style="font-size:11px;color:var(--text-tertiary);margin-top:2px">${n ? n + ' waiting for your decision — sync is not fully resolved.' : 'No conflicts are waiting.'}</div></div>
+    ${n ? '<button class="btn btn-primary" onclick="openSyncConflictModal()"><i class="ti ti-git-merge"></i> Resolve</button>' : ''}</div>`;
+}
+function ensureSyncConflictModal() {
+  if (document.getElementById('sync-conflict-modal')) return;
+  const d = document.createElement('div');
+  d.className = 'modal-overlay hidden'; d.id = 'sync-conflict-modal';
+  d.innerHTML = `<div class="modal" style="max-width:640px"><div class="modal-header"><div class="modal-title"><i class="ti ti-git-merge" style="vertical-align:-2px;margin-right:6px;color:var(--amber-mid)"></i>Sync Conflict</div>
+    <button class="btn-icon" onclick="closeSyncConflictModal()"><i class="ti ti-x"></i></button></div>
+    <div class="modal-body" id="sync-conflict-body" style="max-height:65vh;overflow:auto"></div>
+    <div class="modal-footer"><button class="btn" onclick="closeSyncConflictModal()">Close</button></div></div>`;
+  document.body.appendChild(d);
+}
+function openSyncConflictModal() { ensureSyncConflictModal(); renderSyncConflictModal(); document.getElementById('sync-conflict-modal').classList.remove('hidden'); }
+function closeSyncConflictModal() { const m = document.getElementById('sync-conflict-modal'); if (m) m.classList.add('hidden'); }
+function syncSideBlock(title, info, fields, side) {
+  const lines = fields.map(f => `<div style="margin-top:4px"><span style="color:var(--text-tertiary)">${esc(f.path)}:</span> ${esc(side === 'L' ? f.local : f.remote)}</div>`).join('');
+  return `<div style="flex:1;min-width:220px;background:var(--bg-secondary);border:1px solid var(--border-md);border-radius:var(--radius-sm);padding:8px 10px;font-size:12px">
+    <div style="font-weight:600;color:var(--text-primary)">${title}</div>
+    <div style="color:var(--text-tertiary);font-size:11px">Updated: ${esc(fmtConflictTime(info && info.updatedAt))}${info && info.deleted ? ' · deleted' : ''}</div>${lines}</div>`;
+}
+function renderSyncConflictModal() {
+  const body = document.getElementById('sync-conflict-body'); if (!body) return;
+  const list = SyncMerge.pendingEntries();
+  if (!list.length) { body.innerHTML = '<div style="font-size:13px;color:var(--text-secondary)">All conflicts are resolved. Tap Sync to upload your decisions.</div>'; return; }
+  const head = list.length > 1
+    ? `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px"><b style="font-size:13px">${list.length} conflicts found</b>
+       <span style="display:flex;gap:6px"><button class="btn" style="padding:4px 10px;font-size:11px" onclick="syncResolveAllClick('keep-local')">Apply Keep Local to all</button>
+       <button class="btn" style="padding:4px 10px;font-size:11px" onclick="syncResolveAllClick('keep-remote')">Apply Keep Remote to all</button></span></div>` : '';
+  const cards = list.map(e => {
+    const mergeable = e.conflictType === 'FIELD_CONFLICT' && e.fields.length > 1;
+    const open = !!_syncMergeOpen[e.syncId];
+    const type = e.conflictType === 'DELETE_VS_EDIT' ? 'Deleted on one device, edited on the other' : 'Same field changed on both devices';
+    const chooser = open ? `<div style="margin-top:8px;font-size:12px">${e.fields.map((f, i) => `<div style="margin-top:6px"><b>${esc(f.path)}</b>
+        <label style="margin-left:10px"><input type="radio" name="mg-${esc(e.syncId)}-${i}" value="local" checked /> Local: ${esc(f.local)}</label>
+        <label style="margin-left:10px"><input type="radio" name="mg-${esc(e.syncId)}-${i}" value="remote" /> Remote: ${esc(f.remote)}</label></div>`).join('')}
+        <button class="btn btn-primary" style="margin-top:8px;padding:4px 10px;font-size:11px" onclick="syncApplyMergeClick('${esc(e.syncId)}')">Apply merge</button></div>` : '';
+    return `<div style="border:1px solid var(--border-md);border-radius:var(--radius-md);padding:10px;margin-bottom:10px">
+      <div style="font-size:11px;color:var(--text-tertiary)">Type: ${esc(SYNC_KIND_LABELS[e.kind] || e.kind)} · ${esc(type)}</div>
+      <div style="font-size:13px;font-weight:600;color:var(--text-primary);margin:2px 0 8px">Item: ${esc(e.label)}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">${syncSideBlock('LOCAL (this device)', e.localInfo, e.fields, 'L')}${syncSideBlock('REMOTE (Google Drive)', e.remoteInfo, e.fields, 'R')}</div>
+      <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
+        <button class="btn" onclick="syncResolveClick('${esc(e.syncId)}','keep-local')">Keep Local</button>
+        <button class="btn" onclick="syncResolveClick('${esc(e.syncId)}','keep-remote')">Keep Remote</button>
+        ${mergeable ? `<button class="btn" onclick="syncToggleMerge('${esc(e.syncId)}')">Merge</button>` : ''}</div>${chooser}</div>`;
+  }).join('');
+  body.innerHTML = head + cards;
+}
+function syncAfterResolve() {
+  if (typeof renderList === 'function') renderList();
+  if (typeof renderTodoList === 'function') renderTodoList();
+  if (typeof updateLogPanel === 'function') updateLogPanel();
+  if (typeof refreshTopSyncIndicator === 'function') refreshTopSyncIndicator();
+  if (typeof activeMastersTab !== 'undefined' && activeMastersTab === 'sync' && typeof renderMastersContent === 'function') renderMastersContent();
+  renderSyncConflictModal();
+  if (SyncMerge.pendingCount() === 0) closeSyncConflictModal();
+}
+function syncResolveClick(id, choice) { SyncMerge.resolve(id, choice); syncAfterResolve(); }
+function syncResolveAllClick(choice) { SyncMerge.pendingEntries().forEach(e => SyncMerge.resolve(e.syncId, choice)); syncAfterResolve(); }
+function syncToggleMerge(id) { _syncMergeOpen[id] = !_syncMergeOpen[id]; renderSyncConflictModal(); }
+function syncApplyMergeClick(id) {
+  const e = findQueueEntry(id, 'conflict'); if (!e) return;
+  const picks = {};
+  e.fields.forEach((f, i) => { const el = document.querySelector('input[name="mg-' + id + '-' + i + '"]:checked'); picks[f.path] = el ? el.value : 'local'; });
+  SyncMerge.resolve(id, 'merge', picks); syncAfterResolve();
+}
+
+
+
 // ── Background Synchronization Scheduler (Phase 13) ─────────────────────────────
 // Implements ONLY this phase's brief: a scheduler that decides WHEN a
 // synchronization pass should run and coordinates running it. It NEVER
@@ -8609,6 +9586,7 @@ const BackgroundScheduler = (function () {
       }
       if (typeof saveState === 'function') saveState();
       if (typeof saveQueues === 'function') saveQueues();
+      if (typeof SyncMerge !== 'undefined') SyncMerge.commitBase();
 
       _running = false;
       _lastSyncAt = new Date().toISOString();
@@ -8626,6 +9604,37 @@ const BackgroundScheduler = (function () {
       finalizeRetryState(_lastResult);
       return _lastResult;
     });
+  }
+
+  // Conflict-aware pass body: reconcile (three-way merge against the downloaded state) → upload
+  // the merged state only if it differs from Drive → record the new common base. Same download,
+  // same single whole-state push, same manual-only gate as before.
+  function runMergeAwarePass(trigger, planResult, acct) {
+    const changedAccount = () => acct !== getAuthenticatedAccountKey();
+    const fail = (extra) => {
+      _running = false; _status = 'failed';
+      _lastResult = Object.assign({ ok: false, trigger: trigger, plan: planResult }, extra);
+      finalizeRetryState(_lastResult);
+      return _lastResult;
+    };
+    if (changedAccount()) { _running = false; _status = 'idle'; _lastResult = { ok: false, reason: 'account-changed', trigger }; return _lastResult; }
+    const remote = planResult.remoteState;
+    const rec = SyncMerge.reconcile(remote);
+    if (!rec.ok) return fail({ reason: rec.reason, error: rec.error });
+    const dom = mergeNonTaskDomains(remote, { skipReconciled: true });
+    try { SyncMerge.refreshUI(rec, dom); } catch (e) {}
+    const step = rec.needsUpload ? SyncMerge.push() : Promise.resolve(null);
+    return step.then(pr => {
+      if (changedAccount()) { _running = false; _status = 'idle'; _lastResult = { ok: false, reason: 'account-changed', trigger }; return _lastResult; }
+      if (pr && !pr.ok) return fail({ reason: pr.reason || 'upload-failed', error: pr.error, authFailure: !!pr.authFailure, httpStatus: pr.httpStatus || null, uploaded: pr });
+      if (!pr) SyncMerge.clearDirtyExceptPending();
+      SyncMerge.commitBase();
+      _running = false; _lastSyncAt = new Date().toISOString(); _status = 'completed';
+      _lastResult = { ok: true, trigger: trigger, plan: planResult, uploaded: pr, noop: !pr, merged: { ok: true, results: [] },
+        domainsMerged: ['merge'], conflicts: SyncMerge.pendingCount(), autoResolved: rec.autoResolved, mergeSummary: rec.summary };
+      finalizeRetryState(_lastResult);
+      return _lastResult;
+    }).catch(err => fail({ reason: 'error', error: (err && err.message) || String(err), authFailure: !!(err && err.authFailure), httpStatus: (err && err.httpStatus) || null }));
   }
 
   function runSynchronizationPass(trigger) {
@@ -8697,6 +9706,8 @@ const BackgroundScheduler = (function () {
         return _lastResult;
       }
 
+      if (typeof SyncMerge !== 'undefined') return runMergeAwarePass(trigger, planResult, syncAccountIdentity);
+      // (legacy path below is retained but no longer reached)
       // Phase 19E: the download buildSyncPlan() just performed for task planning
       // already carries the full remote payload (planResult.remoteState) — merge
       // the non-task domains (theme/masters/breakData/weekendOverrides/counters/
@@ -10104,6 +11115,7 @@ LockSyncTrigger.register();
 
 // ── Persistence ───────────────────────────────────────────────────────────────
 function saveState() {
+  if (window._ttlResetting) return; // Reset in progress — never re-write what was just wiped
   try {
     localStorage.setItem('ttl_tasks',    JSON.stringify(tasks));
     localStorage.setItem('ttl_log',      JSON.stringify(logEntries));
@@ -10191,6 +11203,7 @@ function loadState() {
     // audit log. Independent of the queues above — never affects dirty
     // state, upload queue reconciliation, or any business data.
     loadConflictHistory();
+    if (typeof SyncMerge !== 'undefined') SyncMerge.init();
     if (l) {
       // Phase 26: this used to silently drop any entry older than a
       // hardcoded 90 days on EVERY load, regardless of the user's configured
@@ -10222,7 +11235,8 @@ function loadState() {
       masters = { ...masters, ...parsed };
       if (!masters.weekendDays) masters.weekendDays = [...DEFAULT_WEEKEND_DAYS];
       if (!masters.workHours) masters.workHours = { startH: DEFAULT_WORK_START_H, startM: DEFAULT_WORK_START_M, endH: DEFAULT_WORK_END_H, endM: DEFAULT_WORK_END_M };
-      if (!masters.flags) masters.flags = { sleepAutoPause: true, backgroundSyncEnabled: true, showPending: true };
+      // Saved settings that predate flags keep the old behaviour (on); only a brand-new install starts with them off.
+      if (!parsed.flags) masters.flags = { sleepAutoPause: true, backgroundSyncEnabled: true, showPending: true };
       if (masters.flags.sleepAutoPause === undefined) masters.flags.sleepAutoPause = true;
       if (masters.flags.backgroundSyncEnabled === undefined) masters.flags.backgroundSyncEnabled = true;
       if (masters.flags.showPending === undefined) masters.flags.showPending = true;
@@ -10368,7 +11382,7 @@ function refreshAllTimers() {
   // Also update complete modal timer if open
   if (pendingCompleteId !== null) {
     const t = tasks.find(x => x.id === pendingCompleteId);
-    if (t) document.getElementById('cm-timer').textContent = fmt(liveElapsedSecs(t));
+    if (t) document.getElementById('cm-timer').textContent = fmtEffortMins(liveElapsedSecs(t));
   }
   updateLogTable();
 }
@@ -10520,6 +11534,8 @@ function fmt(secs) {
   return pad(m) + ':' + pad(s);
 }
 function pad(n) { return String(n).padStart(2,'0'); }
+// Effort is logged in whole minutes (rounded up) — same rule as the log's Effort column.
+function fmtEffortMins(secs) { return Math.ceil(Math.max(0, Number(secs) || 0) / 60) + ' min'; }
 function fmtDate(d) { return d.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}); }
 function fmtTime(d) { return d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
 function fmtDuration(secs) {
@@ -10832,6 +11848,8 @@ function startTask(id) {
   task.status = 'running';
   task.segmentStart = Date.now();
   if (!task.startedAt) task.startedAt = Date.now();
+  // To Do link: starting the task planned from a To Do removes that To Do from the list.
+  if (task.todoUid && typeof consumeTodoForStartedTask === 'function') consumeTodoForStartedTask(task);
   markBreakDayWorkedHere();
 
   const newEntryStartTs = Date.now();
@@ -10930,7 +11948,7 @@ function openCompleteModal(id) {
   if (!task) return;
   pendingCompleteId = id;
 
-  document.getElementById('cm-timer').textContent = fmt(liveElapsedSecs(task));
+  document.getElementById('cm-timer').textContent = fmtEffortMins(liveElapsedSecs(task));
 
   // Pull the log entry to pre-fill Complete from. Bug 2 fix: prefer the entry that's actually
   // OPEN (endTs === null) — Complete is only ever reachable for a running/paused task, which
@@ -11017,14 +12035,14 @@ function openCompleteModal(id) {
   if (cb) { cb.checked = false; }
   const ctFields = document.getElementById('cm-custom-time-fields');
   if (ctFields) ctFields.style.display = 'none';
-  document.getElementById('cm-timer-label').textContent = 'Time tracked (live)';
+  document.getElementById('cm-timer-label').textContent = 'Effort in minutes (live)';
 
   // Start live tick so timer counts up while popup is open
   if (cmTimerInterval) clearInterval(cmTimerInterval);
   cmTimerInterval = setInterval(() => {
     if (pendingCompleteId === null) return;
     const t = tasks.find(t => t.id === pendingCompleteId);
-    if (t) document.getElementById('cm-timer').textContent = fmt(liveElapsedSecs(t));
+    if (t) document.getElementById('cm-timer').textContent = fmtEffortMins(liveElapsedSecs(t));
   }, 500);
 
   document.getElementById('complete-modal').classList.remove('hidden');
@@ -11088,7 +12106,7 @@ function editLogEntry(globalIdx) {
   pendingCompleteId = null;
 
   document.getElementById('cm-timer').textContent =
-    entry.durationSecs !== null ? fmt(Math.floor(entry.durationSecs)) : '—';
+    entry.durationSecs !== null ? fmtEffortMins(entry.durationSecs) : '—';
 
   const headEl = document.getElementById('cm-heading');
   headEl.value = entry.heading || ''; headEl.classList.remove('invalid');
@@ -11152,7 +12170,7 @@ function editLogEntry(globalIdx) {
   if (cbEdit) { cbEdit.checked = false; }
   const ctFieldsEdit = document.getElementById('cm-custom-time-fields');
   if (ctFieldsEdit) ctFieldsEdit.style.display = 'none';
-  document.getElementById('cm-timer-label').textContent = 'Time tracked';
+  document.getElementById('cm-timer-label').textContent = 'Effort in minutes';
 
   document.getElementById('complete-modal').classList.remove('hidden');
   setTimeout(() => focusFieldInput('cm-description'), 80);
@@ -12094,6 +13112,8 @@ function confirmDeleteTask(id) {
 function deleteTask(id) {
   clearInterval(intervals[id]); delete intervals[id];
   const task = tasks.find(t => t.id === id);
+  // To Do link: deleting the planned task from its day sets the To Do back to unplanned.
+  if (task && task.todoUid && typeof unplanTodoForDeletedTask === 'function') unplanTodoForDeletedTask(task);
   // Add consumed task time to break
   if (task && task.accumulatedMs > 0 && isWithinWorkHours()) {
     const dateStr = todayStr();
@@ -12969,6 +13989,7 @@ const FS_PORTAL_IDS = [
   'todo-modal',
   'add-todo-modal',
   'todo-plan-modal',
+  'reset-modal',
   'make-recurring-modal',
   'manage-recurring-modal',
   'transfer-minutes-modal',
@@ -13377,7 +14398,7 @@ function updateLogTable() {
       + ((!isFutureDay)
             ? '<button class="btn-icon" id="continue-'+e.taskId+'" onclick="continueTomorrow('+e.taskId+')" title="Add this task to another day" style="border-color:var(--blue-mid);color:var(--blue-dark)"><i class="ti ti-calendar-plus"></i></button>'
             : '')
-      + ((isPresentDay && statusText!=='In Progress')
+      + ((isPresentDay && e.endTs !== null)
             ? '<button class="btn-icon" onclick="reopenTask('+e.taskId+')" title="Reopen task" style="border-color:var(--amber-mid);color:var(--amber-dark)"><i class="ti ti-refresh"></i></button>'
             : '')
       + ((!isFutureDay)
@@ -13464,6 +14485,7 @@ function openMasters() {
   const addSec = document.getElementById('master-add-section');
   if (addSec) addSec.style.display = (activeMastersTab === 'projects' || activeMastersTab === 'natures') ? '' : 'none';
   closeMasterNav(); // never open the popup with the mobile drawer already expanded
+  applyMasterNavState(); // desktop/tablet: restore the remembered sidebar collapsed/expanded state
   renderMastersContent();
 }
 function closeMasters() {
@@ -13478,10 +14500,32 @@ function closeMasters() {
 // Phase 24: master navigation drawer (phone only — desktop/tablet keep the
 // nav permanently visible via CSS, these are no-ops there since #master-body
 // only responds to the .nav-open class inside the <=760px breakpoint).
+const MASTER_NAV_COLLAPSED_KEY = 'ttl_master_nav_collapsed';
+function _masterNavIsDrawer() { return !!(window.matchMedia && window.matchMedia('(max-width: 760px)').matches); }
+// Applies the remembered sidebar state for the current screen size (desktop/tablet: collapsed or
+// expanded; phone: drawer closed). Safe to call repeatedly.
+function applyMasterNavState() {
+  const body = document.getElementById('master-body');
+  const toggle = document.getElementById('master-nav-toggle');
+  if (!body) return;
+  let collapsed = false;
+  try { collapsed = localStorage.getItem(MASTER_NAV_COLLAPSED_KEY) === '1'; } catch (e) {}
+  body.classList.toggle('nav-collapsed', collapsed);
+  if (toggle) {
+    const open = _masterNavIsDrawer() ? body.classList.contains('nav-open') : !collapsed;
+    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+}
 function toggleMasterNav() {
   const body = document.getElementById('master-body');
   if (!body) return;
-  if (body.classList.contains('nav-open')) closeMasterNav(); else openMasterNav();
+  if (_masterNavIsDrawer()) {
+    if (body.classList.contains('nav-open')) closeMasterNav(); else openMasterNav();
+    return;
+  }
+  const collapsed = !body.classList.contains('nav-collapsed');
+  try { localStorage.setItem(MASTER_NAV_COLLAPSED_KEY, collapsed ? '1' : '0'); } catch (e) {}
+  applyMasterNavState();
 }
 function openMasterNav() {
   const body = document.getElementById('master-body');
@@ -13495,8 +14539,13 @@ function closeMasterNav() {
   const toggle = document.getElementById('master-nav-toggle');
   if (!body) return;
   body.classList.remove('nav-open');
-  if (toggle) toggle.setAttribute('aria-expanded', 'false');
+  if (toggle) toggle.setAttribute('aria-expanded', _masterNavIsDrawer() ? 'false' : (body.classList.contains('nav-collapsed') ? 'false' : 'true'));
 }
+window.addEventListener('resize', function() {
+  const body = document.getElementById('master-body');
+  if (body && !_masterNavIsDrawer()) body.classList.remove('nav-open');
+  applyMasterNavState();
+});
 // ── Font preferences (User tab) ─────────────────────────────────────────────
 // Keep these in sync with the pre-paint copy in <head> (which must run
 // standalone, before this script has loaded).
@@ -13723,19 +14772,37 @@ function renderListsTabHTML() {
       <input class="master-add-input" id="bulk-list-input" placeholder="Add items, comma-separated — e.g. Low, Medium, High" style="flex:1" onkeydown="if(event.key==='Enter') bulkAddCustomListItems(activeListKey)" />
       <button class="btn btn-primary" onclick="bulkAddCustomListItems(activeListKey)"><i class="ti ti-plus"></i> Add</button>
     </div>
+    ${items.length > 1 ? `<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
+      <span style="font-size:11px;color:var(--text-tertiary)">Sort:</span>
+      <button class="btn" style="padding:3px 10px;font-size:12px" onclick="sortListItems('asc')"><i class="ti ti-sort-ascending"></i> A → Z</button>
+      <button class="btn" style="padding:3px 10px;font-size:12px" onclick="sortListItems('desc')"><i class="ti ti-sort-descending"></i> Z → A</button>
+      <span style="font-size:11px;color:var(--text-tertiary)">or drag / use the arrows</span>
+    </div>` : ''}
+    <div id="list-edit-error" style="display:none;font-size:12px;color:var(--red-dark);margin-bottom:8px"></div>
     ${items.length === 0 ? '<div style="color:var(--text-tertiary);font-size:13px;padding:8px 0">No items yet.</div>' :
-      '<div class="master-list" id="lists-tab-container">' + items.map((item, idx) => `<div class="master-item" draggable="true" data-idx="${idx}"
+      '<div class="master-list" id="lists-tab-container">' + items.map((item, idx) => {
+        const editing = (listItemEditIdx === idx);
+        return `<div class="master-item" ${editing ? '' : 'draggable="true"'} data-idx="${idx}"
         ondragstart="listItemDragStart(event,${idx})" ondragover="listItemDragOver(event,${idx})"
         ondragleave="listItemDragLeave(event)" ondrop="listItemDrop(event,${idx})" ondragend="listItemDragEnd(event)">
         <span class="master-drag-handle" title="Drag to reorder"><i class="ti ti-grip-vertical"></i></span>
-        <span class="master-item-name">${esc(item)}</span>
-        <button class="btn-icon btn-delete" onclick="deleteCustomListItem(activeListKey,${idx})" title="Delete"><i class="ti ti-x"></i></button>
-      </div>`).join('') + '</div>'}
+        ${editing
+          ? `<input class="master-add-input" id="list-item-edit-input" value="${esc(item)}" style="flex:1;min-width:0"
+              onkeydown="if(event.key==='Enter'){event.preventDefault();commitListItemEdit(${idx})}else if(event.key==='Escape'){cancelListItemEdit()}" />
+             <button class="btn-icon" onclick="commitListItemEdit(${idx})" title="Save"><i class="ti ti-check" style="color:var(--green-mid)"></i></button>
+             <button class="btn-icon" onclick="cancelListItemEdit()" title="Cancel"><i class="ti ti-x"></i></button>`
+          : `<span class="master-item-name" ondblclick="startListItemEdit(${idx})" title="Double-click to rename">${esc(item)}</span>
+             <button class="btn-icon" onclick="moveListItem(${idx},-1)" title="Move up" ${idx===0?'disabled style="opacity:.3"':''}><i class="ti ti-arrow-up"></i></button>
+             <button class="btn-icon" onclick="moveListItem(${idx},1)" title="Move down" ${idx===items.length-1?'disabled style="opacity:.3"':''}><i class="ti ti-arrow-down"></i></button>
+             <button class="btn-icon btn-edit" onclick="startListItemEdit(${idx})" title="Rename"><i class="ti ti-pencil"></i></button>
+             <button class="btn-icon btn-delete" onclick="deleteCustomListItem(activeListKey,${idx})" title="Delete"><i class="ti ti-x"></i></button>`}
+      </div>`; }).join('') + '</div>'}
   `;
 }
 
 function selectActiveList(listKey) {
   activeListKey = listKey;
+  listItemEditIdx = null;
   renderMastersContent();
 }
 
@@ -13962,16 +15029,37 @@ function renderMastersContent() {
         </div>
       </div>
       <div style="border:1px solid var(--border-md);border-radius:var(--radius-md);padding:14px;margin-bottom:14px">
-        <div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:4px"><i class="ti ti-download" style="vertical-align:-2px;margin-right:5px;color:var(--blue-mid)"></i>Backup — Export All Data</div>
-        <div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">Download a full JSON backup of all tasks, log history, and settings. Use this to transfer the app to another device.</div>
-        <button class="btn btn-primary" onclick="exportBackup()"><i class="ti ti-file-download"></i> Download Backup JSON</button>
+        <div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:4px"><i class="ti ti-download" style="vertical-align:-2px;margin-right:5px;color:var(--blue-mid)"></i>Backup — Export</div>
+        <div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">Download a JSON backup. Use this to transfer the app to another device or to keep a safe copy.</div>
+        <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px">
+          <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;font-size:12px;color:var(--text-secondary)">
+            <input type="radio" name="backup-scope" value="full" checked style="margin-top:2px">
+            <span><strong style="color:var(--text-primary)">Configuration and data</strong><br>Tasks, effort logs, To Do items, recurring plans, break and weekend records, plus all settings below.</span>
+          </label>
+          <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;font-size:12px;color:var(--text-secondary)">
+            <input type="radio" name="backup-scope" value="config" style="margin-top:2px">
+            <span><strong style="color:var(--text-primary)">Configuration only</strong><br>Masters (lists), columns, work hours, weekends, email template, theme, name and layout settings. No tasks or logs.</span>
+          </label>
+        </div>
+        <button class="btn btn-primary" onclick="exportBackup(getBackupScope('backup-scope'))"><i class="ti ti-file-download"></i> Download Backup JSON</button>
       </div>
+      ${autoBackupCardHtml()}
       <div style="border:1px solid var(--border-md);border-radius:var(--radius-md);padding:14px;margin-bottom:14px">
         <div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:4px"><i class="ti ti-upload" style="vertical-align:-2px;margin-right:5px;color:var(--green-mid)"></i>Restore — Import Backup</div>
-        <div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">Import a previously exported backup JSON. <strong>This will overwrite all current data.</strong></div>
+        <div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">Import a previously exported backup JSON. <strong>This overwrites what you choose below.</strong></div>
+        <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px">
+          <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;font-size:12px;color:var(--text-secondary)">
+            <input type="radio" name="restore-scope" value="full" checked style="margin-top:2px">
+            <span><strong style="color:var(--text-primary)">Configuration and data</strong><br>Replaces your data <strong>and</strong> configuration with what is in the file.</span>
+          </label>
+          <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;font-size:12px;color:var(--text-secondary)">
+            <input type="radio" name="restore-scope" value="config" style="margin-top:2px">
+            <span><strong style="color:var(--text-primary)">Configuration only</strong><br>Replaces only configuration. Your current tasks and logs are kept. Works with either kind of backup file.</span>
+          </label>
+        </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <label class="btn" style="cursor:pointer"><i class="ti ti-file-upload"></i> Choose Backup File
-            <input type="file" accept=".json" style="display:none" onchange="importBackup(event)">
+            <input type="file" accept=".json" style="display:none" onchange="importBackup(event, getBackupScope('restore-scope'))">
           </label>
           <span id="import-backup-status" style="font-size:12px;color:var(--text-secondary)"></span>
         </div>
@@ -13986,6 +15074,11 @@ function renderMastersContent() {
           <button class="btn" id="history-cleanup-btn" style="color:var(--red-dark);border-color:var(--red-mid)" onclick="runHistoryCleanup()"><i class="ti ti-trash"></i> Clean Up</button>
         </div>
         <div id="cleanup-status" style="font-size:12px;margin-top:8px;display:none"></div>
+      </div>
+      <div style="border:1px solid var(--red-mid);border-radius:var(--radius-md);padding:14px;margin-top:14px">
+        <div style="font-size:13px;font-weight:600;color:var(--red-dark);margin-bottom:4px"><i class="ti ti-refresh-alert" style="vertical-align:-2px;margin-right:5px;color:var(--red-mid)"></i>Reset</div>
+        <div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">Wipe this device and start fresh — either just your data, or your configuration too. You will be asked to confirm.</div>
+        <button class="btn" style="color:var(--red-dark);border-color:var(--red-mid)" onclick="openResetModal()"><i class="ti ti-refresh-alert"></i> Reset…</button>
       </div>
     `;
     return;
@@ -14376,8 +15469,9 @@ function renderMastersContent() {
       const t = tasks.find(x => x.id === taskId);
       return '#' + taskId + ' — ' + (t ? esc(t.heading || t.description || 'Untitled task') : 'no longer present locally');
     }
-    const manualConflictRowsHtml = (resolutionStats && resolutionStats.manualEntries.length)
-      ? resolutionStats.manualEntries.map(e => {
+    const legacyManual = resolutionStats ? resolutionStats.manualEntries.filter(e => String(e.syncId).indexOf('m:') !== 0) : [];
+    const manualConflictRowsHtml = (legacyManual.length)
+      ? legacyManual.map(e => {
           const buttons = CHOICE_BUTTONS[e.conflictType] || [];
           const buttonsHtml = buttons.map(([choice, label]) =>
             `<button class="btn" style="padding:4px 10px;font-size:11px" onclick="resolveConflictClick('${esc(e.syncId)}','${choice}')">${esc(label)}</button>`
@@ -14418,6 +15512,8 @@ function renderMastersContent() {
         </label>
       </div>
 
+      ${renderSyncPolicyCard()}
+      ${renderSyncConflictSummaryCard()}
       <!-- Phase 5: Connection card — Cloud Provider, Connection Status, and
            Authenticated User now reflect live GoogleAuthManager state. Device
            ID, Last Synchronization, and Synchronization Status stay Phase
@@ -14647,6 +15743,7 @@ function renderMastersContent() {
 let _lastKnownSyncAccountKey;
 
 function resetSyncRuntimeForAccountChange() {
+  if (typeof SyncMerge !== 'undefined') SyncMerge.resetForAccountChange();
   if (typeof GoogleDriveWorkspace !== 'undefined' && GoogleDriveWorkspace.resetForAccountChange) {
     GoogleDriveWorkspace.resetForAccountChange();
   }
@@ -14903,6 +16000,7 @@ function manualSyncClick() {
   if (activeMastersTab === 'sync') renderMastersContent();
   refreshTopSyncIndicator();
   syncPromise.then((result) => {
+    if (result && result.conflicts > 0 && typeof openSyncConflictModal === 'function') openSyncConflictModal();
     if (activeMastersTab === 'sync') renderMastersContent();
     // Phase 19F-B: Manual Sync runs through the exact same runSynchronizationPass()
     // as every automatic trigger, but (unlike the automatic callers) never used to
@@ -14937,6 +16035,7 @@ function topSyncClick() {
   // defers rather than forcing interactive auth during this state.
   if (authStatus.state === 'connecting') return;
   if (typeof BackgroundScheduler !== 'undefined' && BackgroundScheduler.isSynchronizationRunning()) return;
+  if (typeof SyncMerge !== 'undefined' && SyncMerge.pendingCount() > 0) { openSyncConflictModal(); return; }
   if (authStatus.authenticated) { manualSyncClick(); return; }
   // Phase 22 (Authentication Persistence), PART 9 (Manual Sync + Auth):
   // authentication isn't usable right now — become authenticated (silent
@@ -15021,6 +16120,10 @@ function computeTopSyncStatus() {
   // information than the generic dirty state it implies.)
   if (schedulerStatus.lastResult && schedulerStatus.lastResult.ok === false) {
     return { dot: 'sync-failed', title: 'Sync failed — tap to retry', label: 'Sync failed' };
+  }
+  // 2b. CONFLICT — unresolved merge conflicts are waiting for the user; never show Synced/Required over them.
+  if (typeof SyncMerge !== 'undefined' && SyncMerge.pendingCount() > 0) {
+    return { dot: 'sync-conflict', title: 'Sync conflict — tap to resolve (' + SyncMerge.pendingCount() + ')', label: 'Conflict' };
   }
   // 3. SYNC REQUIRED — significant local changes are pending. Local UI state
   // only; never mind whether Drive is currently reachable. Must never blink
@@ -15449,6 +16552,7 @@ function bulkAddCustomListItems(listKey) {
 
 function deleteCustomListItem(listKey, idx) {
   if (!masters.customLists[listKey]) return;
+  listItemEditIdx = null;
   masters.customLists[listKey].splice(idx, 1);
   saveState();
   renderMastersContent();
@@ -15460,6 +16564,135 @@ function deleteCustomListItem(listKey, idx) {
 function goToListInListsTab(listKey) {
   activeListKey = listKey;
   switchTab('lists');
+}
+
+// ── Lists tab: rename, move up/down, sort ──────────────────────────────────
+let listItemEditIdx = null;
+let _listEditBusy = false;
+
+function _showListEditError(msg) {
+  const el = document.getElementById('list-edit-error');
+  if (!el) return;
+  el.textContent = msg || '';
+  el.style.display = msg ? 'block' : 'none';
+}
+
+function startListItemEdit(idx) {
+  listItemEditIdx = idx;
+  renderMastersContent();
+  setTimeout(() => {
+    const inp = document.getElementById('list-item-edit-input');
+    if (inp) { inp.focus(); inp.select(); }
+  }, 20);
+}
+
+function cancelListItemEdit() {
+  listItemEditIdx = null;
+  renderMastersContent();
+}
+
+// Renames `oldVal` -> `newVal` in every record that stores a value from this list, so
+// existing tasks, log entries, recurring plans and To Dos keep matching the dropdown.
+// Returns how many records changed.
+function renameListValueInRecords(listKey, oldVal, newVal) {
+  const cols = getLogColumns().filter(c => c.listSource === listKey && (c.type === 'list' || c.type === 'multilist'));
+  if (!cols.length) return { tasks: 0, logs: 0, plans: 0, todos: 0 };
+  const swap = (col, raw) => {
+    if (raw === undefined || raw === null || raw === '') return raw;
+    if (col.type === 'multilist') {
+      const parts = String(raw).split(/\s*[\/,]\s*/).filter(Boolean);
+      if (!parts.includes(oldVal)) return raw;
+      return parts.map(x => x === oldVal ? newVal : x).join(' / ');
+    }
+    return raw === oldVal ? newVal : raw;
+  };
+  // Applies the rename to one record; returns true if anything changed.
+  const fixRecord = (rec, kind) => {
+    let changed = false;
+    cols.forEach(col => {
+      const k = col.key;
+      if (col.isStatusColumn) {
+        // Status: only the stored log-entry status label. task.status is runtime state
+        // (running/paused/done) and must never be rewritten.
+        if (kind === 'log' && rec.taskStatus === oldVal) { rec.taskStatus = newVal; changed = true; }
+        return;
+      }
+      if (col.builtIn) {
+        if (k in rec) { const v = swap(col, rec[k]); if (v !== rec[k]) { rec[k] = v; changed = true; } }
+      } else if (rec.customFields && k in rec.customFields) {
+        const v = swap(col, rec.customFields[k]);
+        if (v !== rec.customFields[k]) { rec.customFields[k] = v; changed = true; }
+      }
+    });
+    return changed;
+  };
+  const n = { tasks: 0, logs: 0, plans: 0, todos: 0 };
+  tasks.forEach(t => { if (fixRecord(t, 'task')) { n.tasks++; try { touchSyncMetadata(t); } catch (e) {} } });
+  logEntries.forEach(e => { if (fixRecord(e, 'log')) n.logs++; });
+  recurringPlans.forEach(pl => { if (fixRecord(pl, 'plan')) n.plans++; });
+  todoItems.forEach(td => { if (fixRecord(td, 'todo')) { n.todos++; td.updatedAt = Date.now(); } });
+  if (n.logs)  { try { recordSyncChange('logEntries', null, 'update'); } catch (e) {} }
+  if (n.plans) { try { recordSyncChange('recurringPlans', null, 'update'); } catch (e) {} }
+  if (n.todos) { try { recordSyncChange('todoItems', null, 'update'); } catch (e) {} }
+  return n;
+}
+
+function commitListItemEdit(idx) {
+  if (_listEditBusy) return;
+  const items = masters.customLists && masters.customLists[activeListKey];
+  const inp = document.getElementById('list-item-edit-input');
+  if (!items || !inp || listItemEditIdx !== idx) return;
+  const oldVal = items[idx];
+  const newVal = inp.value.trim();
+  if (!newVal) { _showListEditError('Name cannot be empty.'); inp.focus(); return; }
+  if (newVal === oldVal) { cancelListItemEdit(); return; }
+  if (items.some((x, i) => i !== idx && x.toLowerCase() === newVal.toLowerCase())) {
+    _showListEditError('"' + newVal + '" already exists in this list.'); inp.focus(); return;
+  }
+  _listEditBusy = true;
+  try {
+    items[idx] = newVal;
+    const n = renameListValueInRecords(activeListKey, oldVal, newVal);
+    saveState();
+    listItemEditIdx = null;
+    renderMastersContent();
+    refreshAfterColumnConfigChange();
+    try { renderList(); } catch (e) {}
+    const total = n.tasks + n.logs + n.plans + n.todos;
+    if (total) {
+      _showListEditError('');
+      const el = document.getElementById('list-edit-error');
+      if (el) {
+        el.style.color = 'var(--green-dark)';
+        el.textContent = '✓ Renamed. Updated ' + n.logs + ' log entr' + (n.logs === 1 ? 'y' : 'ies') + (n.tasks ? ', ' + n.tasks + ' task' + (n.tasks === 1 ? '' : 's') : '') + (n.plans ? ', ' + n.plans + ' recurring plan' + (n.plans === 1 ? '' : 's') : '') + (n.todos ? ', ' + n.todos + ' To Do' + (n.todos === 1 ? '' : 's') : '') + '.';
+        el.style.display = 'block';
+      }
+    }
+  } finally { _listEditBusy = false; }
+}
+
+function moveListItem(idx, dir) {
+  const items = masters.customLists && masters.customLists[activeListKey];
+  if (!items) return;
+  const to = idx + dir;
+  if (to < 0 || to >= items.length) return;
+  const [m] = items.splice(idx, 1);
+  items.splice(to, 0, m);
+  listItemEditIdx = null;
+  saveState();
+  renderMastersContent();
+  refreshAfterColumnConfigChange();
+}
+
+function sortListItems(dir) {
+  const items = masters.customLists && masters.customLists[activeListKey];
+  if (!items || items.length < 2) return;
+  const cmp = (a, b) => String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' });
+  items.sort(dir === 'desc' ? (a, b) => cmp(b, a) : cmp);
+  listItemEditIdx = null;
+  saveState();
+  renderMastersContent();
+  refreshAfterColumnConfigChange();
 }
 
 // ── Drag-and-drop reorder for items within the Lists tab ───────────────────
@@ -15789,21 +17022,76 @@ async function copyEmailTableFromPreview() {
 }
 
 // ── Data: Backup / Restore / Cleanup ──────────────────────────────────────────
-function exportBackup() {
-  // Per-date weekend "working day?" overrides are stored under dynamically-named
-  // keys (ttl_weekend_YYYY-MM-DD), one per date the user was prompted — collect
-  // all of them so a restore doesn't lose this history.
-  const weekendOverrides = {};
-  try {
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (k && k.indexOf('ttl_weekend_') === 0) weekendOverrides[k.slice('ttl_weekend_'.length)] = localStorage.getItem(k);
-    }
-  } catch (e) {}
+// Backup format history:
+//   _version 2 — flat object: tasks, logEntries, masters, counters, recurringPlans,
+//                userName, breakData, theme, log-table prefs, weekendOverrides, To Do.
+//   _version 3 — the SAME flat fields (so the file stays readable by older builds and
+//                still mirrors buildStatePayload()), plus:
+//                  application / backupVersion / exportedAt  — self-describing header
+//                  settings   — device-local UI preferences that used to be missed
+//                  sync       — informational per-domain change summary only (never
+//                               applied on restore; see below for what is excluded)
+//                  contents   — record counts, used for a sanity check on restore
+// `masters` is the application's single masters object — it already holds Lists
+// (Projects, Nature, Status and every custom list such as Module/Ticket if configured),
+// Task Columns (order, visibility, type, carry-forward/recurring flags, textarea/rich
+// text settings), work hours, weekend days, flags, font prefs and the email template.
+// It is exported whole, so any future master added to that object is included automatically.
+//
+// Intentionally NOT exported: Google auth tokens (ttl_sync_auth), Drive workspace/folder
+// ids (ttl_sync_workspace), state sync identity/version (ttl_sync_state_meta), upload
+// queues and domain dirty-state (ttl_sync_queues / ttl_sync_domain_state), the Conflict
+// History audit log, the device id (ttl_device_id), running JS timers, expanded-card UI
+// state and search popups. Those are device/account-bound or runtime-only; restoring them
+// onto another browser could tie two devices to one identity or replay stale sync work.
+const TTL_BACKUP_VERSION = 3;
 
-  const backup = {
-    _version: 2,
-    _exported: new Date().toISOString(),
+function collectBackupSettings() {
+  return {
+    logActionsCollapsed: !!logActionsCollapsed
+  };
+}
+
+// Which part of the app a backup covers.
+//   'full'   : configuration + data (the original behaviour; also what old backups are)
+//   'config' : configuration only — masters/lists/columns/work hours/weekends/email template,
+//              user name, theme, log table layout, UI settings. No tasks, logs, To Dos, plans,
+//              counters, break or per-date weekend records (the same set Reset calls "data").
+function getBackupScope(radioName) {
+  const el = document.querySelector('input[name="' + radioName + '"]:checked');
+  return el && el.value === 'config' ? 'config' : 'full';
+}
+
+function buildBackupObject(scope) {
+  scope = scope === 'config' ? 'config' : 'full';
+  // Per-date weekend "working day?" overrides live under dynamically-named keys
+  // (ttl_weekend_YYYY-MM-DD) — collectWeekendOverrides() gathers them all.
+  const weekendOverrides = collectWeekendOverrides();
+  const nowIso = new Date().toISOString();
+
+  let syncSummary = {};
+  try { syncSummary = { domainMeta: buildDomainMeta() }; } catch (e) { syncSummary = {}; }
+
+  const backup = scope === 'config' ? {
+    _version: TTL_BACKUP_VERSION,
+    _exported: nowIso,
+    application: 'TTL',
+    backupVersion: TTL_BACKUP_VERSION,
+    backupScope: 'config',
+    exportedAt: nowIso,
+    masters,
+    userName,
+    theme: getStoredTheme(),
+    logTableColWidths,
+    logTableColPinned,
+    settings: collectBackupSettings()
+  } : {
+    _version: TTL_BACKUP_VERSION,
+    _exported: nowIso,
+    application: 'TTL',
+    backupVersion: TTL_BACKUP_VERSION,
+    backupScope: 'full',
+    exportedAt: nowIso,
     tasks,
     logEntries,
     masters,
@@ -15817,46 +17105,132 @@ function exportBackup() {
     logTableColWidths,
     logTableColPinned,
     weekendOverrides,
-    // To Do backlog (Pending > To Do) — included so a restore doesn't lose it.
+    // To Do backlog (Pending > To Do) — stored separately from tasks, kept separate here.
     todoItems,
     todoTombstones,
-    todoIdCounter
+    todoIdCounter,
+    settings: collectBackupSettings(),
+    sync: syncSummary,
+    contents: {
+      tasks: tasks.length,
+      logEntries: logEntries.length,
+      todoItems: todoItems.length,
+      recurringPlans: recurringPlans.length
+    }
   };
-  // Future synchronization integration point: Export
-  // No implementation in Phase 0.5A
+  return backup;
+}
+
+function exportBackup(scope) {
+  scope = scope === 'config' ? 'config' : 'full';
+  const backup = buildBackupObject(scope);
   const json = JSON.stringify(backup, null, 2);
   const blob = new Blob([json], { type: 'application/json' });
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement('a');
   const d    = new Date();
   const ds   = String(d.getDate()).padStart(2,'0') + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + d.getFullYear();
-  a.href = url; a.download = `TTL_Backup_${ds}.json`;
+  a.href = url; a.download = scope === 'config' ? `TTL_Config_Backup_${ds}.json` : `TTL_Backup_${ds}.json`;
   document.body.appendChild(a); a.click();
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
 
-function importBackup(event) {
-  // Future synchronization integration point: Import
-  // No implementation in Phase 0.5A
+// Validates a parsed backup WITHOUT touching any live state. Throws a readable Error on
+// the first problem. Older backups (v1/v2, or missing newer fields) must keep passing:
+// every field added after v2 is optional and only type-checked when present.
+function validateBackup(b) {
+  const isObj = v => v && typeof v === 'object' && !Array.isArray(v);
+  if (!isObj(b)) throw new Error('Invalid backup file format.');
+  if (b.application !== undefined && b.application !== 'TTL') throw new Error('This backup was not created by TTL.');
+  const isConfigOnly = b.backupScope === 'config';
+  if (!b._version) throw new Error('Invalid backup file format.');
+  if (isConfigOnly) {
+    if (!isObj(b.masters)) throw new Error('Invalid configuration backup: masters section is missing.');
+  } else if (!Array.isArray(b.tasks) || !Array.isArray(b.logEntries)) {
+    throw new Error('Invalid backup file format.');
+  }
+  if (typeof b._version === 'number' && b._version > TTL_BACKUP_VERSION) {
+    throw new Error('This backup was created by a newer version of TTL (v' + b._version + '). Update the app before restoring it.');
+  }
+  if (!isConfigOnly && (!b.tasks.every(isObj) || !b.logEntries.every(isObj))) throw new Error('Backup is corrupted: task or log records are malformed.');
+  if (b.masters !== undefined && b.masters !== null && !isObj(b.masters)) throw new Error('Backup is corrupted: masters section is malformed.');
+  if (b.recurringPlans !== undefined && b.recurringPlans !== null && !Array.isArray(b.recurringPlans)) throw new Error('Backup is corrupted: recurring plans are malformed.');
+  if (Array.isArray(b.recurringPlans) && !b.recurringPlans.every(isObj)) throw new Error('Backup is corrupted: recurring plans are malformed.');
+  if (b.todoItems !== undefined && b.todoItems !== null && !Array.isArray(b.todoItems)) throw new Error('Backup is corrupted: To Do items are malformed.');
+  if (b.todoTombstones !== undefined && b.todoTombstones !== null && !isObj(b.todoTombstones)) throw new Error('Backup is corrupted: To Do tombstones are malformed.');
+  if (b.breakData !== undefined && b.breakData !== null && !isObj(b.breakData)) throw new Error('Backup is corrupted: break data is malformed.');
+  if (b.weekendOverrides !== undefined && b.weekendOverrides !== null && !isObj(b.weekendOverrides)) throw new Error('Backup is corrupted: weekend overrides are malformed.');
+  if (b.settings !== undefined && b.settings !== null && !isObj(b.settings)) throw new Error('Backup is corrupted: settings section is malformed.');
+  if (isObj(b.masters) && b.masters.logColumns !== undefined && !Array.isArray(b.masters.logColumns)) {
+    throw new Error('Backup is corrupted: task column configuration is malformed.');
+  }
+  // v3 record counts (informational) must agree with the arrays actually present.
+  if (isObj(b.contents)) {
+    if (typeof b.contents.tasks === 'number' && b.contents.tasks !== b.tasks.length) throw new Error('Backup is incomplete: task count does not match.');
+    if (typeof b.contents.logEntries === 'number' && b.contents.logEntries !== b.logEntries.length) throw new Error('Backup is incomplete: log entry count does not match.');
+    if (typeof b.contents.todoItems === 'number' && Array.isArray(b.todoItems) && b.contents.todoItems !== b.todoItems.length) throw new Error('Backup is incomplete: To Do count does not match.');
+  }
+}
+
+function importBackup(event, scope) {
+  scope = scope === 'config' ? 'config' : 'full';
   const file = event.target.files[0];
   if (!file) return;
   const status = document.getElementById('import-backup-status');
   if (status) status.textContent = 'Reading…';
   const reader = new FileReader();
   reader.onload = e => {
+    // Everything that gets reassigned below, captured so a failure part-way through
+    // leaves the live in-memory state exactly as it was.
+    const prev = { tasks, logEntries, masters, taskIdCounter, importIdCounter, recurringPlans,
+      recurringPlanIdCounter, userName, logTableColWidths, logTableColPinned, logActionsCollapsed,
+      todoItems, todoTombstones, todoIdCounter };
     try {
       const b = JSON.parse(e.target.result);
-      if (!b._version || !Array.isArray(b.tasks) || !Array.isArray(b.logEntries)) {
-        throw new Error('Invalid backup file format.');
+      validateBackup(b);   // throws before ANY state is modified
+      const fileIsConfigOnly = b.backupScope === 'config';
+      if (scope === 'full' && fileIsConfigOnly) {
+        throw new Error('This file is a configuration-only backup. Choose "Configuration only" to restore it.');
       }
-      if (!confirm(`This will replace ALL current data with the backup from ${b._exported ? new Date(b._exported).toLocaleString() : 'unknown date'}.\n\nAre you sure?`)) {
+      const when = (b.exportedAt || b._exported) ? new Date(b.exportedAt || b._exported).toLocaleString() : 'unknown date';
+      const msg = scope === 'config'
+        ? `This will replace your CONFIGURATION (masters, columns, settings, theme, name) with the backup from ${when}.\n\nYour tasks and logs are kept.\n\nAre you sure?`
+        : `This will replace ALL current data and configuration with the backup from ${when}.\n\nAre you sure?`;
+      if (!confirm(msg)) {
         if (status) status.textContent = 'Cancelled.';
         return;
       }
-      // Restore all state
-      tasks                   = b.tasks                   || [];
-      logEntries              = b.logEntries              || [];
+      if (scope === 'config') {
+        // Configuration only: touch nothing that holds tasks, logs, To Dos, plans, counters,
+        // break or weekend-date records.
+        masters = b.masters || masters;
+        if (b.userName) userName = b.userName;
+        if (b.logTableColWidths) { logTableColWidths = b.logTableColWidths; ltSaveObj(LOG_TABLE_WIDTHS_KEY, logTableColWidths); }
+        if (b.logTableColPinned) { logTableColPinned = b.logTableColPinned; ltSaveObj(LOG_TABLE_PINNED_KEY, logTableColPinned); }
+        if (b.settings && typeof b.settings.logActionsCollapsed === 'boolean') {
+          logActionsCollapsed = b.settings.logActionsCollapsed;
+          ltSaveBool(LOG_ACTIONS_COLLAPSED_KEY, logActionsCollapsed);
+        }
+        saveState();
+        try { loadState(); saveState(); } catch (err) {}   // same load-time normalization as a full restore
+        if (b.theme) setTheme(b.theme);
+        renderAll();
+        if (status) { status.style.color = 'var(--green-dark)'; status.textContent = '✓ Configuration restored. Tasks and logs were not changed.'; }
+        setTimeout(() => switchTab('data'), 300);
+        return;
+      }
+      // Restore all state. Restore REPLACES (never merges), so it cannot create duplicates
+      // against existing data; records that are duplicated inside the file itself are
+      // dropped below (same task id / same To Do uid).
+      const seenTaskIds = new Set();
+      tasks = b.tasks.filter(t => {
+        if (t.id === undefined || t.id === null) return true;
+        if (seenTaskIds.has(t.id)) return false;
+        seenTaskIds.add(t.id);
+        return true;
+      });
+      logEntries              = b.logEntries;
       // Phase 1: a backup exported before Phase 1 existed has no _sync field on its
       // tasks at all; back-fill it the same way loadState() does, so older exported
       // data still imports correctly with no user interaction and no data loss.
@@ -15867,19 +17241,17 @@ function importBackup(event) {
       recurringPlans          = b.recurringPlans          || [];
       recurringPlanIdCounter  = b.recurringPlanIdCounter  ?? recurringPlanIdCounter;
       if (b.userName) userName = b.userName;
-      if (b.breakData) saveBreakData(b.breakData);
-      if (b.theme) setTheme(b.theme);
       if (b.logTableColWidths) { logTableColWidths = b.logTableColWidths; ltSaveObj(LOG_TABLE_WIDTHS_KEY, logTableColWidths); }
       if (b.logTableColPinned) { logTableColPinned = b.logTableColPinned; ltSaveObj(LOG_TABLE_PINNED_KEY, logTableColPinned); }
-      if (b.weekendOverrides) {
-        Object.keys(b.weekendOverrides).forEach(dateStr => {
-          try { localStorage.setItem('ttl_weekend_' + dateStr, b.weekendOverrides[dateStr]); } catch (e) {}
-        });
+      if (b.settings && typeof b.settings.logActionsCollapsed === 'boolean') {
+        logActionsCollapsed = b.settings.logActionsCollapsed;
+        ltSaveBool(LOG_ACTIONS_COLLAPSED_KEY, logActionsCollapsed);
       }
       // To Do backlog. Backups exported before To Do was included have no todoItems
       // field — in that case leave the current To Do list untouched rather than wiping it.
       let todoRestored = false;
       if (Array.isArray(b.todoItems)) {
+        const seenUids = new Set();
         todoItems = b.todoItems.filter(t => t && typeof t === 'object');
         todoTombstones = (b.todoTombstones && typeof b.todoTombstones === 'object') ? b.todoTombstones : {};
         let maxTodoId = 0;
@@ -15888,21 +17260,54 @@ function importBackup(event) {
           if (!t.updatedAt) t.updatedAt = t.createdAt || Date.now();
           if (typeof t.id === 'number' && t.id > maxTodoId) maxTodoId = t.id;
         });
+        todoItems = todoItems.filter(t => { if (seenUids.has(t.uid)) return false; seenUids.add(t.uid); return true; });
         todoIdCounter = Math.max(parseInt(b.todoIdCounter) || 0, maxTodoId);
         todoRestored = true;
       }
+      // Per-date weekend overrides: a restore replaces them, so clear this browser's own
+      // first (otherwise dates the backup never had would survive the "replace ALL").
+      if (b.weekendOverrides) {
+        try {
+          const stale = [];
+          for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (k && k.indexOf('ttl_weekend_') === 0) stale.push(k);
+          }
+          stale.forEach(k => localStorage.removeItem(k));
+        } catch (err) {}
+        Object.keys(b.weekendOverrides).forEach(dateStr => {
+          try { localStorage.setItem('ttl_weekend_' + dateStr, b.weekendOverrides[dateStr]); } catch (err) {}
+        });
+      }
+      // Persist; saveState() also records masters/counters/userName changes for sync
+      // (it diffs against the baseline that is still the pre-restore state at this point).
       saveState();
-      if (todoRestored) { try { recordSyncChange('todoItems', null, 'update'); } catch (e) {} }
+      // Re-run the app's own load-time normalization over what was just persisted: masters
+      // migrations (older column schema, legacy projects/natures arrays, missing
+      // workHours/flags/fontPrefs/emailTemplate), ID-counter repair, upload-queue
+      // reconcile. Reusing loadState() keeps older backups restoring exactly as an older
+      // saved profile would load. Then persist anything it normalized.
+      try { loadState(); saveState(); } catch (err) {}
+      // Remaining domains (theme/breakData record their own change inside their setters).
+      if (b.breakData) saveBreakData(b.breakData);
+      if (b.theme) setTheme(b.theme);
+      try { recordSyncChange('logEntries', null, 'update'); } catch (err) {}
+      try { recordSyncChange('recurringPlans', null, 'update'); } catch (err) {}
+      if (todoRestored) { try { recordSyncChange('todoItems', null, 'update'); } catch (err) {} }
       // Re-render everything
       renderAll();
       if (todoRestored) {
-        try { if (typeof renderTodoList === 'function') renderTodoList(); } catch (e) {}
-        try { if (typeof updatePendingMenuCounts === 'function') updatePendingMenuCounts(); } catch (e) {}
-        try { if (typeof updatePendingTasksBadge === 'function') updatePendingTasksBadge(); } catch (e) {}
+        try { if (typeof renderTodoList === 'function') renderTodoList(); } catch (err) {}
+        try { if (typeof updatePendingMenuCounts === 'function') updatePendingMenuCounts(); } catch (err) {}
+        try { if (typeof updatePendingTasksBadge === 'function') updatePendingTasksBadge(); } catch (err) {}
       }
       if (status) { status.style.color = 'var(--green-dark)'; status.textContent = `✓ Restored ${tasks.length} tasks, ${logEntries.length} log entries` + (todoRestored ? ` and ${todoItems.length} To Do items.` : '.'); }
       setTimeout(() => switchTab('data'), 300);
     } catch(err) {
+      // Roll the in-memory state back; nothing was persisted unless saveState() ran.
+      ({ tasks, logEntries, masters, taskIdCounter, importIdCounter, recurringPlans,
+         recurringPlanIdCounter, userName, logTableColWidths, logTableColPinned, logActionsCollapsed,
+         todoItems, todoTombstones, todoIdCounter } = prev);
       if (status) { status.style.color = 'var(--red-mid)'; status.textContent = '✗ ' + err.message; }
     }
   };
@@ -18261,6 +19666,7 @@ function updatePendingTasksBadge() {
 (function wrapRenderListForPendingBadge() {
   const original = renderList;
   renderList = function(onlyIds) {
+    reconcileTodoLinks();
     original(onlyIds);
     updatePendingTasksBadge();
     updatePendingMenuCounts();
@@ -18492,6 +19898,7 @@ function closeTodoModal() {
 }
 
 function renderTodoList() {
+  reconcileTodoLinks();
   const container = document.getElementById('todo-list');
   if (!container) return;
   if (todoItems.length === 0) {
@@ -18600,8 +20007,135 @@ function saveTodoDraft() {
   updatePendingTasksBadge();
 }
 
+// ── To Do ↔ Task link ─────────────────────────────────────────────────────────
+// Planning a To Do to a date creates a REAL task on that day (task.todoUid = item.uid).
+//   • Start the task on its day  → the To Do is removed from the list.
+//   • Delete the task (unstarted) → the To Do goes back to Unplanned.
+//   • Re-plan / clear the date    → the linked task moves / is removed.
+// reconcileTodoLinks() re-applies these rules on load, on every render and after sync,
+// so the two sides can never drift apart (e.g. a change that arrived from another device).
+function todoTaskIsStarted(t) {
+  return !!(t && (t.startedAt || (t.status && t.status !== 'idle') || logEntries.some(e => e.taskId === t.id)));
+}
+function findLiveLinkedTask(uid) {
+  return tasks.find(t => t.todoUid === uid && !isTaskDeleted(t));
+}
+function plannedTimestampFor(dateStr) {
+  if (dateStr === todayStr()) return Date.now();
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const w = (typeof getWorkHours === 'function') ? getWorkHours() : { startH: 9, startM: 30 };
+  return new Date(y, m - 1, d, w.startH, w.startM, 0, 0).getTime();
+}
+function createPlannedTaskForTodo(item, dateStr) {
+  const newTask = {
+    id: ++taskIdCounter,
+    heading: item.heading || '', project: item.project || '', nature: item.nature || '',
+    module: item.module || '', ticket: item.ticket || '',
+    customFields: { ...(item.customFields || {}) },
+    status: 'idle', accumulatedMs: 0, segmentStart: null, startedAt: null,
+    createdAt: plannedTimestampFor(dateStr),
+    todoUid: item.uid
+  };
+  createSyncMetadata(newTask);
+  tasks.unshift(newTask);
+  return newTask;
+}
+// Soft-delete (tombstone) an UNSTARTED linked task — same mechanism deleteTask() uses.
+function removeUnstartedLinkedTask(task) {
+  clearInterval(intervals[task.id]); delete intervals[task.id];
+  markSyncMetadataDeleted(task);
+  const row = document.getElementById('row-' + task.id);
+  if (row) row.remove();
+}
+function removeTodoByUid(uid) {
+  const gone = todoItems.find(t => t.uid === uid);
+  if (!gone) return false;
+  todoItems = todoItems.filter(t => t.uid !== uid);
+  todoTombstones[uid] = Date.now();
+  recordSyncChange('todoItems', uid, 'delete');
+  return true;
+}
+function refreshTodoUi() {
+  if (typeof renderTodoList === 'function') renderTodoList();
+  if (typeof updatePendingMenuCounts === 'function') updatePendingMenuCounts();
+  if (typeof updatePendingTasksBadge === 'function') updatePendingTasksBadge();
+}
+// Called from startTask().
+function consumeTodoForStartedTask(task) {
+  if (task && task.todoUid && removeTodoByUid(task.todoUid)) refreshTodoUi();
+}
+// Called from deleteTask().
+function unplanTodoForDeletedTask(task) {
+  if (!task || !task.todoUid || todoTaskIsStarted(task)) return;
+  const item = todoItems.find(t => t.uid === task.todoUid);
+  if (!item) return;
+  item.plannedDate = null;
+  item.plannedLinked = false;
+  item.updatedAt = Date.now();
+  recordSyncChange('todoItems', item.uid, 'update');
+  refreshTodoUi();
+}
+
+let _reconcilingTodoLinks = false;
+function reconcileTodoLinks() {
+  if (_reconcilingTodoLinks || !Array.isArray(todoItems) || !Array.isArray(tasks)) return false;
+  _reconcilingTodoLinks = true;
+  let changed = false, tasksChanged = false;
+  try {
+    const today = todayStr();
+    todoItems.slice().forEach(item => {
+      if (!item || !item.uid) return;
+      const linked = tasks.filter(t => t.todoUid === item.uid);
+      let live = linked.filter(t => !isTaskDeleted(t));
+      // Two devices may have each created the task: keep one (prefer a started one), tombstone the rest.
+      if (live.length > 1) {
+        const sid = t => (t._sync && t._sync.syncId) || '';
+        live.sort((a, b) => (todoTaskIsStarted(b) - todoTaskIsStarted(a)) || (sid(a) < sid(b) ? -1 : 1));
+        live.slice(1).forEach(t => { if (!todoTaskIsStarted(t)) { removeUnstartedLinkedTask(t); tasksChanged = true; } });
+        live = [live[0]];
+      }
+      const task = live[0];
+      if (task) {
+        if (todoTaskIsStarted(task)) { removeTodoByUid(item.uid); changed = true; return; }
+        const d = taskDateStr(task);
+        if (item.plannedDate !== d || !item.plannedLinked) {
+          item.plannedDate = d; item.plannedLinked = true; item.updatedAt = Date.now();
+          recordSyncChange('todoItems', item.uid, 'update'); changed = true;
+        }
+        return;
+      }
+      if (linked.length) { // only deleted copies of the task remain
+        if (linked.some(todoTaskIsStarted)) { removeTodoByUid(item.uid); changed = true; }
+        else if (item.plannedDate || item.plannedLinked) {
+          item.plannedDate = null; item.plannedLinked = false; item.updatedAt = Date.now();
+          recordSyncChange('todoItems', item.uid, 'update'); changed = true;
+        }
+        return;
+      }
+      // Older To Do that was given a date before linking existed: create its task now (once).
+      if (item.plannedDate && !item.plannedLinked && item.plannedDate >= today) {
+        createPlannedTaskForTodo(item, item.plannedDate);
+        item.plannedLinked = true; item.updatedAt = Date.now();
+        recordSyncChange('todoItems', item.uid, 'update'); changed = true; tasksChanged = true;
+      }
+    });
+  } finally { _reconcilingTodoLinks = false; }
+  if (changed || tasksChanged) {
+    saveState();
+    if (changed) setTimeout(refreshTodoUi, 0);
+    if (tasksChanged) setTimeout(() => { try { renderList(); } catch (e) {} }, 0);
+  }
+  return changed || tasksChanged;
+}
+
 function deleteTodoItem(id) {
   const _gone = todoItems.find(t => t.id === id);
+  // Deleting the To Do also removes its planned (unstarted) task from the day.
+  let removedTask = false;
+  if (_gone && _gone.uid) {
+    const lt = findLiveLinkedTask(_gone.uid);
+    if (lt && !todoTaskIsStarted(lt)) { removeUnstartedLinkedTask(lt); removedTask = true; }
+  }
   todoItems = todoItems.filter(t => t.id !== id);
   if (_gone && _gone.uid) todoTombstones[_gone.uid] = Date.now();
   saveState();
@@ -18609,6 +20143,7 @@ function deleteTodoItem(id) {
   renderTodoList();
   updatePendingMenuCounts();
   updatePendingTasksBadge();
+  if (removedTask) { renderList(); if (typeof updateEmptyState === 'function') updateEmptyState(); }
 }
 
 function openTodoPlanModal(id) {
@@ -18620,6 +20155,7 @@ function openTodoPlanModal(id) {
   nameEl.textContent = name;
   nameEl.title = name;
   const dateInp = document.getElementById('todo-plan-date');
+  dateInp.min = todayStr();
   dateInp.value = item.plannedDate || '';
   dateInp.classList.remove('invalid');
   document.getElementById('todo-plan-modal').classList.remove('hidden');
@@ -18628,31 +20164,384 @@ function closeTodoPlanModal() {
   document.getElementById('todo-plan-modal').classList.add('hidden');
   pendingTodoPlanId = null;
 }
-// Sets the target date only — the item is NOT converted into a task/log entry
-// and does not leave the To Do list (per the user's own confirmed intent).
+// Plans the To Do onto a day: a real task is created on that date (or the existing linked
+// task is moved there). The To Do stays listed until that task is started.
 function confirmTodoPlanDate() {
   const id = pendingTodoPlanId;
   if (id == null) return;
   const item = todoItems.find(t => t.id === id);
   if (!item) { closeTodoPlanModal(); return; }
-  const chosen = document.getElementById('todo-plan-date').value;
-  item.plannedDate = chosen || null;
+  const dateInp = document.getElementById('todo-plan-date');
+  const chosen = dateInp.value;
+  if (!chosen) { clearTodoPlanDate(); return; }
+  if (chosen < todayStr()) {
+    dateInp.classList.add('invalid');
+    alert('A To Do can only be planned for today or a future date.');
+    return;
+  }
+  let task = findLiveLinkedTask(item.uid);
+  if (task && !todoTaskIsStarted(task)) {
+    if (taskDateStr(task) !== chosen) { task.createdAt = plannedTimestampFor(chosen); touchSyncMetadata(task); }
+  } else {
+    task = createPlannedTaskForTodo(item, chosen);
+  }
+  item.plannedDate = chosen;
+  item.plannedLinked = true;
   item.updatedAt = Date.now();
   saveState();
   if (item.uid) recordSyncChange('todoItems', item.uid, 'update');
   closeTodoPlanModal();
   renderTodoList();
+  renderList();
+  const notice = document.getElementById('wake-notice');
+  if (notice) {
+    notice.textContent = '📋 Added to ' + chosen + ' — "' + (item.heading || 'Untitled') + '"';
+    notice.style.background = 'var(--blue-mid)';
+    notice.classList.add('show');
+    setTimeout(() => { notice.classList.remove('show'); notice.style.background = ''; notice.textContent = '⏱ Timers refreshed after wake'; }, 4000);
+  }
 }
+// Clears the plan: the linked (unstarted) task is removed from its day and the To Do is unplanned.
 function clearTodoPlanDate() {
   const id = pendingTodoPlanId;
   if (id == null) return;
   const item = todoItems.find(t => t.id === id);
-  if (item) { item.plannedDate = null; item.updatedAt = Date.now(); }
+  if (item) {
+    const lt = findLiveLinkedTask(item.uid);
+    if (lt && !todoTaskIsStarted(lt)) removeUnstartedLinkedTask(lt);
+    item.plannedDate = null;
+    item.plannedLinked = false;
+    item.updatedAt = Date.now();
+  }
   saveState();
   if (item && item.uid) recordSyncChange('todoItems', item.uid, 'update');
   closeTodoPlanModal();
   renderTodoList();
+  renderList();
+  if (typeof updateEmptyState === 'function') updateEmptyState();
 }
+
+// ── Reset (Settings → Data → Reset) ───────────────────────────────────────────
+// "data"  : tasks, effort logs, To Dos, recurring plans, counters, break + weekend records,
+//           and local sync bookkeeping. Keeps masters/columns/settings/theme/name/sign-in.
+// "all"   : every ttl_* key on this device (also configuration, theme, name, sync sign-in).
+// Only this device's browser storage is touched — the Google Drive copy is never deleted.
+const RESET_DATA_KEYS = ['ttl_tasks','ttl_log','ttl_todo_items','ttl_todo_counter','ttl_todo_tombstones',
+  'ttl_counter','ttl_import_counter','ttl_recurring_plans','ttl_recurring_counter','ttl_break',
+  'ttl_sync_queues','ttl_sync_domain_state','ttl_sync_base','ttl_sync_state_meta','ttl_conflict_history'];
+const RESET_PHRASE = 'reset ttl';
+function openResetModal() {
+  const inp = document.getElementById('reset-confirm-input');
+  if (inp) inp.value = '';
+  const first = document.querySelector('input[name="reset-mode"][value="data"]');
+  if (first) first.checked = true;
+  const note = document.getElementById('reset-sync-note');
+  if (note) {
+    let signedIn = false;
+    try { signedIn = typeof GoogleAuthManager !== 'undefined' && GoogleAuthManager.isAuthenticated(); } catch (e) {}
+    note.style.display = signedIn ? 'block' : 'none';
+    const cloudRadio = document.getElementById('reset-mode-cloud');
+    const cloudHint = document.getElementById('reset-cloud-hint');
+    const cloudLabel = document.getElementById('reset-cloud-option');
+    if (cloudRadio) cloudRadio.disabled = !signedIn;
+    if (cloudLabel) cloudLabel.style.opacity = signedIn ? '1' : '0.5';
+    if (cloudHint) cloudHint.textContent = signedIn ? '' : '(Sign in to cloud sync to use this option.)';
+  }
+  const st = document.getElementById('reset-status');
+  if (st) { st.style.display = 'none'; st.textContent = ''; }
+  updateResetConfirmState();
+  document.getElementById('reset-modal').classList.remove('hidden');
+  setTimeout(() => { if (inp) inp.focus(); }, 30);
+}
+function closeResetModal() {
+  document.getElementById('reset-modal').classList.add('hidden');
+}
+function updateResetConfirmState() {
+  const inp = document.getElementById('reset-confirm-input');
+  const btn = document.getElementById('reset-confirm-btn');
+  if (btn && inp) btn.disabled = inp.value.trim().toLowerCase() !== RESET_PHRASE;
+}
+function _wipeTtlStorage(mode) {
+  const doomed = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (!k || k.indexOf('ttl_') !== 0) continue;
+    if (mode === 'all' || RESET_DATA_KEYS.indexOf(k) !== -1 || k.indexOf('ttl_weekend_') === 0) doomed.push(k);
+  }
+  doomed.forEach(k => { try { localStorage.removeItem(k); } catch (e) {} });
+}
+function _finishReset(mode) {
+  window._ttlResetting = true; // saveState() becomes a no-op from here on
+  try { Object.keys(intervals).forEach(k => { clearInterval(intervals[k]); }); } catch (e) {}
+  _wipeTtlStorage(mode);
+  // Unload handlers (timer freeze / sync shutdown) may try to persist once more — wipe again after them.
+  const wipeAgain = () => _wipeTtlStorage(mode);
+  window.addEventListener('beforeunload', wipeAgain);
+  window.addEventListener('pagehide', wipeAgain);
+  location.reload();
+}
+function performReset() {
+  const inp = document.getElementById('reset-confirm-input');
+  if (!inp || inp.value.trim().toLowerCase() !== RESET_PHRASE) return;
+  const checked = document.querySelector('input[name="reset-mode"]:checked');
+  const choice = checked ? checked.value : 'data';
+  if (choice !== 'cloud') { _finishReset(choice === 'all' ? 'all' : 'data'); return; }
+
+  // Cloud reset: delete the Drive copy FIRST. Local data is only wiped once that succeeded,
+  // so a failure (offline, expired sign-in…) loses nothing.
+  const btn = document.getElementById('reset-confirm-btn');
+  const st = document.getElementById('reset-status');
+  const say = (msg, bad) => { if (st) { st.style.display = 'block'; st.style.color = bad ? 'var(--red-dark)' : 'var(--text-secondary)'; st.textContent = msg; } };
+  if (typeof GoogleDriveWorkspace === 'undefined' || !GoogleDriveWorkspace.deleteCloudStateFile) { say('Cloud reset is unavailable in this build.', true); return; }
+  if (btn) btn.disabled = true;
+  say('Deleting the cloud copy…');
+  // Freeze background sync so nothing re-uploads local data while the cloud copy is being removed.
+  window._ttlResetting = true;
+  const origPush = GoogleDriveWorkspace.pushStateToStateFile;
+  GoogleDriveWorkspace.pushStateToStateFile = () => Promise.resolve({ ok: false, reason: 'reset-in-progress' });
+  try { if (typeof BackgroundScheduler !== 'undefined' && BackgroundScheduler.cancelSynchronization) BackgroundScheduler.cancelSynchronization(); } catch (e) {}
+  GoogleDriveWorkspace.deleteCloudStateFile().then(res => {
+    if (res && res.ok) { say('Cloud copy deleted. Resetting this device…'); setTimeout(() => _finishReset('all'), 300); return; }
+    // Failed: restore normal behaviour and keep all local data.
+    GoogleDriveWorkspace.pushStateToStateFile = origPush;
+    window._ttlResetting = false;
+    say('Could not delete the cloud copy: ' + ((res && res.error) || 'unknown error') + '. Nothing was changed.', true);
+    updateResetConfirmState();
+  });
+}
+// ── End Reset ─────────────────────────────────────────────────────────────────
+
+// ── Auto Backup to a chosen folder (desktop browsers only) ──────────────────
+// Additive module. Writes the same JSON that exportBackup() produces (via
+// buildBackupObject) into a folder the user picks (File System Access API:
+// desktop Chrome/Edge). Schedule: daily / weekly / monthly at a set time. If the
+// app was not open at the scheduled time, the missed backup runs on the next load.
+// Never touches sync, tasks, or logs. The folder handle lives in its own
+// IndexedDB database so the app's existing storage is untouched.
+const AUTOBACKUP_KEY = 'ttl_autobackup_v1';
+const AUTOBACKUP_DB  = 'ttl_autobackup_db';
+let _abHandle = null;
+let _abRunning = false;
+
+// Desktop-only gate. Capability-based: phones/tablets are excluded by user agent (and they lack
+// the folder picker anyway). Touch-screen laptops/desktops are NOT excluded - the previous
+// (pointer: coarse) test wrongly hid the feature on them.
+function autoBackupIsMobile() {
+  try {
+    const ua = navigator.userAgent || '';
+    if (/Android|iPhone|iPad|iPod|Mobile|Tablet/i.test(ua)) return true;
+    if (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1) return true; // iPadOS reports as Mac
+  } catch (e) {}
+  return false;
+}
+function autoBackupSupported() {
+  try { return !autoBackupIsMobile() && typeof window.showDirectoryPicker === 'function'; } catch (e) { return false; }
+}
+
+function abLoadCfg() {
+  const d = { enabled: false, freq: 'daily', time: '18:00', weekday: 5, monthDay: 1, scope: 'full', lastRun: 0, folderName: '', lastStatus: '' };
+  try { const p = JSON.parse(localStorage.getItem(AUTOBACKUP_KEY) || 'null'); if (p && typeof p === 'object') return Object.assign(d, p); } catch (e) {}
+  return d;
+}
+function abSaveCfg(c) { try { localStorage.setItem(AUTOBACKUP_KEY, JSON.stringify(c)); } catch (e) {} }
+
+function abDb() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open(AUTOBACKUP_DB, 1);
+    r.onupgradeneeded = () => { r.result.createObjectStore('h'); };
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+function abIdbGet() { return abDb().then(db => new Promise((res, rej) => { const q = db.transaction('h').objectStore('h').get('folder'); q.onsuccess = () => res(q.result || null); q.onerror = () => rej(q.error); })); }
+function abIdbPut(h) { return abDb().then(db => new Promise((res, rej) => { const t = db.transaction('h', 'readwrite'); t.objectStore('h').put(h, 'folder'); t.oncomplete = () => res(); t.onerror = () => rej(t.error); })); }
+
+// Most recent scheduled moment at or before `now` (a Date).
+function abLastScheduled(cfg, now) {
+  const parts = String(cfg.time || '18:00').split(':');
+  const hh = parseInt(parts[0], 10) || 0, mm = parseInt(parts[1], 10) || 0;
+  if (cfg.freq === 'monthly') {
+    const at = (y, m) => { const dim = new Date(y, m + 1, 0).getDate(); return new Date(y, m, Math.min(Math.max(parseInt(cfg.monthDay, 10) || 1, 1), dim), hh, mm, 0, 0); };
+    let c = at(now.getFullYear(), now.getMonth());
+    if (c > now) c = at(now.getFullYear(), now.getMonth() - 1);
+    return c;
+  }
+  const c = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hh, mm, 0, 0);
+  if (cfg.freq === 'weekly') {
+    const wd = parseInt(cfg.weekday, 10); const w = isNaN(wd) ? 5 : wd;
+    c.setDate(c.getDate() - ((c.getDay() - w + 7) % 7));
+    if (c > now) c.setDate(c.getDate() - 7);
+    return c;
+  }
+  if (c > now) c.setDate(c.getDate() - 1);
+  return c;
+}
+function abIsDue(cfg, now) {
+  return !!cfg.enabled && (cfg.lastRun || 0) < abLastScheduled(cfg, now || new Date()).getTime();
+}
+
+function abPad(n) { return String(n).padStart(2, '0'); }
+
+async function abEnsurePermission(interactive) {
+  if (!_abHandle) return false;
+  const opts = { mode: 'readwrite' };
+  if ((await _abHandle.queryPermission(opts)) === 'granted') return true;
+  if (!interactive) return false;
+  return (await _abHandle.requestPermission(opts)) === 'granted';
+}
+
+async function abWriteBackup(cfg) {
+  const json = JSON.stringify(buildBackupObject(cfg.scope), null, 2);
+  const d = new Date();
+  const stamp = d.getFullYear() + '-' + abPad(d.getMonth() + 1) + '-' + abPad(d.getDate()) + '_' + abPad(d.getHours()) + abPad(d.getMinutes());
+  const name = (cfg.scope === 'config' ? 'TTL_Config_AutoBackup_' : 'TTL_AutoBackup_') + stamp + '.json';
+  const fh = await _abHandle.getFileHandle(name, { create: true });
+  const w = await fh.createWritable();
+  await w.write(json); await w.close();
+  const f = await fh.getFile();
+  if (f.size !== new Blob([json]).size) throw new Error('written file size does not match (' + f.size + ' bytes)');
+  return name;
+}
+
+function abFmtWhen(ts) { if (!ts) return 'never'; const d = new Date(ts); return d.toLocaleDateString('en-GB') + ' ' + abPad(d.getHours()) + ':' + abPad(d.getMinutes()); }
+
+function abScheduleText(cfg) {
+  const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  if (cfg.freq === 'weekly') return 'Weekly, ' + days[parseInt(cfg.weekday, 10) || 0] + ' at ' + cfg.time;
+  if (cfg.freq === 'monthly') return 'Monthly, day ' + cfg.monthDay + ' at ' + cfg.time;
+  return 'Daily at ' + cfg.time;
+}
+
+function abRefreshStatusUI() {
+  const el = document.getElementById('ab-status');
+  if (!el) return;
+  const c = abLoadCfg();
+  el.textContent = (c.folderName ? 'Folder: ' + c.folderName : 'No folder selected') + '  |  Last backup: ' + abFmtWhen(c.lastRun) + (c.lastStatus ? '  |  ' + c.lastStatus : '');
+}
+
+function abShowBanner(show) {
+  let b = document.getElementById('ab-banner');
+  if (!show) { if (b) b.remove(); return; }
+  if (b) return;
+  b = document.createElement('div');
+  b.id = 'ab-banner';
+  b.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:100000;background:var(--bg-primary,#fff);color:var(--text-primary,#111);border:1px solid var(--border-md,#ccc);border-radius:8px;padding:10px 14px;box-shadow:0 4px 16px rgba(0,0,0,.2);font-size:12px;display:flex;gap:10px;align-items:center;max-width:380px';
+  b.innerHTML = '<span>Scheduled backup is due. The browser needs your OK to write to the folder.</span>' +
+    '<button class="btn btn-primary" id="ab-banner-go">Back up now</button>' +
+    '<button class="btn" id="ab-banner-x" title="Dismiss">&times;</button>';
+  document.body.appendChild(b);
+  document.getElementById('ab-banner-go').onclick = () => runAutoBackup(true);
+  document.getElementById('ab-banner-x').onclick = () => abShowBanner(false);
+}
+
+async function runAutoBackup(interactive) {
+  if (_abRunning) return false;
+  _abRunning = true;
+  const cfg = abLoadCfg();
+  try {
+    if (!_abHandle) _abHandle = await abIdbGet();
+    if (!_abHandle) { cfg.lastStatus = 'No folder selected'; abSaveCfg(cfg); return false; }
+    if (!(await abEnsurePermission(interactive))) { if (!interactive) abShowBanner(true); return false; }
+    const name = await abWriteBackup(cfg);
+    cfg.lastRun = Date.now(); cfg.lastStatus = 'Saved ' + name;
+    abSaveCfg(cfg); abShowBanner(false);
+    return true;
+  } catch (e) {
+    cfg.lastStatus = 'Failed: ' + ((e && e.message) || e);
+    abSaveCfg(cfg);
+    return false;
+  } finally {
+    _abRunning = false;
+    abRefreshStatusUI();
+  }
+}
+
+function abCheckDue() {
+  if (!autoBackupSupported() || _abRunning) return;
+  if (abIsDue(abLoadCfg(), new Date())) runAutoBackup(false);
+}
+
+function abChooseFolder() {
+  window.showDirectoryPicker({ id: 'ttl-backup', mode: 'readwrite' }).then(async h => {
+    _abHandle = h;
+    await abIdbPut(h);
+    const c = abLoadCfg(); c.folderName = h.name; abSaveCfg(c);
+    abRefreshStatusUI();
+    if (c.enabled) runAutoBackup(true);
+  }).catch(e => {
+    if (e && e.name === 'AbortError') return;
+    const c = abLoadCfg(); c.lastStatus = 'Folder not usable: ' + ((e && e.message) || e) + ' (pick a sub-folder, not Documents/Desktop/Downloads itself)'; abSaveCfg(c); abRefreshStatusUI();
+  });
+}
+
+function abOnChange() {
+  const g = id => document.getElementById(id);
+  const c = abLoadCfg();
+  const wasEnabled = c.enabled;
+  c.freq = g('ab-freq').value; c.time = g('ab-time').value || '18:00';
+  c.weekday = parseInt(g('ab-weekday').value, 10); c.monthDay = Math.min(28, Math.max(1, parseInt(g('ab-monthday').value, 10) || 1));
+  c.scope = g('ab-scope').value === 'config' ? 'config' : 'full';
+  c.enabled = g('ab-enabled').checked;
+  if (c.enabled && !c.folderName) { c.enabled = false; g('ab-enabled').checked = false; c.lastStatus = 'Choose a folder first'; }
+  abSaveCfg(c);
+  g('ab-weekday-wrap').style.display = c.freq === 'weekly' ? '' : 'none';
+  g('ab-monthday-wrap').style.display = c.freq === 'monthly' ? '' : 'none';
+  abRefreshStatusUI();
+  // Turning it on: take a first backup right away (a user gesture, so the browser can ask for folder access).
+  if (c.enabled && !wasEnabled) runAutoBackup(true);
+}
+
+function autoBackupCardHtml() {
+  if (autoBackupIsMobile()) return '';
+  if (!autoBackupSupported()) {
+    const why = (window.isSecureContext === false)
+      ? 'This page is not running over https or localhost, so the browser blocks folder access. Open the app from its https address.'
+      : 'This browser cannot save to a chosen folder. Use desktop Chrome or Edge.';
+    return `
+      <div style="border:1px solid var(--border-md);border-radius:var(--radius-md);padding:14px;margin-bottom:14px">
+        <div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:4px"><i class="ti ti-folder-down" style="vertical-align:-2px;margin-right:5px;color:var(--text-tertiary)"></i>Auto Backup to Folder <span style="font-size:11px;font-weight:400;color:var(--text-tertiary)">(unavailable)</span></div>
+        <div style="font-size:12px;color:var(--text-secondary)">${why} You can still use Download Backup JSON above.</div>
+      </div>`;
+  }
+  const c = abLoadCfg();
+  const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const sel = (v, cur) => v == cur ? ' selected' : '';
+  return `
+      <div style="border:1px solid var(--border-md);border-radius:var(--radius-md);padding:14px;margin-bottom:14px">
+        <div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:4px"><i class="ti ti-folder-down" style="vertical-align:-2px;margin-right:5px;color:var(--blue-mid)"></i>Auto Backup to Folder <span style="font-size:11px;font-weight:400;color:var(--text-tertiary)">(desktop only)</span></div>
+        <div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">Saves a timestamped backup JSON into a folder you choose. If the app was closed at the scheduled time, the backup runs the next time it opens. Needs Chrome or Edge; your browser may ask permission to write to the folder.</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+          <button class="btn" onclick="abChooseFolder()"><i class="ti ti-folder"></i> Choose Folder</button>
+          <label style="display:flex;gap:6px;align-items:center;font-size:12px;color:var(--text-secondary);cursor:pointer"><input type="checkbox" id="ab-enabled" ${c.enabled ? 'checked' : ''} onchange="abOnChange()"> Enable auto backup</label>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;font-size:12px;color:var(--text-secondary)">
+          <select class="complete-input" id="ab-freq" onchange="abOnChange()">
+            <option value="daily"${sel('daily', c.freq)}>Daily</option>
+            <option value="weekly"${sel('weekly', c.freq)}>Weekly</option>
+            <option value="monthly"${sel('monthly', c.freq)}>Monthly</option>
+          </select>
+          <span id="ab-weekday-wrap" style="${c.freq === 'weekly' ? '' : 'display:none'}">on <select class="complete-input" id="ab-weekday" onchange="abOnChange()">${days.map((d, i) => `<option value="${i}"${sel(i, c.weekday)}>${d}</option>`).join('')}</select></span>
+          <span id="ab-monthday-wrap" style="${c.freq === 'monthly' ? '' : 'display:none'}">on day <input class="complete-input" id="ab-monthday" type="number" min="1" max="28" value="${c.monthDay}" style="width:60px;text-align:center" onchange="abOnChange()"></span>
+          <span>at <input class="complete-input" id="ab-time" type="time" value="${c.time}" onchange="abOnChange()"></span>
+          <select class="complete-input" id="ab-scope" onchange="abOnChange()">
+            <option value="full"${sel('full', c.scope)}>Configuration and data</option>
+            <option value="config"${sel('config', c.scope)}>Configuration only</option>
+          </select>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <button class="btn" onclick="runAutoBackup(true)"><i class="ti ti-player-play"></i> Back up now</button>
+          <span id="ab-status" style="font-size:12px;color:var(--text-secondary)">${(c.folderName ? 'Folder: ' + c.folderName : 'No folder selected') + '  |  Last backup: ' + abFmtWhen(c.lastRun) + (c.lastStatus ? '  |  ' + c.lastStatus : '')}</span>
+        </div>
+      </div>`;
+}
+
+function initAutoBackup() {
+  if (!autoBackupSupported()) return;
+  abIdbGet().then(h => { _abHandle = h || null; setTimeout(abCheckDue, 3000); }).catch(() => {});
+  setInterval(abCheckDue, 60000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) abCheckDue(); });
+}
+// ── End Auto Backup ─────────────────────────────────────────────────────────
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 loadState();
@@ -18666,12 +20555,14 @@ if (typeof Notification !== 'undefined' && Notification.permission === 'default'
 checkUserNamePrompt();
 initDatePicker();
 materializeRecurringTasksUpTo(todayStr());
+reconcileTodoLinks();
 renderList();
 restoreIntervals();
 updateLogPanel();
 updateTaskVisibility();
 updateSummaryButtonVisibility();
 initBreakTimer();
+initAutoBackup();
 if (!tasks.some(t => !isTaskDeleted(t))) addTask();
 
 // Scheduled recurring tasks (plan.startTime) are hidden until their exact
