@@ -493,11 +493,15 @@ html:not(.is-touch) .pending-card:hover .pending-history-panel { display: block;
 .actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 
 /* Task meta */
-.task-meta { display: flex; gap: 8px; margin-top: 9px; flex-wrap: wrap; align-items: flex-end; }
-.meta-field { display: flex; flex-direction: column; gap: 3px; }
+.task-meta {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px 12px; margin-top: 9px; align-items: end;
+}
+.meta-field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .meta-label {
   font-family: var(--font-mono); font-size: 10px; color: var(--text-tertiary);
   text-transform: uppercase; letter-spacing: 0.08em; font-weight: 500;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .meta-label .req { color: var(--red-mid); margin-left: 2px; }
 .meta-select, .meta-input {
@@ -505,15 +509,12 @@ html:not(.is-touch) .pending-card:hover .pending-history-panel { display: block;
   border-radius: var(--radius-md); background: var(--bg-secondary);
   color: var(--text-primary); font-size: 12px; font-family: var(--font-mono);
   outline: none; transition: border-color 0.15s;
-  width:100%;
+  width: 100%; min-width: 0; height: 32px;
 }
 .meta-select:focus, .meta-input:focus { border-color: var(--blue-mid); }
 .meta-select:disabled, .meta-input:disabled { opacity: 0.6; }
 .meta-select.invalid, .meta-input.invalid { border-color: var(--red-mid) !important; background: var(--red-bg); }
-.meta-field-project .meta-select { min-width: 130px; }
-.meta-field-nature  .meta-select { min-width: 130px; }
-.meta-field-module  .meta-input  { width: 160px; }
-.msdd { position: relative; display: inline-block; min-width: 140px;width:100%; }
+.msdd { position: relative; display: block; min-width: 0; width: 100%; }
 .msdd-trigger {
   width: 100%; text-align: left; cursor: pointer; white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis;
@@ -534,6 +535,15 @@ html:not(.is-touch) .pending-card:hover .pending-history-panel { display: block;
 .msdd-option:hover { background: var(--bg-secondary); }
 .msdd-option input[type="checkbox"] { cursor: pointer; }
 .msdd-empty { font-size: 12px; color: var(--text-tertiary); padding: 6px 8px; }
+.ssdd-search { width: 100%; box-sizing: border-box; margin: 0 0 4px; padding: 6px 8px; font-size: 12px;
+  border: 1px solid var(--border-md); border-radius: 6px; background: var(--bg-secondary);
+  color: var(--text-primary); outline: none; position: sticky; top: 0; }
+.ssdd-search:focus { border-color: var(--blue-mid); }
+.ssdd-option { display: block; padding: 6px 8px; font-size: 12px; color: var(--text-primary);
+  cursor: pointer; border-radius: 6px; white-space: nowrap; }
+.ssdd-option:hover, .ssdd-option.active { background: var(--bg-secondary); }
+.ssdd-option.selected { font-weight: 600; color: var(--blue-mid); }
+.ssdd-clear { color: var(--text-tertiary); }
 .meta-field-ticket  .meta-input  { 
   /* width: 100px;  */
 }
@@ -541,7 +551,7 @@ html:not(.is-touch) .pending-card:hover .pending-history-panel { display: block;
    "textarea") have no intrinsic content width like a select or text input does, so
    without an explicit flex-basis they'd shrink to min-content and look misaligned
    next to Project/Nature/Module/Ticket. Give them the full row instead. */
-.meta-field-wide { flex: 1 1 100%; min-width: 220px; }
+.meta-field-wide { grid-column: 1 / -1; min-width: 0; }
 .meta-field-wide .rte-wrap,
 .meta-field-wide .rte-editor { width: 100%; }
 
@@ -599,7 +609,7 @@ html:not(.is-touch) .pending-card:hover .pending-history-panel { display: block;
    show the full configured height, since there's no space pressure there. */
 /* .meta-field (two classes) beats the single-class .meta-field-wide rule above,
    regardless of source order, so collapsed always wins over the "full width" default. */
-.meta-field.tc-field-collapsed { flex: 0 0 257px; width: 257px; max-width: 257px; }
+.meta-field.tc-field-collapsed { grid-column: 1 / -1; width: auto; max-width: none; }
 .tc-field-collapsed .rte-editor { --rte-rows: 1 !important; overflow-y: hidden; }
 .tc-field-collapsed .rte-toolbar { display: none; }
 .tc-field-collapsed .rte-copy-btn { display: none; }
@@ -1530,21 +1540,13 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
   .status-badge { font-size: 10px; padding: 2px 6px; }
 
 
-  /* Stack meta fields vertically in 2-col grid */
-  .task-meta { gap: 6px; }
-  .meta-field-project,
-  .meta-field-nature { flex: 1 1 calc(50% - 3px); min-width: 120px; }
-  .meta-field-module  { flex: 1 1 100%; }
-  .meta-field-ticket  { flex: 1 1 calc(40% - 3px); }
-  .meta-field-wide    { flex: 1 1 100%; min-width: unset; }
-  .meta-field-module .meta-input { width: 100%; }
-  .meta-field-ticket .meta-input { width: 100%; }
+  /* Phones: two equal columns, every input the same width and height */
+  .task-meta { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 8px; }
 }
 
 @media (max-width: 380px) {
-  .meta-field-project,
-  .meta-field-nature { flex: 1 1 100%; }
-  .meta-field-ticket { flex: 1 1 100%; }
+  /* Very small phones: single column */
+  .task-meta { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* ── Log panel header ── */
@@ -1607,7 +1609,7 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
   .header { margin-bottom: 0.75rem; }
   .header-actions { gap: 5px; row-gap: 6px; }
   .task-card { padding: 8px 10px; margin-bottom: 6px; }
-  .task-meta { flex-wrap: wrap; gap: 5px; }
+  .task-meta { gap: 6px 8px; }
   .work-widget, .break-widget { bottom: 8px; padding: 6px 10px; }
   .break-time, .work-time { font-size: 16px; }
 }
@@ -1616,7 +1618,6 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
 @media (min-width: 769px) and (max-width: 1024px) {
   body { padding: 1.5rem 1rem 6rem; }
   .task-meta { gap: 8px; }
-  .meta-field-wide { min-width: 160px; }
 }
 
 /* ── Phase 25A: very small phones (≤360px) ──
@@ -2106,7 +2107,7 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
 <div class="modal-overlay hidden" id="add-todo-modal">
   <div class="modal" style="max-width:460px">
     <div class="modal-header">
-      <div class="modal-title"><i class="ti ti-plus" style="vertical-align:-2px;margin-right:6px"></i>Add To Do</div>
+      <div class="modal-title"><i class="ti ti-plus" id="todo-form-icon" style="vertical-align:-2px;margin-right:6px"></i><span id="todo-form-title">Add To Do</span></div>
       <button class="btn-icon" onclick="closeAddTodoForm()"><i class="ti ti-x"></i></button>
     </div>
     <div class="modal-body">
@@ -2629,6 +2630,7 @@ let taskIdCounter = 0;
 // deletion tombstones) — see applyRemoteTodoItems().
 let todoItems = [];
 let todoIdCounter = 0;
+let pendingTodoEditId = null; // id of the To Do being edited in the Add/Edit To Do form (null = adding)
 let pendingTodoPlanId = null; // id of the To Do item currently targeted by the Plan-a-Date popup
 let todoTombstones = {};      // uid -> deletedAt (ms). Synced so a To Do deleted on one device is not resurrected by another.
 let recurringPlans = []; // { id, heading, project, nature, module, ticket, customFields,
@@ -13604,6 +13606,25 @@ function buildDynamicFieldInput(col, idAttr, value, onChangeExpr, disabledAttr, 
       </div>
     </div>`;
   }
+  if (col.type === 'searchlist') {
+    const options = getSearchListOptions(col, value);
+    const changeExpr = (onChangeExpr || '').replace(/this\.value/g, `document.getElementById('${idAttr}').value`);
+    const cur = String(value || '');
+    return `<div class="msdd" ${disabledAttr}>
+      <input type="hidden" id="${idAttr}" value="${esc(cur)}" />
+      <button type="button" id="${idAttr}-trigger" class="meta-select msdd-trigger" ${disabledAttr} onclick="ssddToggle('${idAttr}')">${cur ? esc(cur) : '— select —'}</button>
+      <div class="msdd-panel hidden" id="${idAttr}-panel">
+        <input type="text" class="ssdd-search" id="${idAttr}-search" placeholder="Search…" autocomplete="off"
+          oninput="ssddFilter('${idAttr}')" onkeydown="ssddKey(event,'${idAttr}')" />
+        <div id="${idAttr}-opts">
+          <div class="ssdd-option ssdd-clear" data-clear="1" data-val="" onclick="ssddPick('${idAttr}', ''); ${changeExpr}">— clear —</div>
+          ${options.map(o => `<div class="ssdd-option${o === cur ? ' selected' : ''}" data-val="${esc(o)}"
+            onclick="ssddPick('${idAttr}', this.dataset.val); ${changeExpr}">${esc(o)}</div>`).join('')}
+          <div class="msdd-empty" id="${idAttr}-none" style="display:none">No matches</div>
+        </div>
+      </div>
+    </div>`;
+  }
   if (col.type === 'list') {
     const options = (masters.customLists && masters.customLists[col.listSource]) || [];
     return `<select id="${idAttr}" class="meta-select" ${disabledAttr} onchange="${onChangeExpr}">
@@ -13848,7 +13869,7 @@ function renderTaskCardFields(task, id, dis) {
              onclick="toggleTaskCardFieldCollapse(${id},'${c.key}')"
              title="${isExpanded ? 'Collapse' : 'Expand'} ${esc(c.label)}"><i class="ti ti-chevron-down"></i></button>`
         : '';
-      const required = isColumnRequired(c) ? ' <span class="req">*</span>' : '';
+      const required = ''; // only Task name is mandatory when adding; other fields are enforced at completion
       const placeholder = TASK_CARD_PLACEHOLDERS[c.key] || '';
       return `<div class="meta-field meta-field-${cssKey}${wideClass}${collapsedClass}">
         <span class="meta-label">${esc(c.label)}${required}${collapseToggle}</span>
@@ -13864,6 +13885,81 @@ function toggleTaskCardFieldCollapse(id, key) {
   if (expandedTaskCardFields.has(k)) expandedTaskCardFields.delete(k);
   else expandedTaskCardFields.add(k);
   renderRow(id);
+}
+
+// ── Searchable select (column type 'searchlist') ────────────────────────────────
+// Options come from the column's linked master list when one is chosen; otherwise from the
+// unique non-empty values already present for this column in the saved log entries and
+// tasks. The current value is always kept in the options so it never disappears.
+function getSearchListOptions(col, currentValue) {
+  let opts;
+  const linked = col.listSource && masters.customLists && masters.customLists[col.listSource];
+  if (linked) {
+    opts = linked.slice();
+  } else {
+    const seen = new Set();
+    const add = v => { v = String(v == null ? '' : v).trim(); if (v) seen.add(v); };
+    (logEntries || []).forEach(e => { try { add(getEntryValueForColumn(e, null, col.key)); } catch (_) {} });
+    (tasks || []).forEach(t => {
+      if (t.customFields && t.customFields[col.key] != null) add(t.customFields[col.key]);
+      else if (t[col.key] != null && typeof t[col.key] === 'string') add(t[col.key]);
+    });
+    opts = Array.from(seen).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true }));
+  }
+  const cur = String(currentValue || '').trim();
+  if (cur && !opts.includes(cur)) opts.unshift(cur);
+  return opts;
+}
+function ssddToggle(idAttr) {
+  msddToggle(idAttr);
+  const panel = document.getElementById(idAttr + '-panel');
+  if (!panel || panel.classList.contains('hidden')) return;
+  const search = document.getElementById(idAttr + '-search');
+  if (search) { search.value = ''; ssddFilter(idAttr); search.focus(); }
+}
+function ssddFilter(idAttr) {
+  const q = (document.getElementById(idAttr + '-search').value || '').trim().toLowerCase();
+  const box = document.getElementById(idAttr + '-opts');
+  let shown = 0, first = null;
+  box.querySelectorAll('.ssdd-option').forEach(el => {
+    el.classList.remove('active');
+    if (el.dataset.clear) { el.style.display = q ? 'none' : ''; return; }
+    const ok = !q || el.dataset.val.toLowerCase().includes(q);
+    el.style.display = ok ? '' : 'none';
+    if (ok) { shown++; if (!first) first = el; }
+  });
+  if (q && first) first.classList.add('active');
+  const none = document.getElementById(idAttr + '-none');
+  if (none) none.style.display = shown ? 'none' : '';
+}
+function ssddKey(ev, idAttr) {
+  const box = document.getElementById(idAttr + '-opts');
+  const vis = Array.from(box.querySelectorAll('.ssdd-option')).filter(el => el.style.display !== 'none');
+  let i = vis.findIndex(el => el.classList.contains('active'));
+  if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+    ev.preventDefault();
+    if (!vis.length) return;
+    if (i >= 0) vis[i].classList.remove('active');
+    i = ev.key === 'ArrowDown' ? (i + 1) % vis.length : (i <= 0 ? vis.length - 1 : i - 1);
+    vis[i].classList.add('active');
+    vis[i].scrollIntoView({ block: 'nearest' });
+  } else if (ev.key === 'Enter') {
+    ev.preventDefault();
+    if (i >= 0) vis[i].click();
+  } else if (ev.key === 'Escape') {
+    document.getElementById(idAttr + '-panel').classList.add('hidden');
+  }
+}
+function ssddPick(idAttr, val) {
+  const hidden = document.getElementById(idAttr);
+  const trigger = document.getElementById(idAttr + '-trigger');
+  const panel = document.getElementById(idAttr + '-panel');
+  if (hidden) hidden.value = val;
+  if (trigger) trigger.textContent = val || '— select —';
+  if (panel) {
+    panel.classList.add('hidden');
+    panel.querySelectorAll('.ssdd-option').forEach(el => el.classList.toggle('selected', !el.dataset.clear && el.dataset.val === val));
+  }
 }
 
 // Toggle a multi-select checkbox dropdown panel open/closed, closing any other open ones.
@@ -14002,7 +14098,7 @@ function renderRow(id) {
       <div class="task-drag-handle" draggable="true" ondragstart="taskDragStart(event, ${id})" ondragend="taskDragEnd(event)" title="Drag to reorder">
         <i class="ti ti-grip-vertical"></i>
       </div>
-      <input id="inp-${id}" class="task-input" type="text" placeholder="Task / feature name…"
+      <input id="inp-${id}" class="task-input" type="text" placeholder="Task / feature name (required)…"
         value="${esc(task.heading)}" ${dis}
         oninput="updateTaskField(${id},'heading',this.value)"
         onkeydown="if(event.key==='Enter' && !${isFuture}) startTask(${id})" />
@@ -14018,7 +14114,7 @@ function renderRow(id) {
       ${renderTaskCardFields(task, id, dis)}
     </div>
     <div class="validation-msg" id="val-msg-${id}">
-      <i class="ti ti-alert-circle"></i> Fill in the mandatory (*) fields.
+      <i class="ti ti-alert-circle"></i> Enter a task name.
     </div>
   `;
   // Phase 19F: restore focus/selection captured just above, now that the
@@ -14471,7 +14567,7 @@ const LOG_TABLE_DEFAULT_WIDTHS = {
 function defaultLogColumnWidth(c) {
   if (LOG_TABLE_DEFAULT_WIDTHS[c.key]) return LOG_TABLE_DEFAULT_WIDTHS[c.key];
   if (c.type === 'date') return 110;
-  if (c.type === 'list' || c.type === 'multilist') return 130;
+  if (c.type === 'list' || c.type === 'multilist' || c.type === 'searchlist') return 130;
   if (c.type === 'textarea') return 220;
   return 150; // generic text fallback for custom columns
 }
@@ -14801,7 +14897,7 @@ function openDailySummary() {
 var _masterNavReturnFocusEl = null;
 function openMasters() {
   _masterNavReturnFocusEl = document.activeElement;
-  if (typeof applyMastersTabFilter === 'function') applyMastersTabFilter(false); // Masters button: hides User + Colors
+  if (typeof applyMastersTabFilter === 'function') applyMastersTabFilter(false); // Masters button: hides User, Colors, Wallpaper + Synchronization
   if (typeof PROFILE_ONLY_TABS !== 'undefined' && PROFILE_ONLY_TABS.includes(activeMastersTab)) switchTab('lists');
   document.getElementById('masters-modal').classList.remove('hidden');
   // Default to user tab so name is easy to set; switch to projects tab otherwise
@@ -15196,7 +15292,7 @@ function switchTab(tab) {
 // ── Columns tab: configure log table / task card columns ───────────────────
 function renderColumnsTabHTML() {
   const cols = getLogColumns();
-  const TYPE_LABELS = { text: 'Text', textarea: 'Text Area', list: 'Dropdown list', multilist: 'Dropdown list (multi-select)', date: 'Date' };
+  const TYPE_LABELS = { text: 'Text', textarea: 'Text Area', list: 'Dropdown list', multilist: 'Dropdown list (multi-select)', searchlist: 'Searchable select', date: 'Date' };
   const DATE_FORMAT_PRESETS = ['DD-MM-YYYY','YYYY-MM-DD','MM-DD-YYYY','DD/MM/YYYY','MM/DD/YYYY','DD MMM YYYY','ddd, DD MMM YYYY','MMMM D, YYYY'];
   // Date and Effort are always required and can't be deleted — the timer/duration math depends
   // on them — but they can still be renamed, reordered, and (for Date) have their format changed.
@@ -15235,8 +15331,8 @@ function renderColumnsTabHTML() {
             <input type="number" min="1" max="30" step="1" class="master-add-input" style="padding:4px 6px;font-size:12px;width:52px"
               value="${(c.rows > 0) ? c.rows : DEFAULT_TEXTAREA_ROWS}" onchange="changeColumnRows('${c.key}', this.value)" />
           </label>` : ''}
-          ${(c.type === 'list' || c.type === 'multilist') ? `<select class="meta-select" style="font-size:12px;padding:4px 6px;width:auto" onchange="changeColumnListSource('${c.key}', this.value)">
-            <option value="">— choose list —</option>
+          ${(c.type === 'list' || c.type === 'multilist' || c.type === 'searchlist') ? `<select class="meta-select" style="font-size:12px;padding:4px 6px;width:auto" onchange="changeColumnListSource('${c.key}', this.value)">
+            <option value="">${c.type === 'searchlist' ? '— none (use existing log values) —' : '— choose list —'}</option>
             ${listOptions.map(lk => `<option value="${lk}" ${c.listSource===lk?'selected':''}>${listLabel(lk)}</option>`).join('')}
             <option value="__new__">+ Create new list…</option>
           </select>
@@ -15291,6 +15387,7 @@ function renderColumnsTabHTML() {
         <option value="textarea">Text Area</option>
         <option value="list">Dropdown list</option>
         <option value="multilist">Dropdown list (multi-select)</option>
+        <option value="searchlist">Searchable select</option>
         <option value="date">Date</option>
       </select>
       <button class="btn btn-primary" onclick="addCustomColumn()"><i class="ti ti-plus"></i> Add Column</button>
@@ -15649,15 +15746,19 @@ function renderMastersContent() {
         <div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">Download a JSON backup. Use this to transfer the app to another device or to keep a safe copy.</div>
         <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px">
           <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;font-size:12px;color:var(--text-secondary)">
-            <input type="radio" name="backup-scope" value="full" checked style="margin-top:2px">
+            <input type="radio" name="backup-scope" value="full" checked style="margin-top:2px" onchange="toggleBackupProfileOpt()">
             <span><strong style="color:var(--text-primary)">Configuration and data</strong><br>Tasks, effort logs, To Do items, recurring plans, break and weekend records, plus all settings below.</span>
           </label>
           <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;font-size:12px;color:var(--text-secondary)">
-            <input type="radio" name="backup-scope" value="config" style="margin-top:2px">
-            <span><strong style="color:var(--text-primary)">Configuration only</strong><br>Masters (lists), columns, work hours, weekends, email template, theme, name and layout settings. No tasks or logs.</span>
+            <input type="radio" name="backup-scope" value="config" style="margin-top:2px" onchange="toggleBackupProfileOpt()">
+            <span><strong style="color:var(--text-primary)">Configuration only</strong><br>Masters (lists), columns, work hours, weekends, email template, theme and layout settings. No tasks or logs.</span>
+          </label>
+          <label id="backup-profile-opt" style="display:none;gap:8px;align-items:flex-start;cursor:pointer;font-size:12px;color:var(--text-secondary);margin-left:24px;padding:8px 10px;border:1px dashed var(--border-md);border-radius:var(--radius-md)">
+            <input type="checkbox" id="backup-include-profile" checked style="margin-top:2px">
+            <span><strong style="color:var(--text-primary)">Include profile settings (header photo menu)</strong><br>Profile photo, your name, font &amp; appearance, colours and wallpaper. Untick to leave them out; restoring that file then keeps whatever profile settings the device already has.</span>
           </label>
         </div>
-        <button class="btn btn-primary" onclick="exportBackup(getBackupScope('backup-scope'))"><i class="ti ti-file-download"></i> Download Backup JSON</button>
+        <button class="btn btn-primary" onclick="exportBackup(getBackupScope('backup-scope'), { includeProfile: getBackupIncludeProfile() })"><i class="ti ti-file-download"></i> Download Backup JSON</button>
       </div>
       ${autoBackupCardHtml()}
       <div style="border:1px solid var(--border-md);border-radius:var(--radius-md);padding:14px;margin-bottom:14px">
@@ -16867,7 +16968,7 @@ function applyHeaderButtonVisibility() {
 const GROUP_TASKNAME_KEY = 'taskname';
 function getGroupFieldOptions() {
   const cols = (masters.logColumns || []).filter(c => c && c.key &&
-    (c.type === 'list' || c.type === 'text') &&
+    (c.type === 'list' || c.type === 'text' || c.type === 'searchlist') &&
     !c.isDateColumn && !c.isEmployeeColumn && !c.isEffortColumn);
   return cols.concat([{ key: GROUP_TASKNAME_KEY, label: 'Task Name' }]);
 }
@@ -17423,14 +17524,15 @@ function wpBindStage() {
   }, { passive: false });
 }
 
-// Masters tabs visible when the popup is opened from the header photo.
-const PROFILE_ONLY_TABS = ['user', 'colors', 'wallpaper'];
+// Masters tabs visible when the popup is opened from the header photo (User, Colors,
+// Wallpaper and Synchronization). The Masters button shows every other tab.
+const PROFILE_ONLY_TABS = ['user', 'colors', 'wallpaper', 'sync'];
 function applyMastersTabFilter(profileOnly) {
   document.querySelectorAll('#master-nav .tab-btn').forEach(b => {
     const m = /switchTab\('([^']+)'\)/.exec(b.getAttribute('onclick') || '');
     const key = m ? m[1] : '';
     const isProfileTab = PROFILE_ONLY_TABS.includes(key);
-    // Photo click: only User + Colors + Wallpaper. Masters button: everything except those.
+    // Photo click: only User + Colors + Wallpaper + Synchronization. Masters button: everything except those.
     b.style.display = (profileOnly ? !isProfileTab : isProfileTab) ? 'none' : '';
   });
 }
@@ -17667,7 +17769,7 @@ function changeColumnType(key, newType) {
   col.type = newType;
   if (newType === 'date' && !col.dateFormat) col.dateFormat = 'YYYY-MM-DD';
   if (newType === 'textarea' && !(col.rows > 0)) col.rows = DEFAULT_TEXTAREA_ROWS;
-  if (newType !== 'list' && newType !== 'multilist') {
+  if (newType !== 'list' && newType !== 'multilist' && newType !== 'searchlist') {
     col.listSource = undefined;
     cleanupOrphanedList(oldListSource, key);
   }
@@ -17934,7 +18036,7 @@ function cancelListItemEdit() {
 // existing tasks, log entries, recurring plans and To Dos keep matching the dropdown.
 // Returns how many records changed.
 function renameListValueInRecords(listKey, oldVal, newVal) {
-  const cols = getLogColumns().filter(c => c.listSource === listKey && (c.type === 'list' || c.type === 'multilist'));
+  const cols = getLogColumns().filter(c => c.listSource === listKey && (c.type === 'list' || c.type === 'multilist' || c.type === 'searchlist'));
   if (!cols.length) return { tasks: 0, logs: 0, plans: 0, todos: 0 };
   const swap = (col, raw) => {
     if (raw === undefined || raw === null || raw === '') return raw;
@@ -18424,13 +18526,57 @@ function collectBackupSettings() {
 //   'config' : configuration only — masters/lists/columns/work hours/weekends/email template,
 //              user name, theme, log table layout, UI settings. No tasks, logs, To Dos, plans,
 //              counters, break or per-date weekend records (the same set Reset calls "data").
+// Settings that live behind the header photo (User / Colors / Wallpaper). They sit inside
+// `masters`, so a config backup can leave them out; a restore of such a file keeps the
+// device's own copies of these keys.
+const PROFILE_MASTER_KEYS = ['userPhotoUrl', 'colorPrefs', 'wallpaper', 'fontPrefs'];
+function toggleBackupProfileOpt() {
+  const box = document.getElementById('backup-profile-opt');
+  if (box) box.style.display = getBackupScope('backup-scope') === 'config' ? 'flex' : 'none';
+}
+function getBackupIncludeProfile() {
+  const el = document.getElementById('backup-include-profile');
+  return !el || el.checked;
+}
+// Device-local images that are not part of `masters`: the uploaded header photo and an
+// uploaded wallpaper. Embedded only when profile settings are included.
+function collectProfileExtras() {
+  const o = {};
+  try { const ph = localStorage.getItem(USER_PHOTO_KEY); if (ph && /^data:image\//.test(ph)) o.userPhoto = ph; } catch (e) {}
+  try {
+    if (masters && masters.wallpaper && masters.wallpaper.customType === 'upload') {
+      const w = localStorage.getItem(WP_UPLOAD_KEY);
+      if (w && /^data:image\//.test(w)) o.wallpaperUpload = w;
+    }
+  } catch (e) {}
+  return o;
+}
+function applyBackupProfile(b, prevMasters) {
+  if (b.profileIncluded === false) {
+    PROFILE_MASTER_KEYS.forEach(k => {
+      if (prevMasters && prevMasters[k] !== undefined) masters[k] = prevMasters[k]; else delete masters[k];
+    });
+    return;
+  }
+  try { if (typeof b.userPhoto === 'string' && /^data:image\//.test(b.userPhoto)) localStorage.setItem(USER_PHOTO_KEY, b.userPhoto); } catch (e) {}
+  try { if (typeof b.wallpaperUpload === 'string' && /^data:image\//.test(b.wallpaperUpload)) localStorage.setItem(WP_UPLOAD_KEY, b.wallpaperUpload); } catch (e) {}
+}
+
 function getBackupScope(radioName) {
   const el = document.querySelector('input[name="' + radioName + '"]:checked');
   return el && el.value === 'config' ? 'config' : 'full';
 }
 
-function buildBackupObject(scope) {
+function buildBackupObject(scope, opts) {
   scope = scope === 'config' ? 'config' : 'full';
+  // Only a configuration-only backup can leave profile settings out; default is to include.
+  const includeProfile = !(scope === 'config' && opts && opts.includeProfile === false);
+  let mastersOut = masters;
+  if (!includeProfile) {
+    mastersOut = Object.assign({}, masters);
+    PROFILE_MASTER_KEYS.forEach(k => { delete mastersOut[k]; });
+  }
+  const profileExtras = includeProfile ? collectProfileExtras() : {};
   // Per-date weekend "working day?" overrides live under dynamically-named keys
   // (ttl_weekend_YYYY-MM-DD) — collectWeekendOverrides() gathers them all.
   const weekendOverrides = collectWeekendOverrides();
@@ -18446,8 +18592,10 @@ function buildBackupObject(scope) {
     backupVersion: TTL_BACKUP_VERSION,
     backupScope: 'config',
     exportedAt: nowIso,
-    masters,
-    userName,
+    profileIncluded: includeProfile,
+    masters: mastersOut,
+    userName: includeProfile ? userName : undefined,
+    ...profileExtras,
     theme: getStoredTheme(),
     logTableColWidths,
     logTableColPinned,
@@ -18459,6 +18607,8 @@ function buildBackupObject(scope) {
     backupVersion: TTL_BACKUP_VERSION,
     backupScope: 'full',
     exportedAt: nowIso,
+    profileIncluded: true,
+    ...profileExtras,
     tasks,
     logEntries,
     masters,
@@ -18488,9 +18638,9 @@ function buildBackupObject(scope) {
   return backup;
 }
 
-function exportBackup(scope) {
+function exportBackup(scope, opts) {
   scope = scope === 'config' ? 'config' : 'full';
-  const backup = buildBackupObject(scope);
+  const backup = buildBackupObject(scope, opts);
   const json = JSON.stringify(backup, null, 2);
   const blob = new Blob([json], { type: 'application/json' });
   const url  = URL.createObjectURL(blob);
@@ -18562,7 +18712,7 @@ function importBackup(event, scope) {
       }
       const when = (b.exportedAt || b._exported) ? new Date(b.exportedAt || b._exported).toLocaleString() : 'unknown date';
       const msg = scope === 'config'
-        ? `This will replace your CONFIGURATION (masters, columns, settings, theme, name) with the backup from ${when}.\n\nYour tasks and logs are kept.\n\nAre you sure?`
+        ? `This will replace your CONFIGURATION (masters, columns, settings, theme${b.profileIncluded === false ? '' : ', profile photo, name, colours, wallpaper'}) with the backup from ${when}.\n\n${b.profileIncluded === false ? 'This file has no profile settings, so your current photo, name, colours and wallpaper are kept.\n\n' : ''}Your tasks and logs are kept.\n\nAre you sure?`
         : `This will replace ALL current data and configuration with the backup from ${when}.\n\nAre you sure?`;
       if (!confirm(msg)) {
         if (status) status.textContent = 'Cancelled.';
@@ -18572,6 +18722,7 @@ function importBackup(event, scope) {
         // Configuration only: touch nothing that holds tasks, logs, To Dos, plans, counters,
         // break or weekend-date records.
         masters = b.masters || masters;
+        applyBackupProfile(b, prev.masters);
         if (b.userName) userName = b.userName;
         if (b.logTableColWidths) { logTableColWidths = b.logTableColWidths; ltSaveObj(LOG_TABLE_WIDTHS_KEY, logTableColWidths); }
         if (b.logTableColPinned) { logTableColPinned = b.logTableColPinned; ltSaveObj(LOG_TABLE_PINNED_KEY, logTableColPinned); }
@@ -18583,6 +18734,7 @@ function importBackup(event, scope) {
         try { loadState(); saveState(); } catch (err) {}   // same load-time normalization as a full restore
         if (b.theme) setTheme(b.theme);
         renderAll();
+        try { renderHeaderAvatar(); applyWallpaper(); } catch (err) {}
         if (status) { status.style.color = 'var(--green-dark)'; status.textContent = '✓ Configuration restored. Tasks and logs were not changed.'; }
         setTimeout(() => switchTab('data'), 300);
         return;
@@ -18603,6 +18755,7 @@ function importBackup(event, scope) {
       // data still imports correctly with no user interaction and no data loss.
       tasks.forEach(ensureSyncMetadata);
       masters                 = b.masters                 || masters;
+      applyBackupProfile(b, prev.masters);
       taskIdCounter           = b.taskIdCounter           ?? taskIdCounter;
       importIdCounter         = b.importIdCounter         ?? importIdCounter;
       recurringPlans          = b.recurringPlans          || [];
@@ -18663,6 +18816,7 @@ function importBackup(event, scope) {
       if (todoRestored) { try { recordSyncChange('todoItems', null, 'update'); } catch (err) {} }
       // Re-render everything
       renderAll();
+      try { renderHeaderAvatar(); applyWallpaper(); } catch (err) {}
       if (todoRestored) {
         try { if (typeof renderTodoList === 'function') renderTodoList(); } catch (err) {}
         try { if (typeof updatePendingMenuCounts === 'function') updatePendingMenuCounts(); } catch (err) {}
@@ -21322,7 +21476,8 @@ function renderTodoList() {
       (chips ? '<div class="pending-card-meta">' + chips + '</div>' : '') +
       '<div class="pending-card-actions">' +
         '<div class="pending-card-icon-btn" title="Plan a date" onclick="openTodoPlanModal(' + item.id + ')"><i class="ti ti-calendar-plus"></i></div>' +
-        '<div class="pending-card-icon-btn" title="Delete" onclick="deleteTodoItem(' + item.id + ')"><i class="ti ti-trash"></i></div>' +
+        '<div class="pending-card-icon-btn" title="Edit" onclick="openEditTodoForm(' + item.id + ')"><i class="ti ti-pencil"></i></div>' +
+        '<div class="pending-card-icon-btn" title="Delete" onclick="confirmDeleteTodo(' + item.id + ')"><i class="ti ti-trash"></i></div>' +
       '</div>' +
     '</div>';
   }).join('');
@@ -21335,7 +21490,7 @@ function renderTodoList() {
 // the live card. Core fields (project/nature/module/ticket) keep their historical
 // 'todo-draft-<key>' ids; everything else keeps its 'todo-draft-custom-<key>' id — both read
 // back by saveTodoDraft().
-function renderTodoDraftFields() {
+function renderTodoDraftFields(item) {
   const container = document.getElementById('todo-draft-fields-container');
   if (!container) return;
   const cols = getTaskCardColumns().filter(c => !isSystemManagedColumn(c));
@@ -21344,16 +21499,24 @@ function renderTodoDraftFields() {
     const idAttr = isCore ? ('todo-draft-' + c.key) : ('todo-draft-custom-' + c.key);
     const cssKey = isCore ? c.key : 'custom';
     const wideClass = c.type === 'textarea' ? ' meta-field-wide' : '';
-    const required = isColumnRequired(c) ? ' <span class="req">*</span>' : '';
+    const required = ''; // only Task name is mandatory when adding
     const placeholder = TASK_CARD_PLACEHOLDERS[c.key] || '';
     return '<div class="meta-field meta-field-' + cssKey + wideClass + '">' +
       '<span class="meta-label">' + esc(c.label) + required + '</span>' +
-      buildDynamicFieldInput(c, idAttr, '', '', '', placeholder) +
+      buildDynamicFieldInput(c, idAttr, item ? (isCore ? (item[c.key] || '') : ((item.customFields && item.customFields[c.key]) || '')) : '', '', '', placeholder) +
       '</div>';
   }).join('');
 }
 
+function setTodoFormMode(editing) {
+  const t = document.getElementById('todo-form-title');
+  const i = document.getElementById('todo-form-icon');
+  if (t) t.textContent = editing ? 'Edit To Do' : 'Add To Do';
+  if (i) i.className = 'ti ' + (editing ? 'ti-pencil' : 'ti-plus');
+}
 function openAddTodoForm() {
+  pendingTodoEditId = null;
+  setTodoFormMode(false);
   const headEl = document.getElementById('todo-draft-heading');
   headEl.value = '';
   headEl.classList.remove('invalid');
@@ -21361,7 +21524,23 @@ function openAddTodoForm() {
   document.getElementById('add-todo-modal').classList.remove('hidden');
   setTimeout(() => headEl.focus(), 30);
 }
+// Edit an existing To Do: same form as Add, pre-filled. Saving updates the item in place
+// (and its planned, not-yet-started task on the calendar, if there is one).
+function openEditTodoForm(id) {
+  const item = todoItems.find(t => t.id === id);
+  if (!item) return;
+  pendingTodoEditId = id;
+  setTodoFormMode(true);
+  const headEl = document.getElementById('todo-draft-heading');
+  headEl.value = item.heading || '';
+  headEl.classList.remove('invalid');
+  renderTodoDraftFields(item);
+  document.getElementById('add-todo-modal').classList.remove('hidden');
+  setTimeout(() => headEl.focus(), 30);
+}
 function closeAddTodoForm() {
+  pendingTodoEditId = null;
+  setTodoFormMode(false);
   document.getElementById('add-todo-modal').classList.add('hidden');
 }
 
@@ -21380,6 +21559,40 @@ function saveTodoDraft() {
     if (isCore) core[c.key] = val;
     else if (val) customFields[c.key] = val;
   });
+
+  // Edit mode: update the existing To Do in place instead of creating a new one.
+  if (pendingTodoEditId != null) {
+    const item = todoItems.find(t => t.id === pendingTodoEditId);
+    if (item) {
+      const mergedCustom = Object.assign({}, item.customFields || {});
+      getTaskCardColumns().filter(c => !isSystemManagedColumn(c) && !CORE_TASK_FIELD_KEYS.includes(c.key)).forEach(c => {
+        if (customFields[c.key]) mergedCustom[c.key] = customFields[c.key]; else delete mergedCustom[c.key];
+      });
+      item.heading = heading;
+      item.project = core.project; item.nature = core.nature;
+      item.module = core.module;   item.ticket = core.ticket;
+      item.customFields = mergedCustom;
+      item.updatedAt = Date.now();
+      // Keep the planned (not yet started) task on its day in step with the edited To Do.
+      const lt = findLiveLinkedTask(item.uid);
+      let taskChanged = false;
+      if (lt && !todoTaskIsStarted(lt)) {
+        lt.heading = heading; lt.project = core.project; lt.nature = core.nature;
+        lt.module = core.module; lt.ticket = core.ticket;
+        lt.customFields = Object.assign({}, mergedCustom);
+        touchSyncMetadata(lt);
+        taskChanged = true;
+      }
+      saveState();
+      if (item.uid) recordSyncChange('todoItems', item.uid, 'update');
+      closeAddTodoForm();
+      renderTodoList();
+      if (taskChanged) renderList();
+    } else {
+      closeAddTodoForm();
+    }
+    return;
+  }
 
   const _newUid = generateSyncId();
   todoItems.unshift({
@@ -21522,6 +21735,14 @@ function reconcileTodoLinks() {
     if (tasksChanged) setTimeout(() => { try { renderList(); } catch (e) {} }, 0);
   }
   return changed || tasksChanged;
+}
+
+function confirmDeleteTodo(id) {
+  const item = todoItems.find(t => t.id === id);
+  if (!item) return;
+  const name = (item.heading && item.heading.trim()) ? item.heading.trim() : 'this To Do';
+  const planned = item.plannedDate ? ' Its planned task on ' + item.plannedDate + ' will be removed too.' : '';
+  showConfirm('Delete To Do?', 'Remove "' + name + '"?' + planned + ' This cannot be undone.', () => deleteTodoItem(id));
 }
 
 function deleteTodoItem(id) {
