@@ -15455,6 +15455,12 @@ function renderMastersContent() {
           </div>
           <input type="file" id="user-photo-file" accept="image/*" style="display:none" onchange="onUserPhotoPicked(this)" />
         </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+          <input class="master-add-input" id="user-photo-url" type="url" inputmode="url" spellcheck="false" placeholder="…or paste an image link (https://…)" value="${esc(/^https?:\/\//i.test(getUserPhoto()) ? getUserPhoto() : '')}"
+            onkeydown="if(event.key==='Enter') applyUserPhotoUrl()" style="flex:1;min-width:200px" />
+          <button class="btn" onclick="applyUserPhotoUrl()"><i class="ti ti-link"></i> Use link</button>
+        </div>
+        <div class="wp-msg" id="user-photo-msg"></div>
         <div style="font-size:11px;color:var(--text-tertiary);margin-top:6px">Shows as a round picture at the top right of the header. Saved on this device.</div>
       </div>
       <div style="margin-bottom:6px;padding-top:16px;border-top:1px solid var(--border)">
@@ -17053,7 +17059,7 @@ function userInitials() {
 }
 function userPhotoInnerHTML() {
   const ph = getUserPhoto();
-  if (ph) return '<img src="' + ph + '" alt="" />';
+  if (ph) return '<img src="' + esc(ph) + '" alt=""' + (/^https?:/i.test(ph) ? ' onerror="this.style.display=\'none\'"' : '') + ' />';
   const ini = userInitials();
   return ini ? esc(ini) : '<i class="ti ti-user"></i>';
 }
@@ -17426,6 +17432,31 @@ function onUserPhotoPicked(input) {
   img.onload = () => { URL.revokeObjectURL(url); openPhotoCrop(img); };
   img.onerror = () => { URL.revokeObjectURL(url); alert('Could not read that image. Try a JPG or PNG.'); };
   img.src = url;
+}
+// Header photo from a link. If the host allows cross-origin canvas use (CORS), the image goes
+// through the same crop dialog as an upload and is saved on-device as a small JPEG. If not, the
+// link itself is stored (verified to load) and the image is fetched from that URL each time.
+function applyUserPhotoUrl() {
+  const input = document.getElementById('user-photo-url');
+  const url = (input ? input.value : '').trim();
+  const setMsg = (text, err) => { const m = document.getElementById('user-photo-msg'); if (m) { m.textContent = text; m.className = 'wp-msg' + (err ? ' err' : ''); } };
+  if (!/^https?:\/\/\S+$/i.test(url)) { setMsg('Enter a full link starting with https://', true); return; }
+  setMsg('Checking image…', false);
+  const probe = new Image();
+  probe.crossOrigin = 'anonymous';
+  probe.onload = () => { setMsg('', false); openPhotoCrop(probe); };
+  probe.onerror = () => {
+    const plain = new Image();
+    plain.onload = () => {
+      try { localStorage.setItem(USER_PHOTO_KEY, url); }
+      catch (e) { setMsg('Could not save the link — browser storage is full.', true); return; }
+      renderHeaderAvatar();
+      if (activeMastersTab === 'user') renderMastersContent();
+    };
+    plain.onerror = () => setMsg('Could not load an image from that link. Make sure it points straight at an image file.', true);
+    plain.src = url;
+  };
+  probe.src = url;
 }
 function openPhotoCrop(img) {
   const minScale = CROP_VIEW / Math.min(img.naturalWidth, img.naturalHeight); // image covers the square
