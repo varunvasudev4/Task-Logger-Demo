@@ -14760,6 +14760,8 @@ function openDailySummary() {
 var _masterNavReturnFocusEl = null;
 function openMasters() {
   _masterNavReturnFocusEl = document.activeElement;
+  if (typeof applyMastersTabFilter === 'function') applyMastersTabFilter(false); // Masters button: hides User + Colors
+  if (typeof PROFILE_ONLY_TABS !== 'undefined' && PROFILE_ONLY_TABS.includes(activeMastersTab)) switchTab('lists');
   document.getElementById('masters-modal').classList.remove('hidden');
   // Default to user tab so name is easy to set; switch to projects tab otherwise
   const addSec = document.getElementById('master-add-section');
@@ -17036,8 +17038,20 @@ function syncAvatarSize() {
   };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
 })();
+// Masters tabs visible when the popup is opened from the header photo.
+const PROFILE_ONLY_TABS = ['user', 'colors'];
+function applyMastersTabFilter(profileOnly) {
+  document.querySelectorAll('#master-nav .tab-btn').forEach(b => {
+    const m = /switchTab\('([^']+)'\)/.exec(b.getAttribute('onclick') || '');
+    const key = m ? m[1] : '';
+    const isProfileTab = PROFILE_ONLY_TABS.includes(key);
+    // Photo click: only User + Colors. Masters button: everything except User + Colors.
+    b.style.display = (profileOnly ? !isProfileTab : isProfileTab) ? 'none' : '';
+  });
+}
 function openUserProfileFromAvatar() {
   openMasters();
+  applyMastersTabFilter(true);
   switchTab('user');
 }
 function onUserPhotoPicked(input) {
