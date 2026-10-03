@@ -215,19 +215,22 @@ body {
 .header-titlebar { min-width: 0; flex: 1 1 auto; }
 /* ── User avatar (header, Outlook-style) + photo crop modal ── */
 .header { position: relative; }
+.header { --avatar-size: 62px; padding-right: calc(var(--avatar-size) + 14px + env(safe-area-inset-right, 0px)); }
 .user-avatar-btn {
-  flex: 0 0 auto; width: 44px; height: 44px; border-radius: 50%; padding: 0; cursor: pointer;
+  position: absolute; top: 0; right: env(safe-area-inset-right, 0px); z-index: 2;
+  width: var(--avatar-size); height: var(--avatar-size); border-radius: 50%; padding: 0; cursor: pointer;
   border: 2px solid var(--border-md, var(--border)); background: var(--green-mid, #2563eb); color: #fff;
   display: inline-flex; align-items: center; justify-content: center; overflow: hidden;
-  font-family: var(--font-head); font-weight: 600; font-size: 16px; letter-spacing: .02em;
-  align-self: flex-start; transition: box-shadow .15s, transform .15s;
+  font-family: var(--font-head); font-weight: 600; font-size: calc(var(--avatar-size) * 0.36); letter-spacing: .02em;
+  transition: box-shadow .15s, transform .15s;
 }
 .user-avatar-btn:hover { box-shadow: 0 0 0 3px rgba(128,128,128,.25); }
 .user-avatar-btn:focus-visible { outline: 2px solid var(--green-mid, #2563eb); outline-offset: 2px; }
 .user-avatar-btn img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* Phone: only the title row makes room for the avatar; the button rows below stay full width. */
 @media (max-width: 640px) {
-  .user-avatar-btn { position: absolute; top: 0; right: env(safe-area-inset-right, 0px); width: 40px; height: 40px; z-index: 2; }
-  .header-titlebar { padding-right: 50px; }
+  .header { padding-right: env(safe-area-inset-right, 0px); }
+  .header-titlebar { padding-right: calc(var(--avatar-size) + 12px); }
 }
 .photo-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .photo-preview {
@@ -17015,6 +17018,24 @@ function renderHeaderAvatar() {
   const pv = document.getElementById('user-photo-preview');
   if (pv) pv.innerHTML = userPhotoInnerHTML();
 }
+
+function syncAvatarSize() {
+  const hdr = document.querySelector('.app-constrained .header');
+  const tb = hdr && hdr.querySelector('.header-titlebar');
+  if (!tb) return;
+  const h = Math.round(tb.getBoundingClientRect().height);
+  if (h >= 40) hdr.style.setProperty('--avatar-size', Math.min(h, 84) + 'px');
+}
+(function () {
+  const start = () => {
+    syncAvatarSize();
+    const tb = document.querySelector('.app-constrained .header-titlebar');
+    if (tb && window.ResizeObserver) new ResizeObserver(syncAvatarSize).observe(tb);
+    window.addEventListener('resize', syncAvatarSize);
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(syncAvatarSize);
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
+})();
 function openUserProfileFromAvatar() {
   openMasters();
   switchTab('user');
