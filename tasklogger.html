@@ -3841,6 +3841,7 @@ function mergeNonTaskDomains(remoteParsed, opts) {
       // "minimum required UI update" per §6, not an over-reaction.
       if (typeof renderList === 'function') renderList();
       if (typeof applyWallpaper === 'function') applyWallpaper();
+      if (typeof renderHeaderAvatar === 'function') renderHeaderAvatar();
     }
     if (changedSet.indexOf('theme') !== -1) {
       // Just a CSS attribute + icon/label swap — never a task-card concern.
@@ -11547,6 +11548,8 @@ function loadState() {
     if (typeof applyFontPrefs === 'function') applyFontPrefs();
     if (typeof applyColorPrefs === 'function') applyColorPrefs();
     if (typeof applyWallpaper === 'function') applyWallpaper();
+    if (typeof migrateUserPhotoLink === 'function') migrateUserPhotoLink();
+    if (typeof renderHeaderAvatar === 'function') renderHeaderAvatar();
   } catch(e) {}
 }
 
@@ -15456,12 +15459,12 @@ function renderMastersContent() {
           <input type="file" id="user-photo-file" accept="image/*" style="display:none" onchange="onUserPhotoPicked(this)" />
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
-          <input class="master-add-input" id="user-photo-url" type="url" inputmode="url" spellcheck="false" placeholder="…or paste an image link (https://…)" value="${esc(/^https?:\/\//i.test(getUserPhoto()) ? getUserPhoto() : '')}"
+          <input class="master-add-input" id="user-photo-url" type="url" inputmode="url" spellcheck="false" placeholder="…or paste an image link (https://…)" value="${esc(getUserPhotoUrl())}"
             onkeydown="if(event.key==='Enter') applyUserPhotoUrl()" style="flex:1;min-width:200px" />
           <button class="btn" onclick="applyUserPhotoUrl()"><i class="ti ti-link"></i> Use link</button>
         </div>
         <div class="wp-msg" id="user-photo-msg"></div>
-        <div style="font-size:11px;color:var(--text-tertiary);margin-top:6px">Shows as a round picture at the top right of the header. Saved on this device.</div>
+        <div style="font-size:11px;color:var(--text-tertiary);margin-top:6px">Shows as a round picture at the top right of the header. An uploaded photo stays on this device; a pasted link syncs to your other devices.</div>
       </div>
       <div style="margin-bottom:6px;padding-top:16px;border-top:1px solid var(--border)">
         <label class="complete-label" style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.06em;font-weight:600;display:block;margin-bottom:5px">Your Name</label>
@@ -17048,8 +17051,22 @@ const CROP_VIEW = 280;     // on-screen crop square (px)
 const CROP_OUT  = 320;     // saved image size (px)
 let _crop = null;          // { img, scale, minScale, maxScale, x, y }
 
-function getUserPhoto() {
+function getUserPhotoLocal() {
   try { return localStorage.getItem(USER_PHOTO_KEY) || ''; } catch (e) { return ''; }
+}
+// Image link chosen via "Use link" — kept in masters so it rides along in Drive sync like the
+// Wallpaper link does (a device-local uploaded photo, if present, still takes priority here).
+function getUserPhotoUrl() {
+  return (masters && typeof masters.userPhotoUrl === 'string') ? masters.userPhotoUrl : '';
+}
+function getUserPhoto() { return getUserPhotoLocal() || getUserPhotoUrl(); }
+// One-time: an earlier build stored a pasted link in the device-local key; move it to masters.
+function migrateUserPhotoLink() {
+  const v = getUserPhotoLocal();
+  if (/^https?:\/\//i.test(v)) {
+    try { localStorage.removeItem(USER_PHOTO_KEY); } catch (e) {}
+    if (!getUserPhotoUrl()) { masters.userPhotoUrl = v; saveState(); }
+  }
 }
 function userInitials() {
   const n = String(userName || '').trim();
@@ -17433,9 +17450,8 @@ function onUserPhotoPicked(input) {
   img.onerror = () => { URL.revokeObjectURL(url); alert('Could not read that image. Try a JPG or PNG.'); };
   img.src = url;
 }
-// Header photo from a link. If the host allows cross-origin canvas use (CORS), the image goes
-// through the same crop dialog as an upload and is saved on-device as a small JPEG. If not, the
-// link itself is stored (verified to load) and the image is fetched from that URL each time.
+// Header photo from a link: verified to load, then stored in masters so it syncs to other
+// devices (no crop step — a cropped copy would be a device-local image and could not sync).
 function applyUserPhotoUrl() {
   const input = document.getElementById('user-photo-url');
   const url = (input ? input.value : '').trim();
@@ -17443,19 +17459,14 @@ function applyUserPhotoUrl() {
   if (!/^https?:\/\/\S+$/i.test(url)) { setMsg('Enter a full link starting with https://', true); return; }
   setMsg('Checking image…', false);
   const probe = new Image();
-  probe.crossOrigin = 'anonymous';
-  probe.onload = () => { setMsg('', false); openPhotoCrop(probe); };
-  probe.onerror = () => {
-    const plain = new Image();
-    plain.onload = () => {
-      try { localStorage.setItem(USER_PHOTO_KEY, url); }
-      catch (e) { setMsg('Could not save the link — browser storage is full.', true); return; }
-      renderHeaderAvatar();
-      if (activeMastersTab === 'user') renderMastersContent();
-    };
-    plain.onerror = () => setMsg('Could not load an image from that link. Make sure it points straight at an image file.', true);
-    plain.src = url;
+  probe.onload = () => {
+    try { localStorage.removeItem(USER_PHOTO_KEY); } catch (e) {}   // link replaces any local upload on this device
+    masters.userPhotoUrl = url;
+    saveState();
+    renderHeaderAvatar();
+    if (activeMastersTab === 'user') renderMastersContent();
   };
+  probe.onerror = () => setMsg('Could not load an image from that link. Make sure it points straight at an image file.', true);
   probe.src = url;
 }
 function openPhotoCrop(img) {
@@ -17564,6 +17575,7 @@ function applyPhotoCrop() {
 }
 function removeUserPhoto() {
   try { localStorage.removeItem(USER_PHOTO_KEY); } catch (e) {}
+  if (masters.userPhotoUrl) { delete masters.userPhotoUrl; saveState(); }
   renderHeaderAvatar();
   if (activeMastersTab === 'user') renderMastersContent();
 }
