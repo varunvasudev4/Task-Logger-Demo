@@ -33,11 +33,37 @@
       var raw = localStorage.getItem('ttl_masters');
       var prefs = (raw && JSON.parse(raw).fontPrefs) || {};
       var root = document.documentElement;
-      if (prefs.family === 'custom' && prefs.customFamily) {
-        var name = prefs.customFamily.trim();
-        root.style.setProperty('--font-ui', /[,'"]/.test(name) ? name : ("'" + name + "', sans-serif"));
+      // The app styles text through three variables (body/UI, headings, mono labels/timers/inputs).
+      // A chosen font must override all three, otherwise headings, labels and numbers keep the old font.
+      var setAllFonts = function(css) {
+        root.style.setProperty('--font-ui', css);
+        root.style.setProperty('--font-head', css);
+        root.style.setProperty('--font-mono', css);
+      };
+      if (prefs.family === 'custom' && (prefs.customFamily || prefs.customLink)) {
+        // Copy of extractFontLinkUrls()/resolveCustomFontFamily() further down — keep in sync.
+        var urls = [];
+        var t = String(prefs.customLink || '').replace(/<link\b[^>]*\brel\s*=\s*["']?(?:preconnect|dns-prefetch|preload)[^>]*>/gi, '');
+        var re = /href\s*=\s*["']([^"']+)["']|url\(\s*["']?([^"')\s]+)["']?\s*\)|(https:\/\/[^\s"'<>)]+)/gi, m;
+        while ((m = re.exec(t))) {
+          var u = (m[1] || m[2] || m[3] || '').replace(/&amp;/g, '&');
+          if (/^https:\/\//i.test(u) && urls.indexOf(u) < 0) urls.push(u);
+        }
+        urls.forEach(function(u) {
+          var l = document.createElement('link');
+          l.rel = 'stylesheet'; l.href = u; l.setAttribute('data-ttl-custom-font', '1');
+          document.head.appendChild(l);
+        });
+        var name = String(prefs.customFamily || '').replace(/^\s*font-family\s*:/i, '').replace(/;+\s*$/, '').trim();
+        if (!name) {
+          for (var i = 0; i < urls.length && !name; i++) {
+            var g = /[?&]family=([^&:;]+)/i.exec(urls[i]);
+            if (g && /googleapis\.com|fonts\.bunny\.net/i.test(urls[i])) name = decodeURIComponent(g[1].replace(/\+/g, ' '));
+          }
+        }
+        if (name) setAllFonts(/[,'"]/.test(name) ? name : ("'" + name + "', sans-serif"));
       } else if (prefs.family && FONT_FAMILY_CSS[prefs.family]) {
-        root.style.setProperty('--font-ui', FONT_FAMILY_CSS[prefs.family]);
+        setAllFonts(FONT_FAMILY_CSS[prefs.family]);
       }
       var scale = (prefs.size === 'custom') ? ((parseFloat(prefs.customSizePct) || 100) / 100) : (FONT_SIZE_SCALE[prefs.size] || 1);
       if (scale !== 1) root.style.zoom = scale;
@@ -65,6 +91,7 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css" />
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.30.1/moment.min.js"></script>
 <link rel="manifest" href="manifest.json" />
 <script>
 if ('serviceWorker' in navigator) {
@@ -164,6 +191,9 @@ html, body { max-width: 100%; overflow-x: hidden; }
   --scroll-thumb-hover: var(--blue-mid);
 }
 
+button, input, select, textarea, optgroup {
+  font-family: inherit; /* form controls don't inherit the page font by default */
+}
 body {
   font-family: var(--font-ui);
   background: var(--bg-tertiary); color: var(--text-primary);
@@ -2169,6 +2199,7 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
         <button class="tab-btn" onclick="switchTab('weekends')"><i class="ti ti-calendar-off" style="font-size:13px"></i> Weekends</button>
         <button class="tab-btn" onclick="switchTab('workhours')"><i class="ti ti-clock" style="font-size:13px"></i> Work Hours</button>
         <button class="tab-btn" onclick="switchTab('email')"><i class="ti ti-mail" style="font-size:13px"></i> Email</button>
+        <button class="tab-btn" onclick="switchTab('colors')"><i class="ti ti-palette" style="font-size:13px"></i> Colors</button>
         <button class="tab-btn" onclick="switchTab('data')"><i class="ti ti-database" style="font-size:13px"></i> Data</button>
         <button class="tab-btn" onclick="switchTab('sync')"><i class="ti ti-cloud" style="font-size:13px"></i> Synchronization</button>
       </nav>
@@ -2489,6 +2520,7 @@ let masters = {
   // First load: Pending and Synchronization start OFF; the user can enable either later
   // (Masters → User → Show Pending / Masters → Synchronization → Enable Synchronization).
   flags: { sleepAutoPause: true, backgroundSyncEnabled: false, showPending: false }, // future flags can be added here
+  colorPrefs: { light: {}, dark: {} }, // Masters → Colors: only the colours you changed (CSS variable → hex)
   fontPrefs: { family: 'default', size: 'md' }, // 'default' = built-in IBM Plex Sans stack, unscaled
   logColumns: DEFAULT_LOG_COLUMNS.map(c => ({ ...c })),
   // Single consolidated store for every list-type column's options — Projects, Nature of
@@ -11240,6 +11272,9 @@ function loadState() {
       if (masters.flags.sleepAutoPause === undefined) masters.flags.sleepAutoPause = true;
       if (masters.flags.backgroundSyncEnabled === undefined) masters.flags.backgroundSyncEnabled = true;
       if (masters.flags.showPending === undefined) masters.flags.showPending = true;
+      if (!masters.colorPrefs || typeof masters.colorPrefs !== 'object') masters.colorPrefs = { light: {}, dark: {} };
+      if (!masters.colorPrefs.light) masters.colorPrefs.light = {};
+      if (!masters.colorPrefs.dark) masters.colorPrefs.dark = {};
       if (!masters.fontPrefs) masters.fontPrefs = { family: 'default', size: 'md' };
       if (!masters.fontPrefs.family) masters.fontPrefs.family = 'default';
       if (!masters.fontPrefs.size) masters.fontPrefs.size = 'md';
@@ -11357,6 +11392,7 @@ function loadState() {
     // being silently absorbed into an unset baseline.
     if (typeof primeNonTaskDomainHashes === 'function') primeNonTaskDomainHashes();
     if (typeof applyFontPrefs === 'function') applyFontPrefs();
+    if (typeof applyColorPrefs === 'function') applyColorPrefs();
   } catch(e) {}
 }
 
@@ -11731,23 +11767,20 @@ function taskDisplayName(entry, task, plan) {
   return plain || 'Untitled';
 }
 // Format a date value (ISO YYYY-MM-DD string) according to a column's chosen dateFormat.
+// dateFormat is any moment.js format string, e.g. "DD-MM-YYYY", "ddd, D MMM YYYY",
+// "MMMM Do, YYYY". Wrap literal text in [brackets], e.g. "[Week] W, YYYY".
 function formatCustomDate(isoStr, dateFormat) {
   if (!isoStr) return '';
-  const [y, m, d] = isoStr.split('-');
-  if (!y || !m || !d) return isoStr;
-  switch (dateFormat) {
-    case 'DD-MM-YYYY': return `${d}-${m}-${y}`;
-    case 'MM-DD-YYYY': return `${m}-${d}-${y}`;
-    case 'DD/MM/YYYY': return `${d}/${m}/${y}`;
-    case 'MM/DD/YYYY': return `${m}/${d}/${y}`;
-    case 'YYYY-MM-DD': return `${y}-${m}-${d}`;
-    default:
-      // Arbitrary custom format string, e.g. "DD.MM.YYYY" — replace tokens generically.
-      if (dateFormat && /YYYY|MM|DD/.test(dateFormat)) {
-        return dateFormat.replace(/YYYY/g, y).replace(/MM/g, m).replace(/DD/g, d);
-      }
-      return `${y}-${m}-${d}`;
+  const fmtStr = (dateFormat && dateFormat !== '__custom__') ? dateFormat : 'YYYY-MM-DD';
+  if (typeof moment === 'function') {
+    const m = moment(isoStr, 'YYYY-MM-DD', true); // strict parse of the stored ISO date
+    return m.isValid() ? m.format(fmtStr) : isoStr;
   }
+  // Fallback if moment.js could not be loaded (e.g. first load while offline):
+  // supports only the YYYY / MM / DD tokens.
+  const [y, mo, d] = String(isoStr).split('-');
+  if (!y || !mo || !d) return isoStr;
+  return fmtStr.replace(/YYYY/g, y).replace(/MM/g, mo).replace(/DD/g, d);
 }
 // Raw value for a given column key from a log entry (used by table render, copy, export)
 function getEntryValueForColumn(e, task, key) {
@@ -14564,15 +14597,53 @@ const FONT_SIZE_OPTIONS = [
   { key: 'xl', label: 'Extra Large', scale: 1.2 },
   { key: 'custom', label: 'Custom…', scale: null }
 ];
-// A bare name with no quotes/commas (e.g. "Poppins") is treated as a Google
-// Font: we inject its stylesheet on demand and wrap it into a real font-family
-// value. Anything already containing a comma or quote is assumed to be a
-// full, ready-to-use font-family CSS value and is used exactly as typed.
-function resolveCustomFontFamily(raw) {
-  const name = (raw || '').trim();
+// ── Custom font: <link> tag(s) from any font CDN + a CSS font-family value ──────
+// The "font link" box accepts whatever the CDN gives you — one or several <link ...> tags
+// (Google Fonts, Bunny Fonts, Fontshare, Adobe Fonts, …), an @import url(...) line, or a bare
+// https URL. Only https stylesheets are injected; preconnect/preload hints are ignored.
+// Keep in sync with the pre-paint copy in <head>.
+function extractFontLinkUrls(raw) {
+  const t = String(raw || '').replace(/<link\b[^>]*\brel\s*=\s*["']?(?:preconnect|dns-prefetch|preload)[^>]*>/gi, '');
+  const re = /href\s*=\s*["']([^"']+)["']|url\(\s*["']?([^"')\s]+)["']?\s*\)|(https:\/\/[^\s"'<>)]+)/gi;
+  const out = [];
+  let m;
+  while ((m = re.exec(t))) {
+    const u = (m[1] || m[2] || m[3] || '').replace(/&amp;/g, '&');
+    if (/^https:\/\//i.test(u) && out.indexOf(u) < 0) out.push(u);
+  }
+  return out;
+}
+// Replace any previously injected custom-font stylesheets with the given URLs.
+function applyCustomFontLinks(urls) {
+  document.querySelectorAll('link[data-ttl-custom-font]').forEach(l => l.remove());
+  (urls || []).forEach(u => {
+    const l = document.createElement('link');
+    l.rel = 'stylesheet';
+    l.href = u;
+    l.setAttribute('data-ttl-custom-font', '1');
+    document.head.appendChild(l);
+  });
+}
+// Google/Bunny Fonts URLs name their family in ?family=… — use it when no family value is typed.
+function deriveFamilyFromUrls(urls) {
+  for (const u of urls) {
+    const m = /[?&]family=([^&:;]+)/i.exec(u);
+    if (m && /googleapis\.com|fonts\.bunny\.net/i.test(u)) {
+      try { return decodeURIComponent(m[1].replace(/\+/g, ' ')); } catch (e) {}
+    }
+  }
+  return '';
+}
+// The family box accepts a full CSS value ("'Poppins', sans-serif"), the whole declaration
+// ("font-family: 'Poppins', sans-serif;") or a bare name ("Poppins"). A bare name with no
+// link tag is looked up on Google Fonts automatically, as before.
+function resolveCustomFontFamily(raw, urls) {
+  urls = urls || [];
+  let name = String(raw || '').replace(/^\s*font-family\s*:/i, '').replace(/;+\s*$/, '').trim();
+  if (!name && urls.length) name = deriveFamilyFromUrls(urls);
   if (!name) return null;
   if (/[,'"]/.test(name)) return name;
-  loadGoogleFont(name);
+  if (!urls.length) loadGoogleFont(name);
   return `'${name}', sans-serif`;
 }
 function loadGoogleFont(name) {
@@ -14590,10 +14661,15 @@ function applyFontPrefs() {
   const prefs = (masters && masters.fontPrefs) || { family: 'default', size: 'md' };
   const root = document.documentElement;
   let familyCss = null;
-  if (prefs.family === 'custom') familyCss = resolveCustomFontFamily(prefs.customFamily);
+  const linkUrls = (prefs.family === 'custom') ? extractFontLinkUrls(prefs.customLink) : [];
+  applyCustomFontLinks(linkUrls);
+  if (prefs.family === 'custom') familyCss = resolveCustomFontFamily(prefs.customFamily, linkUrls);
   else { const fam = FONT_FAMILY_OPTIONS.find(f => f.key === prefs.family); familyCss = fam ? fam.css : null; }
-  if (familyCss) root.style.setProperty('--font-ui', familyCss);
-  else root.style.removeProperty('--font-ui');
+  // Apply to every font variable so ALL text (body, headings, labels, timers, inputs) follows the choice.
+  ['--font-ui', '--font-head', '--font-mono'].forEach(function(v) {
+    if (familyCss) root.style.setProperty(v, familyCss);
+    else root.style.removeProperty(v); // Default: restore the built-in per-role fonts
+  });
   let scale = 1;
   if (prefs.size === 'custom') scale = (parseFloat(prefs.customSizePct) || 100) / 100;
   else { const sizeOpt = FONT_SIZE_OPTIONS.find(s => s.key === prefs.size); scale = sizeOpt ? sizeOpt.scale : 1; }
@@ -14613,6 +14689,14 @@ function setCustomFontFamily(val) {
   applyFontPrefs();
   saveState();
 }
+function setCustomFontLink(val) {
+  if (!masters.fontPrefs) masters.fontPrefs = { family: 'custom', size: 'md' };
+  masters.fontPrefs.family = 'custom';
+  masters.fontPrefs.customLink = val;
+  applyFontPrefs();
+  saveState();
+  renderMastersContent(); // refresh the "detected stylesheets" line
+}
 function setFontSize(val) {
   if (!masters.fontPrefs) masters.fontPrefs = { family: 'default', size: 'md' };
   masters.fontPrefs.size = val;
@@ -14628,9 +14712,175 @@ function setCustomFontSize(val) {
   applyFontPrefs();
   saveState();
 }
+// ── Colors tab: master colour catalog ───────────────────────────────────────
+// Every theme colour in the app is a CSS variable. This catalog lists them with
+// built-in defaults for Light and Dark and a plain-language note on where each is
+// used. Changes are stored in masters.colorPrefs (only the colours you edit) and
+// injected as a <style> override, so Light, Dark and System all keep working.
+const COLOR_CATALOG = [
+  { group: 'Backgrounds', items: [
+    { v: '--bg', name: 'Page background', light: '#fffdf8', dark: '#1c2230', desc: 'Main app background, modals, cards, input fields and dropdown menus.' },
+    { v: '--bg-primary', name: 'Page background (alias)', light: '#fffdf8', dark: '#1c2230', desc: 'Same role as Page background; used by a few components that reference it directly. Keep the two matching.' },
+    { v: '--bg-secondary', name: 'Panel background', light: '#f7f0dd', dark: '#232a3d', desc: 'Table headers, side panels, list rows, hover highlights, idle badges, buttons and the scrollbar track.' },
+    { v: '--bg-tertiary', name: 'Inset background', light: '#ede1c3', dark: '#0c0e13', desc: 'Deeper inset areas and the strongest background contrast, used in a few places.' }
+  ]},
+  { group: 'Text', items: [
+    { v: '--text-primary', name: 'Main text', light: '#26211a', dark: '#edeff4', desc: 'Headings, task names, table cell values, timers and most body text.' },
+    { v: '--text-secondary', name: 'Secondary text', light: '#5a4f3c', dark: '#8b93a7', desc: 'Field labels, descriptions, helper sentences and button text.' },
+    { v: '--text-tertiary', name: 'Muted text', light: '#8a7f68', dark: '#5b6478', desc: 'Placeholders, hints, small captions, section labels, icons and idle status text.' }
+  ]},
+  { group: 'Borders', items: [
+    { v: '--border', name: 'Border (soft)', light: '#26211a29', dark: '#2e3549', desc: 'Hairline dividers between rows, card outlines and section separators. Supports transparency (8-digit hex).' },
+    { v: '--border-md', name: 'Border (strong)', light: '#26211a4d', dark: '#454f6b', desc: 'Outlines of inputs, buttons, dropdowns and checkboxes; scrollbar thumb. Supports transparency (8-digit hex).' }
+  ]},
+  { group: 'Accent (orange)', items: [
+    { v: '--blue-mid', name: 'Accent', light: '#c94f1f', dark: '#e8622c', desc: 'Primary brand colour: Add task button, active tab, focus rings, links, highlights and scrollbar hover. (Named "blue" in the code for historical reasons.)' },
+    { v: '--blue-dark', name: 'Accent (dark / hover)', light: '#9c3c15', dark: '#ff8f5c', desc: 'Hover state of the Add task / primary buttons and accent-coloured text.' },
+    { v: '--blue-bg', name: 'Accent (soft background)', light: '#fbe2d3', dark: '#3a2a20', desc: 'Soft accent tint behind selected items, info notices and accent badges.' }
+  ]},
+  { group: 'Success / Running (green)', items: [
+    { v: '--green-mid', name: 'Green', light: '#2f8f76', dark: '#3fab8f', desc: 'Success buttons, completed marks, running-task indicators and positive highlights.' },
+    { v: '--green-dark', name: 'Green (text)', light: '#1f6350', dark: '#7fd4bc', desc: 'Running timer text, "Running" badge text, "Saved" confirmations and success messages.' },
+    { v: '--green-bg', name: 'Green (soft background)', light: '#dcefe8', dark: '#1c332e', desc: '"Running" badge background and success notices.' }
+  ]},
+  { group: 'Paused / Warning (amber)', items: [
+    { v: '--amber-mid', name: 'Amber', light: '#a3821f', dark: '#d1b954', desc: 'Pause indicators, break highlights and warning accents.' },
+    { v: '--amber-dark', name: 'Amber (text)', light: '#7a5f13', dark: '#e8cf7a', desc: 'Paused timer text, "Paused" badge text and warning messages.' },
+    { v: '--amber-bg', name: 'Amber (soft background)', light: '#f3e9c9', dark: '#2b2a1f', desc: '"Paused" badge background and warning notices.' }
+  ]},
+  { group: 'Danger / Error (red)', items: [
+    { v: '--red-mid', name: 'Red', light: '#b1403c', dark: '#d9534f', desc: 'Delete / danger buttons, error borders, overdue markers and validation errors.' },
+    { v: '--red-dark', name: 'Red (text)', light: '#8a2e2a', dark: '#f08a86', desc: 'Red headings and error text, e.g. the Reset configuration options and list errors.' },
+    { v: '--red-bg', name: 'Red (soft background)', light: '#f6dede', dark: '#331f1f', desc: 'Background of danger buttons and error notices.' }
+  ]},
+  { group: 'Purple', items: [
+    { v: '--purple-mid', name: 'Purple', light: '#6a5cb0', dark: '#8b7fd1', desc: 'Secondary highlight for special tags, recurring items and badges.' },
+    { v: '--purple-dark', name: 'Purple (text)', light: '#4f4386', dark: '#b0a8e8', desc: 'Text on purple badges.' },
+    { v: '--purple-bg', name: 'Purple (soft background)', light: '#e6e1f5', dark: '#221f35', desc: 'Background of purple badges and tags.' }
+  ]}
+];
+let colorEditTheme = null; // which palette the Colors tab is editing: 'light' | 'dark'
+function currentEffectiveTheme() {
+  const a = document.documentElement.getAttribute('data-theme');
+  if (a === 'light' || a === 'dark') return a;
+  try { return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; } catch (e) { return 'light'; }
+}
+function normalizeHex(val) {
+  let h = String(val || '').trim().replace(/^#/, '');
+  if (/^[0-9a-f]{3,4}$/i.test(h)) h = h.split('').map(c => c + c).join('');
+  if (!/^([0-9a-f]{6}|[0-9a-f]{8})$/i.test(h)) return null;
+  return '#' + h.toLowerCase();
+}
+function applyColorPrefs() {
+  const cp = (masters && masters.colorPrefs) || {};
+  const block = (o) => Object.keys(o || {}).filter(k => normalizeHex(o[k])).map(k => k + ':' + normalizeHex(o[k]) + ';').join('');
+  const light = block(cp.light), dark = block(cp.dark);
+  let el = document.getElementById('ttl-color-overrides');
+  if (!light && !dark) { if (el) el.remove(); return; }
+  if (!el) { el = document.createElement('style'); el.id = 'ttl-color-overrides'; document.head.appendChild(el); }
+  // Order matters: light first, dark rules after with equal-or-higher specificity (mirrors the base theme CSS).
+  el.textContent =
+    (light ? ':root:not([data-theme="dark"]){' + light + '}:root[data-theme="light"]{' + light + '}' : '') +
+    (dark ? '@media (prefers-color-scheme: dark){:root:not([data-theme="light"]):not([data-theme="dark"]){' + dark + '}}:root[data-theme="dark"]{' + dark + '}' : '');
+}
+function colorValueFor(theme, item) {
+  const o = (masters.colorPrefs && masters.colorPrefs[theme]) || {};
+  return normalizeHex(o[item.v]) || item[theme];
+}
+function colorSetValue(theme, v, hex, persist) {
+  if (!masters.colorPrefs) masters.colorPrefs = { light: {}, dark: {} };
+  if (!masters.colorPrefs[theme]) masters.colorPrefs[theme] = {};
+  const item = COLOR_CATALOG.flatMap(g => g.items).find(i => i.v === v);
+  masters.colorPrefs[theme][v] = normalizeHex(hex); // stored even when equal to the default, so a sync merge can't bring an older custom value back
+  applyColorPrefs();
+  if (persist) saveState();
+}
+function colorRowId(v) { return 'cr-' + v.replace(/^--/, ''); }
+function colorPickerInput(v, el) { // live preview while dragging in the picker
+  const row = document.getElementById(colorRowId(v));
+  const t = row && row.querySelector('.cr-hex');
+  const old = normalizeHex(t && t.value) || '';
+  // keep any alpha the user already has on this colour
+  const val = (old.length === 9 ? el.value + old.slice(7) : el.value);
+  if (t) t.value = val;
+  colorSetValue(colorEditTheme, v, val, false);
+}
+function colorPickerCommit(v) { saveState(); renderMastersContent(); }
+function colorHexCommit(v, el) {
+  const hex = normalizeHex(el.value);
+  if (!hex) { el.style.borderColor = 'var(--red-mid)'; return; }
+  colorSetValue(colorEditTheme, v, hex, true);
+  renderMastersContent();
+}
+function colorReset(v) {
+  const item = COLOR_CATALOG.flatMap(g => g.items).find(i => i.v === v);
+  if (!item) return;
+  colorSetValue(colorEditTheme, v, item[colorEditTheme], true); // writes the default explicitly
+  renderMastersContent();
+}
+let _colorResetAllArmed = false, _colorResetAllTimer = null;
+function colorResetAll() {
+  // Two-step confirm without confirm() (browser dialogs are blocked in some installed/embedded contexts).
+  if (!_colorResetAllArmed) {
+    _colorResetAllArmed = true;
+    clearTimeout(_colorResetAllTimer);
+    _colorResetAllTimer = setTimeout(() => { _colorResetAllArmed = false; if (activeMastersTab === 'colors') renderMastersContent(); }, 5000);
+    renderMastersContent();
+    return;
+  }
+  _colorResetAllArmed = false; clearTimeout(_colorResetAllTimer);
+  if (!masters.colorPrefs) masters.colorPrefs = { light: {}, dark: {} };
+  const t = colorEditTheme, o = {};
+  COLOR_CATALOG.forEach(g => g.items.forEach(i => { o[i.v] = i[t]; }));
+  masters.colorPrefs[t] = o;
+  applyColorPrefs(); saveState(); renderMastersContent();
+}
+function colorSetEditTheme(t) { colorEditTheme = t; _colorResetAllArmed = false; renderMastersContent(); }
+function renderColorsTabHTML() {
+  if (!colorEditTheme) colorEditTheme = currentEffectiveTheme();
+  const t = colorEditTheme;
+  const changed = COLOR_CATALOG.reduce((n, g) => n + g.items.filter(i => colorValueFor(t, i) !== i[t]).length, 0);
+  const seg = (k, label) => `<button class="btn ${t === k ? 'btn-primary' : ''}" onclick="colorSetEditTheme('${k}')" style="padding:5px 14px">${label}</button>`;
+  const rows = COLOR_CATALOG.map(g => `
+    <div style="margin-top:18px">
+      <div style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.06em;font-weight:600;margin-bottom:8px">${esc(g.group)}</div>
+      <div class="master-list">${g.items.map(it => {
+        const val = colorValueFor(t, it);
+        const isCustom = val !== it[t];
+        return `<div class="master-item" id="${colorRowId(it.v)}" style="flex-wrap:wrap;align-items:center;gap:10px;padding:10px">
+          <input type="color" value="${val.slice(0, 7)}" oninput="colorPickerInput('${it.v}', this)" onchange="colorPickerCommit('${it.v}')"
+            style="width:44px;height:36px;padding:0;border:1px solid var(--border-md);border-radius:var(--radius-md);background:none;cursor:pointer;flex-shrink:0" aria-label="Pick colour for ${esc(it.name)}" />
+          <div style="flex:1;min-width:200px">
+            <div style="font-size:13px;font-weight:600;color:var(--text-primary)">${esc(it.name)} ${isCustom ? '<span style="font-size:10px;font-weight:600;color:var(--blue-dark);background:var(--blue-bg);border-radius:8px;padding:1px 6px;margin-left:4px">changed</span>' : ''}</div>
+            <div style="font-size:11px;color:var(--text-secondary);margin-top:2px;line-height:1.4">${esc(it.desc)}</div>
+            <div style="font-size:10px;color:var(--text-tertiary);margin-top:2px;font-family:var(--font-mono)">${it.v} · default ${it[t]}</div>
+          </div>
+          <div style="display:flex;gap:6px;align-items:center">
+            <input class="master-add-input cr-hex" value="${val}" spellcheck="false" maxlength="9" placeholder="#rrggbb"
+              onchange="colorHexCommit('${it.v}', this)" onkeydown="if(event.key==='Enter') this.blur()"
+              style="width:100px;font-family:var(--font-mono);font-size:12px;padding:6px 8px" aria-label="Hex code for ${esc(it.name)}" />
+            <button class="btn" onclick="colorReset('${it.v}')" title="Reset to default (${it[t]})" aria-label="Reset ${esc(it.name)} to default" style="padding:5px 10px;font-size:12px;white-space:nowrap;${isCustom ? '' : 'opacity:.55'}"><i class="ti ti-restore"></i> Default</button>
+          </div>
+        </div>`;
+      }).join('')}</div>
+    </div>`).join('');
+  return `
+    <div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">
+      The master list of every colour the app uses. Pick a colour or paste a hex code (e.g. <code>#c94f1f</code>; 8-digit hex adds transparency) and the change applies instantly across the whole app.
+      Light and Dark themes are edited separately.
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      ${seg('light', '<i class="ti ti-sun"></i> Light theme')}${seg('dark', '<i class="ti ti-moon"></i> Dark theme')}
+      <span style="flex:1"></span>
+      <span style="font-size:11px;color:var(--text-tertiary)">${changed} changed</span>
+      <button class="btn ${_colorResetAllArmed ? 'btn-danger' : ''}" onclick="colorResetAll()"><i class="ti ti-restore"></i> ${_colorResetAllArmed ? 'Click again to confirm' : 'Reset all to default'}</button>
+    </div>
+    <div style="font-size:11px;color:var(--text-tertiary);margin-top:6px">Editing the ${t} palette. It shows in the app when the ${t} theme is active (use the Light / Dark / System toggle to switch).</div>
+    ${rows}`;
+}
 function switchTab(tab) {
   activeMastersTab = tab;
-  const TAB_ORDER = ['user','lists','columns','weekends','workhours','email','data','sync'];
+  const TAB_ORDER = ['user','lists','columns','weekends','workhours','email','colors','data','sync'];
   document.querySelectorAll('.master-nav .tab-btn').forEach((b,i) => {
     b.classList.toggle('active', TAB_ORDER[i] === tab);
   });
@@ -14656,7 +14906,7 @@ function switchTab(tab) {
 function renderColumnsTabHTML() {
   const cols = getLogColumns();
   const TYPE_LABELS = { text: 'Text', textarea: 'Text Area', list: 'Dropdown list', multilist: 'Dropdown list (multi-select)', date: 'Date' };
-  const DATE_FORMAT_PRESETS = ['DD-MM-YYYY','YYYY-MM-DD','MM-DD-YYYY','DD/MM/YYYY','MM/DD/YYYY'];
+  const DATE_FORMAT_PRESETS = ['DD-MM-YYYY','YYYY-MM-DD','MM-DD-YYYY','DD/MM/YYYY','MM/DD/YYYY','DD MMM YYYY','ddd, DD MMM YYYY','MMMM D, YYYY'];
   // Date and Effort can't be deleted — the timer/duration math depends on these existing —
   // but they can still be renamed, reordered, and (for Date) have their format changed.
   const UNDELETABLE_KEYS = ['date', 'effort'];
@@ -14681,7 +14931,9 @@ function renderColumnsTabHTML() {
             <option value="__custom__" ${isCustomFormat?'selected':''}>Custom…</option>
           </select>
           ${isCustomFormat ? `<input class="master-add-input" style="padding:4px 8px;font-size:12px;width:120px" value="${esc(c.dateFormat)}"
-            onchange="changeColumnDateFormat('${c.key}', this.value)" placeholder="e.g. DD.MM.YYYY" />` : ''}` : ''}
+            oninput="this.nextElementSibling.textContent = formatCustomDate(todayStr(), this.value.trim() || 'YYYY-MM-DD')"
+            onchange="changeColumnDateFormat('${c.key}', this.value)" placeholder="e.g. ddd, D MMM YYYY" title="Any moment.js format. Wrap literal text in [brackets]." />
+          <span style="font-size:11px;color:var(--text-tertiary)">${esc(formatCustomDate(todayStr(), c.dateFormat))}</span>` : ''}` : ''}
           ${c.type === 'textarea' ? `<label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text-secondary)" title="How many rows tall this field starts at (Task Card, Edit Popup, Completed Popup). Longer content scrolls inside the field instead of growing it.">
             Rows
             <input type="number" min="1" max="30" step="1" class="master-add-input" style="padding:4px 6px;font-size:12px;width:52px"
@@ -14899,15 +15151,27 @@ function renderMastersContent() {
             </select>
           </div>
         </div>
-        ${((masters.fontPrefs&&masters.fontPrefs.family)==='custom') ? `
+        ${((masters.fontPrefs&&masters.fontPrefs.family)==='custom') ? (() => {
+          const fp = masters.fontPrefs || {};
+          const det = extractFontLinkUrls(fp.customLink);
+          const hosts = det.map(u => { try { return new URL(u).host; } catch (e) { return u; } });
+          return `
         <div style="margin-top:10px">
-          <label class="complete-label">Custom font family</label>
+          <label class="complete-label">Font link tag <span style="text-transform:none;letter-spacing:0;font-weight:400;color:var(--text-tertiary)">(optional)</span></label>
+          <textarea class="master-add-input" rows="3" spellcheck="false" style="width:100%;resize:vertical;font-size:12px"
+            placeholder='<link href="https://fonts.googleapis.com/css2?family=Poppins&display=swap" rel="stylesheet">'
+            onchange="setCustomFontLink(this.value)">${esc(fp.customLink || '')}</textarea>
+          <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">Paste the &lt;link&gt; tag(s) from Google Fonts or any other font CDN (https only). ${det.length ? '<span style="color:var(--green-dark)">Detected ' + det.length + ' stylesheet' + (det.length > 1 ? 's' : '') + ': ' + esc(hosts.join(', ')) + '</span>' : (fp.customLink ? '<span style="color:var(--red-mid)">No https stylesheet link found in that text.</span>' : '')}</div>
+        </div>
+        <div style="margin-top:10px">
+          <label class="complete-label">Font family (CSS value)</label>
           <input class="master-add-input" type="text" style="width:100%"
-            value="${esc((masters.fontPrefs&&masters.fontPrefs.customFamily)||'')}"
-            placeholder="Google Font name (e.g. Poppins) or full CSS value (e.g. 'Comic Sans MS', cursive)"
+            value="${esc(fp.customFamily||'')}"
+            placeholder="'Poppins', sans-serif"
             onchange="setCustomFontFamily(this.value)" />
-          <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">A plain name is loaded from Google Fonts automatically; anything with quotes or commas is used as-is as a font-family CSS value.</div>
-        </div>` : ''}
+          <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">Any CSS font-family value, e.g. <code>'Poppins', sans-serif</code> (a full <code>font-family: …;</code> line also works). Left empty, it's taken from a Google Fonts link above. With no link, a plain name such as Poppins is loaded from Google Fonts automatically.</div>
+        </div>`;
+        })() : ''}
         ${((masters.fontPrefs&&masters.fontPrefs.size)==='custom') ? `
         <div style="margin-top:10px">
           <label class="complete-label">Custom font size (%)</label>
@@ -14917,6 +15181,10 @@ function renderMastersContent() {
         </div>` : ''}
         <div style="font-size:11px;color:var(--text-tertiary);margin-top:6px">Changes apply immediately and are saved to this device.</div>
       </div>`;
+    return;
+  }
+  if (activeMastersTab === 'colors') {
+    content.innerHTML = renderColorsTabHTML();
     return;
   }
   if (activeMastersTab === 'columns') {
@@ -15405,7 +15673,7 @@ function renderMastersContent() {
     const failureDiagnostic = (schedulerStatus.lastResult && schedulerStatus.lastResult.ok === false)
       ? schedulerStatus.lastResult.diagnostic : null;
     const schedulerDiagnosticHtml = failureDiagnostic ? `
-      <div style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;line-height:1.7;background:var(--bg-secondary);border:1px solid var(--red-mid);border-radius:var(--radius-sm);padding:10px 12px;margin-top:8px;color:var(--text-primary)">
+      <div style="font-family:var(--font-mono);font-size:11px;line-height:1.7;background:var(--bg-secondary);border:1px solid var(--red-mid);border-radius:var(--radius-sm);padding:10px 12px;margin-top:8px;color:var(--text-primary)">
         <div style="font-weight:700;color:var(--red-dark);margin-bottom:4px">SYNC FAILED</div>
         <div>Stage: ${esc(formatDiagnosticStage(failureDiagnostic.stage))}</div>
         <div>Reason: ${esc(failureDiagnostic.reason || 'unknown')}</div>
@@ -16369,7 +16637,8 @@ function changeColumnDateFormat(key, format) {
   const col = getColumnByKey(key);
   if (!col) return;
   const needsRerender = format === '__custom__' || col.dateFormat === '__custom__';
-  col.dateFormat = (format === '__custom__') ? 'DD.MM.YYYY' : format;
+  format = (format || '').trim();
+  col.dateFormat = (format === '__custom__') ? 'DD.MM.YYYY' : (format || 'YYYY-MM-DD');
   saveState();
   if (needsRerender) renderMastersContent();
   refreshAfterColumnConfigChange();
