@@ -139,7 +139,7 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 <div class="fcoll"><div class="fin"><div class="fbody">
 <label>Date range<select id="fPre"><option value="today">Today</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="month">This month</option><option value="3m">Last 3 months</option><option value="all">All dates</option><option value="custom">Custom range</option></select></label><label>From<input type="date" id="fFrom"></label><label>To<input type="date" id="fTo"></label>
 <span id="ms" style="display:contents"></span>
-<label class="q">Search task, description, module<input type="search" id="fQ" placeholder="Type to search · Enter adds a keyword"></label>
+<label class="q">Search task, description, module, ticket<input type="search" id="fQ" placeholder="Type to search · Enter adds a keyword"></label>
 <div class="chips full" id="kws"></div>
 <div class="chips full" id="fAct"><button data-p="clear">Clear filters</button>
 <select id="sv" title="Apply a saved filter" style="min-height:28px;padding:2px 8px"></select><button id="svSave" title="Save the current filters under a name">Save filter</button><button id="svDel" title="Delete the selected saved filter">Delete saved</button></div>
@@ -176,7 +176,7 @@ const PAL=['--blue-mid','--green-mid','--amber-mid','--purple-mid','--red-mid'],
 const PRE={valley:'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=2000&q=80',forest:'https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?auto=format&fit=crop&w=2000&q=80',night:'https://images.unsplash.com/photo-1519681393784-d120267933ba?auto=format&fit=crop&w=2000&q=80'};
 const FONTS={default:"'IBM Plex Sans',system-ui,sans-serif",spacegrotesk:"'Space Grotesk','IBM Plex Sans',sans-serif",mono:"'IBM Plex Mono',ui-monospace,monospace",serif:"Georgia,'Times New Roman',serif"},SCALE={sm:.9,md:1,lg:1.1,xl:1.2};
 const DEFCOLS=[['date','Date'],['employee','Employee Name'],['project','Project'],['module','Module / Feature'],['nature','Nature of Task'],['ticket','Ticket #'],['description','Task progress / Effort description'],['effort','Effort (Minutes)'],['status','Status'],['remark','Remark']].map(([key,label])=>({key,label,showInLogTable:true}));
-const TIME=['date','week','month','weekday'],WD=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],TL={date:'Day',week:'Week',month:'Month',weekday:'Weekday',heading:'Task'};
+const TIME=['date','week','month','weekday'],WD=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],TL={date:'Day',week:'Week',month:'Month',weekday:'Weekday',heading:'Task',tsys:'Ticket system',tproj:'Ticket project (P#)'};
 const LOGW={heading:200,date:110,employee:130,project:130,module:150,nature:120,ticket:110,description:260,effort:90,status:100,remark:200};
 const MEAS={minutes:'Minutes',hours:'Hours',count:'Entry count'},FK=['project','nature','module','status'];
 const emptyF=()=>({from:'',to:'',project:[],nature:[],module:[],status:[],kw:[],q:''});
@@ -199,18 +199,28 @@ function header(){const u=D.user||'',p=D.photo||D.masters.userPhotoUrl||'',pp=u.
  $('#ph').innerHTML=`<div class="ph">${p?`<img src="${esc(p)}" alt="" style="width:100%;height:100%;object-fit:cover" onerror="this.remove()">`:''}<span style="${p?'display:none':''}">${ini?esc(ini):ic('user',22)}</span></div>`;
  const im=$('#ph img');if(im)im.onload=()=>{};if(p&&im)im.onerror=()=>{im.remove();$('#ph span').style.display=''};
  $('#ph').title=(u||'TTL user')+' · data from '+D.src+' (read-only)'}
+// ---- ticket normalization (from the old dashboard + Zoho P# ids) ----
+// URL-shaped values are split on '/' and the last segment is the id. NAV-prefixed id = Jira (wins even inside a zoho link).
+// An id starting with P<number> (e.g. P12-3456) = Zoho, and that P<number> prefix is the project code.
+function normalizeTicket(raw){if(raw==null)return null;const val=String(raw).trim();if(!val)return null;
+ const slash=val.includes('/'),id=slash?(val.split('/').map(x=>x.trim()).filter(Boolean).pop()||val):val;
+ if(/^NAV/i.test(id))return{id,system:'Jira',proj:'NAV'};
+ const pm=id.match(/^P\d+/i);if(pm)return{id,system:'Zoho',proj:pm[0].toUpperCase()};
+ if(slash)return{id,system:/zoho/i.test(val)?'Zoho':'Jira',proj:'—'};
+ return{id,system:'Other',proj:'—'}}
 function build(){const tm={};(D.tasks||[]).forEach(t=>{if(t)tm[t.id]=t});
  rows=(Array.isArray(D.log)?D.log:[]).filter(e=>e&&e.startTs).map(e=>{const t=tm[e.taskId];let s=e.durationSecs;
   if(s==null){if(e.endTs)s=(e.endTs-e.startTs)/1000;else if(t){let ms=t.accumulatedMs||0;if(t.status==='running'&&t.segmentStart)ms+=Date.now()-t.segmentStart;s=ms/1000}else s=0}
-  const cf=e.customFields||{};return{e,d:ymd(e.startTs),m:Math.max(0,s/60),st:e.status||e.taskStatus||cf.status||(t&&t.status)||''}})}
+  const cf=e.customFields||{};return{e,d:ymd(e.startTs),m:Math.max(0,s/60),st:e.status||e.taskStatus||cf.status||(t&&t.status)||'',tk:normalizeTicket(e.ticket!=null&&e.ticket!==''?e.ticket:cf.ticket)}})}
 function val(r,k){if(k==='date')return r.d;if(k==='month')return r.d.slice(0,7);
  if(k==='week'){const d=new Date(r.d+'T00:00');d.setDate(d.getDate()-((d.getDay()+6)%7));return ymd(d)}
  if(k==='weekday')return['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][new Date(r.d+'T00:00').getDay()];
  if(k==='effort')return Math.round(r.m);if(k==='status')return r.st||'—';
  if(k==='heading')return r.e.heading||'—';
+ if(k==='ticket')return r.tk?r.tk.id:'—';if(k==='tsys')return r.tk?r.tk.system:'—';if(k==='tproj')return r.tk?r.tk.proj:'—';
  const v=r.e[k]!=null?r.e[k]:(r.e.customFields||{})[k];return v===''||v==null?'—':String(v).trim()||'—'}
 const kws=()=>F.kw.concat(F.q.trim()?[F.q.trim()]:[]).map(s=>s.toLowerCase());
-function fr(){const kw=kws();return rows.filter(r=>(!F.from||r.d>=F.from)&&(!F.to||r.d<=F.to)&&FK.every(k=>!F[k].length||F[k].includes(val(r,k)))&&kw.every(q=>[r.e.heading,r.e.description,r.e.module].some(x=>String(x||'').toLowerCase().includes(q))))}
+function fr(){const kw=kws();return rows.filter(r=>(!F.from||r.d>=F.from)&&(!F.to||r.d<=F.to)&&FK.every(k=>!F[k].length||F[k].includes(val(r,k)))&&kw.every(q=>[r.e.heading,r.e.description,r.e.module,r.tk&&r.tk.id,r.tk&&r.tk.system].some(x=>String(x||'').toLowerCase().includes(q))))}
 const mv=(r,met)=>met==='count'?1:met==='hours'?r.m/60:r.m;
 const fmt=(v,met)=>met==='count'?Math.round(v):met==='hours'?(+v).toFixed(1)+'h':Math.round(v)+'m';
 function agg(rs,f,met,n){const m=new Map();rs.forEach(r=>{const k=String(val(r,f));m.set(k,(m.get(k)||0)+mv(r,met))});let a=[...m].map(([k,v])=>({k,v}));
@@ -233,7 +243,8 @@ function completion(rs){const sc=D.masters.statusConfig||{closed:['Completed'],b
  rows.forEach(r=>{if(!r.e.endTs||r.d>toK)return;const k=gkey(r.e,c);if(!keys.has(k))return;const o=latest.get(k);if(!o||(r.e.startTs||0)>(o.e.startTs||0))latest.set(k,r)});
  let done=0,blocked=0,pending=0;latest.forEach(r=>{const st=String(r.e.taskStatus||'').trim().toLowerCase();if(st&&cl.includes(st))done++;else if(st&&bl.includes(st))blocked++;else pending++});
  const total=done+blocked+pending;return{done,blocked,pending,total,pct:total?done/total*100:0}}
-function kpi(rs,m){if(m==='completion'){const c=completion(rs);return c.total?Math.round(c.pct)+'%':'—'}const min=rs.reduce((s,r)=>s+r.m,0),days=new Set(rs.map(r=>r.d)).size;
+function kpi(rs,m){if(m==='utickets'){const u=new Set();rs.forEach(r=>{if(r.tk)u.add(r.tk.id.toUpperCase())});return u.size.toLocaleString()}
+ if(m==='completion'){const c=completion(rs);return c.total?Math.round(c.pct)+'%':'—'}const min=rs.reduce((s,r)=>s+r.m,0),days=new Set(rs.map(r=>r.d)).size;
  return m==='hours'?(min/60).toFixed(1)+'h':m==='minutes'?Math.round(min).toLocaleString():m==='entries'?rs.length:m==='tasks'?new Set(rs.map(r=>r.e.taskSyncId||r.e.taskId||r.e.heading)).size:m==='days'?days:(days?min/60/days:0).toFixed(1)+'h'}
 function csv(name,head,data){const q=v=>'"'+String(v??'').replace(/"/g,'""')+'"',a=document.createElement('a');
  a.href=URL.createObjectURL(new Blob(['\ufeff'+[head,...data].map(r=>r.map(q).join(',')).join('\r\n')],{type:'text/csv'}));a.download=name.replace(/[^\w\-]+/g,'_')+'.csv';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),800)}
@@ -251,8 +262,8 @@ function gtbl(w,defs,data,get,rowAttr){const t=w.tbl=w.tbl||{},keys=defs.map(d=>
  return`<div class="sc"><table class="g" style="width:${vis.reduce((s,k)=>s+wd(k),0)}px"><colgroup>${vis.map(k=>`<col data-k="${esc(k)}" style="width:${wd(k)}px">`).join('')}</colgroup><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>
 <div class="pg"><span>${sorted.length} rows</span><button data-a="prev"${pg?'':' disabled'}>${ic('chevron-left',14)}Prev</button><span>Page ${pg+1}/${pages}</span><button data-a="next"${pg<pages-1?'':' disabled'}>Next${ic('chevron-right',14)}</button><select data-a="per">${[10,25,50,100].concat([per]).filter((v,i,a)=>a.indexOf(v)===i).sort((a,b)=>a-b).map(v=>`<option${v===per?' selected':''}>${v}</option>`).join('')}</select><span>per page</span></div>`}
 function entryDefs(){const seen=new Set(),d=[{k:'heading',label:'Task',w:200}];seen.add('heading');cols().filter(c=>c.showInLogTable!==false).forEach(c=>{if(seen.has(c.key))return;seen.add(c.key);d.push({k:c.key,label:c.label,w:LOGW[c.key]||(c.type==='date'?110:c.type==='textarea'?220:150)})});return d}
-const TDEFS=[{k:'ticket',label:'Ticket',w:110},{k:'project',label:'Project',w:130},{k:'entries',label:'Entries',w:80},{k:'minutes',label:'Effort (min)',w:100},{k:'hours',label:'Hours',w:80},{k:'first',label:'First',w:100},{k:'last',label:'Last',w:100},{k:'status',label:'Latest status',w:110}];
-function tickets(rs){const m=new Map();rs.forEach(r=>{const k=val(r,'ticket');if(k==='—')return;let o=m.get(k);if(!o)m.set(k,o={ticket:k,project:val(r,'project'),entries:0,minutes:0,first:r.d,last:r.d,status:r.st||'—',ts:0});o.entries++;o.minutes+=r.m;if(r.d<o.first)o.first=r.d;if(r.d>=o.last&&r.e.startTs>=o.ts){o.last=r.d;o.ts=r.e.startTs;o.status=r.st||'—'}});
+const TDEFS=[{k:'ticket',label:'Ticket',w:120},{k:'system',label:'System',w:80},{k:'project',label:'Project',w:130},{k:'entries',label:'Entries',w:80},{k:'minutes',label:'Effort (min)',w:100},{k:'hours',label:'Hours',w:80},{k:'first',label:'First',w:100},{k:'last',label:'Last',w:100},{k:'status',label:'Latest status',w:110}];
+function tickets(rs){const m=new Map();rs.forEach(r=>{const k=val(r,'ticket');if(k==='—')return;let o=m.get(k);if(!o)m.set(k,o={ticket:k,system:val(r,'tsys'),project:val(r,'project')!=='—'?val(r,'project'):val(r,'tproj'),entries:0,minutes:0,first:r.d,last:r.d,status:r.st||'—',ts:0});o.entries++;o.minutes+=r.m;if(r.d<o.first)o.first=r.d;if(r.d>=o.last&&r.e.startTs>=o.ts){o.last=r.d;o.ts=r.e.startTs;o.status=r.st||'—'}});
  return[...m.values()].map(o=>(o.minutes=Math.round(o.minutes),o.hours=+(o.minutes/60).toFixed(1),o))}
 function body(w,rs){
  if(w.type==='tickets'){const t=tickets(rs);return t.length?gtbl(w,TDEFS,t,(o,k)=>o[k],o=>` data-a="hist" data-k="${esc(o.ticket)}" title="Show ticket history"`):'<p class="mt">No ticketed entries match the filters.</p>'}
@@ -279,7 +290,7 @@ const DEF=()=>[{id:'k1',title:'Total hours',type:'kpi',metric:'hours',span:3},{i
  {id:'c1',title:'Effort',type:'donut',field:'project',metric:'hours',span:4,n:8},{id:'c2',title:'Effort',type:'hbar',field:'nature',metric:'hours',span:4,n:8},{id:'c3',title:'Effort',type:'bar',field:'module',metric:'hours',span:4,n:8},
  {id:'c4',title:'Daily effort',type:'line',field:'date',metric:'hours',span:6,n:31,split:'none'},{id:'c5',title:'Weekly effort',type:'bar',field:'week',metric:'hours',span:6,n:12,split:'nature'},
  {id:'t0',title:'Ticket effort rollup',type:'tickets',span:12,n:10},{id:'t1',title:'Task entries',type:'entries',span:12,n:25}];
-const fields=()=>['date','week','month','weekday'].concat(cols().filter(c=>!['description','remark','effort','date','taskId','employee'].includes(c.key)&&!c.isEmployeeColumn).map(c=>c.key)).concat(cols().some(c=>c.key==='heading')?[]:['heading']);
+const fields=()=>['date','week','month','weekday'].concat(cols().filter(c=>!['description','remark','effort','date','taskId','employee'].includes(c.key)&&!c.isEmployeeColumn).map(c=>c.key)).concat(cols().some(c=>c.key==='heading')?[]:['heading']).concat(['tsys','tproj']);
 // ---- filters
 function sumF(){const p=[];if(F.from||F.to)p.push((F.from||'any')+' to '+(F.to||'any'));FK.forEach(k=>{if(F[k].length)p.push(label(k)+': '+F[k].join(', '))});kws().forEach(k=>p.push('“'+k+'”'));$('#fsum').textContent=p.length?p.join(' · '):'No filters'}
 function fillFilters(){$('#ms').innerHTML=FK.map(k=>{const set=[...new Set(rows.map(r=>val(r,k)))].filter(v=>v!=='—').sort((a,b)=>a.localeCompare(b));F[k]=F[k].filter(v=>set.includes(v));
@@ -373,7 +384,7 @@ $('#hX').onclick=()=>$('#dlgH').close();
 // widget editor
 $('#bAdd').onclick=()=>openEd(-1);
 function typeUI(){const t=$('#eY').value,k=t==='kpi',tb=t==='entries'||t==='tickets';$('#gF').style.display=(k||tb)?'none':'';$('#gN').style.display=k?'none':'';$('#nL').textContent=tb?'Rows per page':'Max items';$('#gP').style.display=(t==='bar'||t==='line')?'':'none';$('#gM').style.display=tb?'none':'';
- $('#eM').innerHTML=(k?[['completion','Task completion %'],['hours','Total hours'],['minutes','Total minutes'],['entries','Entries'],['tasks','Distinct tasks'],['days','Active days'],['avg','Avg hours / day']]:Object.entries(MEAS)).map(([v,l])=>`<option value="${v}">${l}</option>`).join('');$('#eM').value=editing.metric&&[...$('#eM').options].some(o=>o.value===editing.metric)?editing.metric:$('#eM').options[0].value}
+ $('#eM').innerHTML=(k?[['completion','Task completion %'],['utickets','Unique tickets'],['hours','Total hours'],['minutes','Total minutes'],['entries','Entries'],['tasks','Distinct tasks'],['days','Active days'],['avg','Avg hours / day']]:Object.entries(MEAS)).map(([v,l])=>`<option value="${v}">${l}</option>`).join('');$('#eM').value=editing.metric&&[...$('#eM').options].some(o=>o.value===editing.metric)?editing.metric:$('#eM').options[0].value}
 function openEd(i){editing=i<0?{id:'w'+Date.now(),title:'New widget',type:'hbar',field:'project',metric:'hours',span:6,n:10,split:'none'}:{...L[i]};editing._i=i;
  $('#eT').value=editing.title;$('#eY').value=editing.type;$('#eS').value=editing.span;$('#eN').value=editing.n||10;
  const fo=fields().map(k=>`<option value="${k}">${esc(label(k))}</option>`).join('');$('#eF').innerHTML=fo;$('#eF').value=editing.field||'project';
