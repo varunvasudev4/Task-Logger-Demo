@@ -287,12 +287,37 @@ body { padding-bottom: 84px; }
   white-space: pre-line; overflow-wrap: anywhere; word-break: break-word;
 }
 
+
+/* ── Wallpaper + profile header (adapted from Dashboard / Task Logger) ──
+   Wallpaper sits behind everything; surfaces are slightly translucent so it
+   shows through, exactly like the Dashboard cards. */
+#ds-wp { position: fixed; inset: 0; z-index: -1; display: none; pointer-events: none; background-repeat: no-repeat; overflow: hidden; }
+#ds-wp::after { content: ""; position: absolute; inset: 0; background: var(--ds-bg-tertiary); opacity: var(--ds-wp-dim, .25); }
+.ds-header {
+  align-items: center; gap: 12px; margin-bottom: 14px; padding: 10px 14px; flex-wrap: nowrap;
+  background: color-mix(in srgb, var(--ds-bg) 93%, transparent);
+  border: 1px solid var(--ds-border); border-radius: 12px;
+}
+.ds-avatar {
+  width: 46px; height: 46px; border-radius: 50%; flex: none; overflow: hidden;
+  display: grid; place-items: center; background: var(--ds-blue-mid); color: #fff;
+  font-family: var(--ds-font-head); font-weight: 700; font-size: 16px; letter-spacing: .02em;
+}
+.ds-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ds-avatar svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.ds-header .ds-title { font-size: 1.1rem; letter-spacing: 0; }
+.ds-header .ds-subtitle { margin-top: 2px; }
+.ds-panel { background: color-mix(in srgb, var(--ds-bg) 93%, transparent); }
+.ds-toolbar { background: color-mix(in srgb, var(--ds-bg-secondary) 93%, transparent); }
+.ds-summary-bar { background: transparent; }
+.daily-summary-project { background: color-mix(in srgb, var(--ds-bg) 60%, transparent); }
+.daily-summary-project-header { background: color-mix(in srgb, var(--ds-bg-secondary) 93%, transparent); }
+
 /* ── Responsive: phone breakpoint, mirrors tasklogger.html's 640px rule ── */
 @media (max-width: 640px) {
   body { padding: 1rem 0.75rem calc(4rem + 68px); }
-  .ds-header { flex-direction: column; align-items: flex-start; gap: 10px; }
-  .ds-header-actions { width: 100%; }
-  .ds-header-actions .ds-btn { flex: 1; justify-content: center; }
+  .ds-header { padding: 8px 12px; }
+  .ds-avatar { width: 40px; height: 40px; font-size: 14px; }
   .ds-toolbar { flex-direction: column; align-items: flex-start; gap: 10px; }
   .ds-toolbar-group { width: 100%; flex-wrap: wrap; }
   .ds-summary-bar { flex-direction: column; align-items: flex-start; gap: 4px; }
@@ -307,12 +332,58 @@ body { padding-bottom: 84px; }
   .daily-summary-project-tasks { padding: 4px 12px 8px; }
 }
 </style>
+<script>
+// Theme: same source as Task Logger / Dashboard. Read-only: ttl_theme (light|dark|system)
+// + ttl_masters.colorPrefs. Runs in <head> so the page never flashes the wrong palette.
+var DS_LIGHT={'bg':'#fffdf8','bg-secondary':'#f7f0dd','bg-tertiary':'#ede1c3','text-primary':'#26211a','text-secondary':'#5a4f3c','text-tertiary':'#8a7f68','border':'rgba(38,33,26,0.16)','border-md':'rgba(38,33,26,0.30)','blue-bg':'#fbe2d3','blue-mid':'#c94f1f','blue-dark':'#9c3c15','green-bg':'#dcefe8','green-mid':'#2f8f76','green-dark':'#1f6350'};
+var DS_DARK={'bg':'#1c2230','bg-secondary':'#232a3d','bg-tertiary':'#0c0e13','text-primary':'#edeff4','text-secondary':'#8b93a7','text-tertiary':'#5b6478','border':'#2e3549','border-md':'#454f6b','blue-bg':'#3a2a20','blue-mid':'#e8622c','blue-dark':'#ff8f5c','green-bg':'#1c332e','green-mid':'#3fab8f','green-dark':'#7fd4bc'};
+function dsLS(k){try{return localStorage.getItem(k)}catch(e){return null}}
+function dsMasters(){try{return JSON.parse(dsLS('ttl_masters'))||{}}catch(e){return {}}}
+function dsApplyTheme(){
+  var pref=dsLS('ttl_theme')||'system';
+  var dark=pref==='dark'||(pref!=='light'&&window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches);
+  var o=(dsMasters().colorPrefs||{})[dark?'dark':'light']||{};
+  var v={},base=dark?DS_DARK:DS_LIGHT,k;
+  for(k in base)v[k]=base[k];
+  for(k in o){var n=k.replace(/^--/,'');if(/^#[0-9a-f]{3,8}$/i.test(o[k]))v[n]=o[k]}
+  for(k in v)document.documentElement.style.setProperty('--ds-'+k,v[k]);
+  document.documentElement.setAttribute('data-theme',dark?'dark':'light');
+}
+dsApplyTheme();
+try{matchMedia('(prefers-color-scheme: dark)').addEventListener('change',dsApplyTheme)}catch(e){}
+</script>
+<script>
+// Fonts: same source/logic as Task Logger (masters.fontPrefs). Read-only; runs before first paint.
+// Family overrides all three font roles; size uses page zoom, exactly like Task Logger.
+(function(){
+  try{
+    var FAM={system:"-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",spacegrotesk:"'Space Grotesk', 'IBM Plex Sans', sans-serif",mono:"'IBM Plex Mono', ui-monospace, SFMono-Regular, monospace",serif:"Georgia, 'Times New Roman', Times, serif"};
+    var SCALE={sm:0.9,md:1,lg:1.1,xl:1.2};
+    var raw=localStorage.getItem('ttl_masters'),prefs=(raw&&JSON.parse(raw).fontPrefs)||{},root=document.documentElement;
+    var setAll=function(css){root.style.setProperty('--ds-font-ui',css);root.style.setProperty('--ds-font-head',css);root.style.setProperty('--ds-font-mono',css)};
+    if(prefs.family==='custom'&&(prefs.customFamily||prefs.customLink)){
+      var urls=[],t=String(prefs.customLink||'').replace(/<link\b[^>]*\brel\s*=\s*["']?(?:preconnect|dns-prefetch|preload)[^>]*>/gi,'');
+      var re=/href\s*=\s*["']([^"']+)["']|url\(\s*["']?([^"')\s]+)["']?\s*\)|(https:\/\/[^\s"'<>)]+)/gi,m;
+      while((m=re.exec(t))){var u=(m[1]||m[2]||m[3]||'').replace(/&amp;/g,'&');if(/^https:\/\//i.test(u)&&urls.indexOf(u)<0)urls.push(u)}
+      urls.forEach(function(u){var l=document.createElement('link');l.rel='stylesheet';l.href=u;document.head.appendChild(l)});
+      var name=String(prefs.customFamily||'').replace(/^\s*font-family\s*:/i,'').replace(/;+\s*$/,'').trim();
+      for(var i=0;i<urls.length&&!name;i++){var g=/[?&]family=([^&:;]+)/i.exec(urls[i]);if(g&&/googleapis\.com|fonts\.bunny\.net/i.test(urls[i]))name=decodeURIComponent(g[1].replace(/\+/g,' '))}
+      if(name)setAll(/[,'"]/.test(name)?name:("'"+name+"', sans-serif"));
+    }else if(prefs.family&&FAM[prefs.family]){setAll(FAM[prefs.family])}
+    var scale=(prefs.size==='custom')?((parseFloat(prefs.customSizePct)||100)/100):(SCALE[prefs.size]||1);
+    if(scale!==1)root.style.zoom=scale;
+  }catch(e){}
+})();
+</script>
 </head>
 <body>
+
+<div id="ds-wp" aria-hidden="true"></div>
 
 <div id="ds-page">
 
   <div class="ds-header">
+    <div class="ds-avatar" id="ds-avatar"></div>
     <div class="ds-header-titlebar">
       <div class="ds-title">Daily Summary</div>
       <div class="ds-subtitle">Read-only overview · generated from Task Logger data</div>
@@ -1147,6 +1218,68 @@ function renderDailySummary() {
     contentEl.appendChild(renderDailySummaryProject(projectGroup, idx));
   });
 }
+
+// ── Profile header + wallpaper (read-only; same keys as Task Logger / Dashboard) ──
+// ttl_username, ttl_user_photo (device-local photo, wins) → masters.userPhotoUrl,
+// masters.wallpaper (+ ttl_wallpaper_upload for an uploaded image). Nothing is written.
+function dsEsc(t) { return String(t == null ? '' : t).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+function dsRenderHeader() {
+  const el = document.getElementById('ds-avatar');
+  if (!el) return;
+  const name = (dsLS('ttl_username') || '').trim();
+  const photo = dsLS('ttl_user_photo') || dsMasters().userPhotoUrl || '';
+  const parts = name.split(/\s+/).filter(Boolean);
+  const ini = parts.length ? (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase() : '';
+  const fallback = ini ? dsEsc(ini) : '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="7" r="4"/><path d="M6 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/></svg>';
+  el.innerHTML = fallback;
+  if (photo) {
+    const img = new Image();
+    img.alt = '';
+    img.onload = function () { el.innerHTML = ''; el.appendChild(img); };
+    img.src = photo; // on error the initials/icon simply stay
+  }
+  el.title = (name || 'TTL user') + ' · data from Task Time Logger (read-only)';
+}
+
+const DS_WP_PRESETS = {
+  valley: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=2000&q=80',
+  forest: 'https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?auto=format&fit=crop&w=2000&q=80',
+  night:  'https://images.unsplash.com/photo-1519681393784-d120267933ba?auto=format&fit=crop&w=2000&q=80'
+};
+function dsClamp(v, a, b) { return Math.min(b, Math.max(a, v)); }
+function dsApplyWallpaper() {
+  const el = document.getElementById('ds-wp');
+  if (!el) return;
+  const w = dsMasters().wallpaper || {};
+  let src = '';
+  if (w.source === 'preset') src = DS_WP_PRESETS[w.presetId] || DS_WP_PRESETS.valley;
+  else if (w.source === 'custom') src = w.customType === 'upload' ? (dsLS('ttl_wallpaper_upload') || '') : (w.customUrl || '');
+  if (!src) { el.style.display = 'none'; el.style.backgroundImage = ''; return; }
+  const vw = window.innerWidth, vh = Math.max(1, window.innerHeight);
+  const dev = vw <= 640 ? 'phone' : (vw <= 1024 ? 'tablet' : 'desktop');
+  const f = (w.fit || {})[dev] || {};
+  const fit = { zoom: dsClamp(+f.zoom || 1, 1, 4), x: f.x == null ? 0.5 : dsClamp(+f.x, 0, 1), y: f.y == null ? 0.5 : dsClamp(+f.y, 0, 1) };
+  const dim = typeof w.dim === 'number' ? dsClamp(w.dim, 0, 80) : 25;
+  const img = new Image();
+  img.onload = function () {
+    // Same formula as Task Logger: cover the viewport, multiply by zoom, slide by x/y.
+    const z = Math.round(fit.zoom * 100);
+    const size = (img.naturalWidth / img.naturalHeight > vw / vh) ? 'auto ' + z + '%' : z + '% auto';
+    el.style.backgroundImage = "url('" + src.replace(/'/g, '%27') + "')";
+    el.style.backgroundSize = size;
+    el.style.backgroundPosition = (fit.x * 100) + '% ' + (fit.y * 100) + '%';
+    el.style.setProperty('--ds-wp-dim', dim / 100);
+    el.style.display = 'block';
+  };
+  img.onerror = function () { el.style.display = 'none'; };
+  img.src = src;
+}
+(function () {
+  let t = null;
+  window.addEventListener('resize', function () { clearTimeout(t); t = setTimeout(dsApplyWallpaper, 150); });
+})();
+dsRenderHeader();
+dsApplyWallpaper();
 
 dsRenderProjectFilterOptions();
 renderDailySummary();
