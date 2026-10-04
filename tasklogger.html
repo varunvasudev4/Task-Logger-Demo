@@ -3261,7 +3261,7 @@ const DOMAIN_WHOLE_KEY = '__domain__';
 // still records a domain outside this list (forward-compatible with a state
 // category not yet anticipated), but every call site added in this session uses one
 // of these.
-const SYNC_DOMAINS = ['logEntries', 'recurringPlans', 'masters', 'breakData', 'theme', 'weekendOverrides', 'counters', 'userName', 'todoItems'];
+const SYNC_DOMAINS = ['logEntries', 'recurringPlans', 'masters', 'breakData', 'theme', 'weekendOverrides', 'counters', 'userName', 'todoItems', 'dashboardConfig'];
 
 // In-memory domain change state, shaped as:
 //   { schemaVersion, domains: { [domain]: { dirty, version, lastChangeAt, entities: { [entityId]: { operation, version, timestamp, deviceId } } } } }
@@ -3476,7 +3476,7 @@ function buildDomainMeta() {
   // either was still "upload-only" (SYNC_AUDIT.md §1). No new tracking added;
   // both already write into domainSyncState via recordSyncChange() at every
   // real mutation site (Phase 19C/19D), same as the other five domains below.
-  ['masters', 'theme', 'breakData', 'counters', 'userName', 'logEntries', 'recurringPlans', 'todoItems'].forEach(d => {
+  ['masters', 'theme', 'breakData', 'counters', 'userName', 'logEntries', 'recurringPlans', 'todoItems', 'dashboardConfig'].forEach(d => {
     const rec = domainSyncState.domains[d];
     if (rec && rec.lastChangeAt) {
       meta[d] = { version: rec.version || 0, modifiedAt: rec.lastChangeAt, deviceId: getDeviceId() };
@@ -3522,6 +3522,82 @@ function adoptRemoteDomainMeta(domain, remoteMeta) {
 // "did this actually do anything" contract BatchCloudMerge's mergeOneRemoteTask()
 // outcome already uses, just boolean instead of an outcome string (no per-domain
 // UI/statistics surface exists yet to warrant the richer shape).
+
+// ── Dashboard configuration (index.html) ─────────────────────────────────────────
+// The Dashboard page keeps its own settings in three localStorage keys on this same
+// origin: widget layout, UI state (e.g. filter-column collapsed) and saved filters.
+// They are configuration, so they travel with Backup / Restore (both scopes) and with
+// Synchronization as one whole-document domain ('dashboardConfig', newer-wins).
+// The Dashboard never reads them while this page runs, so nothing here needs a re-render.
+const DASH_LAYOUT_KEY = 'ttl_dash_layout_v2';
+const DASH_UI_KEY = 'ttl_dash_ui';
+const DASH_SAVED_FILTERS_KEY = 'ttl_dash_saved_filters';
+const DASH_HASH_KEY = 'ttl_sync_dash_hash';   // device-local baseline; never synced or backed up
+const DASH_FIELDS = [['layout', DASH_LAYOUT_KEY, 'array'], ['ui', DASH_UI_KEY, 'object'], ['savedFilters', DASH_SAVED_FILTERS_KEY, 'array']];
+const dashShapeOk = (v, kind) => kind === 'array' ? Array.isArray(v) : (!!v && typeof v === 'object' && !Array.isArray(v));
+
+// Reads the Dashboard's current settings. Absent / unparsable keys are simply omitted.
+function collectDashboardConfig() {
+  const out = {};
+  DASH_FIELDS.forEach(f => {
+    try {
+      const raw = localStorage.getItem(f[1]);
+      if (raw == null) return;
+      const v = JSON.parse(raw);
+      if (dashShapeOk(v, f[2])) out[f[0]] = v;
+    } catch (e) {}
+  });
+  return out;
+}
+function dashboardConfigHash(cfg) { return simpleHash(stableStringify(cfg || collectDashboardConfig())); }
+function saveDashHashBaseline() { try { localStorage.setItem(DASH_HASH_KEY, dashboardConfigHash()); } catch (e) {} }
+
+// Replaces the Dashboard's settings with `cfg` (a collectDashboardConfig()-shaped object).
+// A key missing from `cfg` is removed so the Dashboard falls back to its default for it.
+function applyDashboardConfig(cfg) {
+  if (!cfg || typeof cfg !== 'object') return false;
+  DASH_FIELDS.forEach(f => {
+    try {
+      if (dashShapeOk(cfg[f[0]], f[2])) localStorage.setItem(f[1], JSON.stringify(cfg[f[0]]));
+      else localStorage.removeItem(f[1]);
+    } catch (e) {}
+  });
+  saveDashHashBaseline();
+  return true;
+}
+
+// Called from saveState() / startup / when another tab (the Dashboard) writes its keys:
+// if the Dashboard's settings differ from the last baseline, mark the domain changed.
+// With no baseline yet, existing settings are recorded once so they get uploaded.
+function trackDashboardConfigChange() {
+  try {
+    const cfg = collectDashboardConfig();
+    const hash = dashboardConfigHash(cfg);
+    const prev = localStorage.getItem(DASH_HASH_KEY);
+    if (prev === hash) return;
+    if (prev !== null || Object.keys(cfg).length > 0) recordSyncChange('dashboardConfig', null, 'update');
+    localStorage.setItem(DASH_HASH_KEY, hash);
+  } catch (e) {}
+}
+window.addEventListener('storage', ev => {
+  if (ev && ev.key && ev.key.indexOf('ttl_dash_') === 0) trackDashboardConfigChange();
+});
+window.addEventListener('focus', () => trackDashboardConfigChange());
+
+function applyRemoteDashboardConfigIfNewer(remoteParsed) {
+  if (!remoteParsed || !remoteParsed.dashboardConfig || typeof remoteParsed.dashboardConfig !== 'object') return false;
+  trackDashboardConfigChange();   // pick up any Dashboard edit made since the last save
+  if (isDomainDirty('dashboardConfig')) return false;
+  const remoteMeta = remoteParsed._syncMeta && remoteParsed._syncMeta.domainMeta && remoteParsed._syncMeta.domainMeta.dashboardConfig;
+  if (!remoteMeta || !remoteMeta.modifiedAt) return false;
+  const rec = domainSyncState.domains['dashboardConfig'];
+  const localModifiedAt = rec ? rec.lastChangeAt : null;
+  if (localModifiedAt && localModifiedAt >= remoteMeta.modifiedAt) return false;
+  if (dashboardConfigHash(remoteParsed.dashboardConfig) === dashboardConfigHash()) { adoptRemoteDomainMeta('dashboardConfig', remoteMeta); return false; }
+  applyDashboardConfig(remoteParsed.dashboardConfig);   // not a local edit: no recordSyncChange()
+  adoptRemoteDomainMeta('dashboardConfig', remoteMeta);
+  return true;
+}
 
 function applyRemoteMastersIfNewer(remoteParsed) {
   if (!remoteParsed || !remoteParsed.masters || typeof remoteParsed.masters !== 'object') return false;
@@ -3820,6 +3896,8 @@ function mergeNonTaskDomains(remoteParsed, opts) {
     if (!skip && applyRemoteLogEntriesIfNewer(remoteParsed)) changed.push('logEntries');
     if (!skip && applyRemoteRecurringPlansIfNewer(remoteParsed)) changed.push('recurringPlans');
     if (!skip && applyRemoteTodoItems(remoteParsed)) changed.push('todoItems');
+    // Dashboard settings are not part of SyncMerge's three-way document, so they are applied on both passes.
+    if (applyRemoteDashboardConfigIfNewer(remoteParsed)) changed.push('dashboardConfig');
   } catch (e) {}
   if (changed.length > 0) {
     saveState();
@@ -3908,6 +3986,7 @@ function trackNonTaskDomainChangesOnSave() {
     if (_lastUserNameHash !== null && uHash !== _lastUserNameHash) recordSyncChange('userName', null, 'update');
     _lastUserNameHash = uHash;
   } catch (e) {}
+  trackDashboardConfigChange();
 }
 
 // Primes the three baseline hashes above from the just-loaded (pre-mutation)
@@ -3922,6 +4001,7 @@ function primeNonTaskDomainHashes() {
     _lastCountersHash = simpleHash(stableStringify({ taskIdCounter: taskIdCounter, importIdCounter: importIdCounter, recurringPlanIdCounter: recurringPlanIdCounter }));
     _lastUserNameHash = simpleHash(String(userName || ''));
   } catch (e) {}
+  trackDashboardConfigChange();
 }
 // ── End Non-Task Domain Synchronization (Phase 19E) ───────────────────────────────
 
@@ -8584,7 +8664,8 @@ function buildLocalBusinessState() {
     userName: userName, theme: getStoredTheme(),
     breakData: getBreakDataForSync(),
     todoItems: todoItems, todoTombstones: todoTombstones, todoIdCounter: todoIdCounter,
-    weekendOverrides: collectWeekendOverrides()
+    weekendOverrides: collectWeekendOverrides(),
+    dashboardConfig: collectDashboardConfig()
   };
   return (typeof SyncMerge !== 'undefined') ? SyncMerge.applyPendingOverrides(business) : business;
 }
@@ -9135,7 +9216,7 @@ const SyncMerge = (function () {
     const lg = {}; (p.logEntries || []).forEach(r => { const k = logKey(r); if (k) lg[k] = h(KINDS.log.fields(r)); });
     const pl = {}; (p.recurringPlans || []).forEach(r => { if (r && r.syncUid) pl[r.syncUid] = h(KINDS.plan.fields(r)); });
     const doc = flatten(buildDoc(p));
-    return simpleHash(stableStringify({ t: t, td: td, tomb: Object.keys(p.todoTombstones || {}).sort(), lg: lg, pl: pl, doc: h(doc), br: h(p.breakData || {}), wk: h(p.weekendOverrides || {}) }));
+    return simpleHash(stableStringify({ t: t, td: td, tomb: Object.keys(p.todoTombstones || {}).sort(), lg: lg, pl: pl, doc: h(doc), br: h(p.breakData || {}), wk: h(p.weekendOverrides || {}), dc: h(p.dashboardConfig || {}) }));
   }
 
   function reconcile(remote) {
@@ -18494,6 +18575,8 @@ async function confirmReviewSelection() {
 // Backup format history:
 //   _version 2 — flat object: tasks, logEntries, masters, counters, recurringPlans,
 //                userName, breakData, theme, log-table prefs, weekendOverrides, To Do.
+//   dashboardConfig (added within v3, optional) — the Dashboard page's layout / UI / saved
+//                filters. Absent in older files; a restore then leaves the Dashboard untouched.
 //   _version 3 — the SAME flat fields (so the file stays readable by older builds and
 //                still mirrors buildStatePayload()), plus:
 //                  application / backupVersion / exportedAt  — self-describing header
@@ -18599,6 +18682,7 @@ function buildBackupObject(scope, opts) {
     theme: getStoredTheme(),
     logTableColWidths,
     logTableColPinned,
+    dashboardConfig: collectDashboardConfig(),
     settings: collectBackupSettings()
   } : {
     _version: TTL_BACKUP_VERSION,
@@ -18622,6 +18706,7 @@ function buildBackupObject(scope, opts) {
     logTableColWidths,
     logTableColPinned,
     weekendOverrides,
+    dashboardConfig: collectDashboardConfig(),
     // To Do backlog (Pending > To Do) — stored separately from tasks, kept separate here.
     todoItems,
     todoTombstones,
@@ -18679,6 +18764,12 @@ function validateBackup(b) {
   if (b.breakData !== undefined && b.breakData !== null && !isObj(b.breakData)) throw new Error('Backup is corrupted: break data is malformed.');
   if (b.weekendOverrides !== undefined && b.weekendOverrides !== null && !isObj(b.weekendOverrides)) throw new Error('Backup is corrupted: weekend overrides are malformed.');
   if (b.settings !== undefined && b.settings !== null && !isObj(b.settings)) throw new Error('Backup is corrupted: settings section is malformed.');
+  if (b.dashboardConfig !== undefined && b.dashboardConfig !== null) {
+    const dc = b.dashboardConfig;
+    if (!isObj(dc) || (dc.layout !== undefined && !Array.isArray(dc.layout)) || (dc.savedFilters !== undefined && !Array.isArray(dc.savedFilters)) || (dc.ui !== undefined && !isObj(dc.ui))) {
+      throw new Error('Backup is corrupted: dashboard configuration is malformed.');
+    }
+  }
   if (isObj(b.masters) && b.masters.logColumns !== undefined && !Array.isArray(b.masters.logColumns)) {
     throw new Error('Backup is corrupted: task column configuration is malformed.');
   }
@@ -18688,6 +18779,15 @@ function validateBackup(b) {
     if (typeof b.contents.logEntries === 'number' && b.contents.logEntries !== b.logEntries.length) throw new Error('Backup is incomplete: log entry count does not match.');
     if (typeof b.contents.todoItems === 'number' && Array.isArray(b.todoItems) && b.contents.todoItems !== b.todoItems.length) throw new Error('Backup is incomplete: To Do count does not match.');
   }
+}
+
+// Restores the Dashboard's settings from a backup and flags them for the next sync.
+// Backups without a dashboardConfig section leave the Dashboard as it is.
+function restoreDashboardFromBackup(b) {
+  if (!b || !b.dashboardConfig || typeof b.dashboardConfig !== 'object') return false;
+  applyDashboardConfig(b.dashboardConfig);
+  try { recordSyncChange('dashboardConfig', null, 'update'); } catch (err) {}
+  return true;
 }
 
 function importBackup(event, scope) {
@@ -18712,7 +18812,7 @@ function importBackup(event, scope) {
       }
       const when = (b.exportedAt || b._exported) ? new Date(b.exportedAt || b._exported).toLocaleString() : 'unknown date';
       const msg = scope === 'config'
-        ? `This will replace your CONFIGURATION (masters, columns, settings, theme${b.profileIncluded === false ? '' : ', profile photo, name, colours, wallpaper'}) with the backup from ${when}.\n\n${b.profileIncluded === false ? 'This file has no profile settings, so your current photo, name, colours and wallpaper are kept.\n\n' : ''}Your tasks and logs are kept.\n\nAre you sure?`
+        ? `This will replace your CONFIGURATION (masters, columns, settings, theme, dashboard layout & saved filters${b.profileIncluded === false ? '' : ', profile photo, name, colours, wallpaper'}) with the backup from ${when}.\n\n${b.profileIncluded === false ? 'This file has no profile settings, so your current photo, name, colours and wallpaper are kept.\n\n' : ''}Your tasks and logs are kept.\n\nAre you sure?`
         : `This will replace ALL current data and configuration with the backup from ${when}.\n\nAre you sure?`;
       if (!confirm(msg)) {
         if (status) status.textContent = 'Cancelled.';
@@ -18733,6 +18833,7 @@ function importBackup(event, scope) {
         saveState();
         try { loadState(); saveState(); } catch (err) {}   // same load-time normalization as a full restore
         if (b.theme) setTheme(b.theme);
+        restoreDashboardFromBackup(b);
         renderAll();
         try { renderHeaderAvatar(); applyWallpaper(); } catch (err) {}
         if (status) { status.style.color = 'var(--green-dark)'; status.textContent = '✓ Configuration restored. Tasks and logs were not changed.'; }
@@ -18811,6 +18912,7 @@ function importBackup(event, scope) {
       // Remaining domains (theme/breakData record their own change inside their setters).
       if (b.breakData) saveBreakData(b.breakData);
       if (b.theme) setTheme(b.theme);
+      restoreDashboardFromBackup(b);
       try { recordSyncChange('logEntries', null, 'update'); } catch (err) {}
       try { recordSyncChange('recurringPlans', null, 'update'); } catch (err) {}
       if (todoRestored) { try { recordSyncChange('todoItems', null, 'update'); } catch (err) {} }
