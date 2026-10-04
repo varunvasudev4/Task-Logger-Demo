@@ -20,6 +20,9 @@ header.top h1{font-size:1.1rem;margin:0}header.top small{color:var(--text-second
 .tt{min-width:0}
 #tip{position:fixed;inset:auto;margin:0;border:0;overflow:visible;pointer-events:none;max-width:min(260px,calc(100vw - 16px));padding:6px 10px;border-radius:var(--radius-md);background:var(--text-primary);color:var(--bg);font:500 12px/1.35 var(--font-mono);letter-spacing:.02em;box-shadow:0 4px 14px rgba(0,0,0,.28);opacity:0;transition:opacity .12s}
 #tip.on{opacity:1}
+#tip{white-space:pre-line}
+.hb[data-ch]:hover .t i,.vb .c[data-ch]:hover>i,.vb .stk i:hover{filter:brightness(1.15)}.hb[data-ch]:hover{background:var(--bg-secondary);border-radius:6px}
+.dn svg circle[data-tip]:hover{stroke-width:6.5}.lg div[data-tip]:hover{background:var(--bg-secondary);border-radius:4px}
 @media print{#tip{display:none!important}}
 /* sticky header + filters (collapses on scroll down, expands on scroll up) */
 html{overflow-anchor:none;scrollbar-gutter:stable}
@@ -84,7 +87,7 @@ body.fsmode{overflow:hidden}body.fsmode .w:not(.fs),body.fsmode #stick,body.fsmo
 .vb .c>i{width:70%;border-radius:4px 4px 0 0;min-height:2px}.vb .c span{max-width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-secondary)}
 .stk{width:70%;display:flex;flex-direction:column-reverse;border-radius:4px 4px 0 0;overflow:hidden}.stk i{width:100%;display:block}
 .lg2{display:flex;gap:10px;flex-wrap:wrap;font-size:.75rem;margin-top:8px;color:var(--text-secondary)}.lg2 i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:4px}
-.dn{display:flex;gap:14px;align-items:center;flex-wrap:wrap}.dn svg{width:130px;flex:none}.lg{font-size:.8rem;flex:1;min-width:120px}.lg div{display:flex;gap:6px;margin:3px 0}.lg b{margin-left:auto}.lg i{width:10px;height:10px;border-radius:3px;margin-top:4px;flex:none}
+.dn{display:flex;gap:14px;align-items:center;flex-wrap:wrap}.dn svg{width:130px;flex:none;overflow:visible}.lg{font-size:.8rem;flex:1;min-width:120px}.lg div{display:flex;gap:6px;margin:3px 0}.lg b{margin-left:auto}.lg i{width:10px;height:10px;border-radius:3px;margin-top:4px;flex:none}
 .sc{overflow:auto;max-height:440px;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
 table{border-collapse:collapse;width:100%;font-size:.8rem}th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);vertical-align:top;overflow:hidden;text-overflow:ellipsis}
 th{position:sticky;top:0;background:var(--bg);color:var(--text-secondary);z-index:2;cursor:pointer;user-select:none;white-space:nowrap}
@@ -223,7 +226,7 @@ const kws=()=>F.kw.concat(F.q.trim()?[F.q.trim()]:[]).map(s=>s.toLowerCase());
 function fr(){const kw=kws();return rows.filter(r=>(!F.from||r.d>=F.from)&&(!F.to||r.d<=F.to)&&FK.every(k=>!F[k].length||F[k].includes(val(r,k)))&&kw.every(q=>[r.e.heading,r.e.description,r.e.module,r.tk&&r.tk.id,r.tk&&r.tk.system].some(x=>String(x||'').toLowerCase().includes(q))))}
 const mv=(r,met)=>met==='count'?1:met==='hours'?r.m/60:r.m;
 const fmt=(v,met)=>met==='count'?Math.round(v):met==='hours'?(+v).toFixed(1)+'h':Math.round(v)+'m';
-function agg(rs,f,met,n){const m=new Map();rs.forEach(r=>{const k=String(val(r,f));m.set(k,(m.get(k)||0)+mv(r,met))});let a=[...m].map(([k,v])=>({k,v}));
+function agg(rs,f,met,n){const m=new Map();rs.forEach(r=>{const k=String(val(r,f));let o=m.get(k);if(!o)m.set(k,o={v:0,c:0,mn:0,tk:new Set()});o.v+=mv(r,met);o.c++;o.mn+=r.m;if(r.tk)o.tk.add(r.tk.id.toUpperCase())});let a=[...m].map(([k,o])=>({k,v:o.v,c:o.c,mn:o.mn,tk:o.tk.size}));
  if(f==='weekday')a.sort((x,y)=>WD.indexOf(x.k)-WD.indexOf(y.k));else if(TIME.includes(f)){a.sort((x,y)=>x.k<y.k?-1:1);if(n)a=a.slice(-n)}else{a.sort((x,y)=>y.v-x.v);if(n)a=a.slice(0,n)}return a}
 function aggS(rs,f,met,n,sp){const a=agg(rs,f,met,n),keys=new Set(a.map(x=>x.k)),tot=new Map(),cell=new Map();
  rs.forEach(r=>{if(!keys.has(String(val(r,f))))return;const s=String(val(r,sp));tot.set(s,(tot.get(s)||0)+mv(r,met))});
@@ -265,21 +268,25 @@ function entryDefs(){const seen=new Set(),d=[{k:'heading',label:'Task',w:200}];s
 const TDEFS=[{k:'ticket',label:'Ticket',w:120},{k:'system',label:'System',w:80},{k:'project',label:'Project',w:130},{k:'entries',label:'Entries',w:80},{k:'minutes',label:'Effort (min)',w:100},{k:'hours',label:'Hours',w:80},{k:'first',label:'First',w:100},{k:'last',label:'Last',w:100},{k:'status',label:'Latest status',w:110}];
 function tickets(rs){const m=new Map();rs.forEach(r=>{const k=val(r,'ticket');if(k==='—')return;let o=m.get(k);if(!o)m.set(k,o={ticket:k,system:val(r,'tsys'),project:val(r,'project')!=='—'?val(r,'project'):val(r,'tproj'),entries:0,minutes:0,first:r.d,last:r.d,status:r.st||'—',ts:0});o.entries++;o.minutes+=r.m;if(r.d<o.first)o.first=r.d;if(r.d>=o.last&&r.e.startTs>=o.ts){o.last=r.d;o.ts=r.e.startTs;o.status=r.st||'—'}});
  return[...m.values()].map(o=>(o.minutes=Math.round(o.minutes),o.hours=+(o.minutes/60).toFixed(1),o))}
+const pc=(x,t)=>{const p=t?x/t*100:0;return p>0&&p<1?'<1':Math.round(p)};
+const tipTxt=(x,met,all)=>x.k+'\n'+MEAS[met]+': '+fmt(x.v,met)+' ('+pc(x.v,all)+'% of total)\nEntries: '+x.c+'\nEffort: '+(x.mn/60).toFixed(1)+'h ('+Math.round(x.mn)+' min)\nUnique tickets: '+x.tk;
+const segTxt=(x,s,v,met)=>x.k+' · '+s+'\n'+MEAS[met]+': '+fmt(v,met)+' ('+pc(v,x.v)+'% of this bar)\nBar total: '+fmt(x.v,met);
+const ta=t=>` data-ch="1" data-tip="${esc(t)}"`;
 function body(w,rs){
  if(w.type==='tickets'){const t=tickets(rs);return t.length?gtbl(w,TDEFS,t,(o,k)=>o[k],o=>` data-a="hist" data-k="${esc(o.ticket)}" title="Show ticket history"`):'<p class="mt">No ticketed entries match the filters.</p>'}
  if(!rs.length)return'<p class="mt">No entries match the filters.</p>';
  if(w.type==='kpi'){if(w.metric==='completion'){const c=completion(rs);return`<div class="kv">${kpi(rs,w.metric)}</div><div class="pb" role="progressbar" aria-valuenow="${Math.round(c.pct)}" aria-valuemin="0" aria-valuemax="100"><i style="width:${c.pct}%"></i></div><div class="kd">${c.done} of ${c.total} tasks completed · ${c.pending} pending${c.blocked?' · '+c.blocked+' blocked':''}</div>`}return`<div class="kv">${kpi(rs,w.metric)}</div>`}
  if(w.type==='entries')return gtbl(w,entryDefs(),rs,(r,k)=>val(r,k));
- const met=w.metric||'hours',a=agg(rs,w.field,met,w.n||10),max=Math.max(...a.map(x=>x.v),1),tot=a.reduce((s,x)=>s+x.v,0)||1,sp=w.split&&w.split!=='none'&&(w.type==='bar'||w.type==='line')?aggS(rs,w.field,met,w.n||10,w.split):null;
+ const met=w.metric||'hours',all=rs.reduce((q,r)=>q+mv(r,met),0),a=agg(rs,w.field,met,w.n||10),max=Math.max(...a.map(x=>x.v),1),tot=a.reduce((s,x)=>s+x.v,0)||1,sp=w.split&&w.split!=='none'&&(w.type==='bar'||w.type==='line')?aggS(rs,w.field,met,w.n||10,w.split):null;
  CSVS[w.id]=sp?{head:[label(w.field)].concat(sp.S),rows:sp.a.map(x=>[x.k].concat(sp.S.map(s=>+sp.get(x.k,s).toFixed(2))))}:{head:[label(w.field),MEAS[met]],rows:a.map(x=>[x.k,+x.v.toFixed(2)])};
  const lg=sp?`<div class="lg2">${sp.S.map((s,i)=>`<span><i style="background:${col(i)}"></i>${esc(s)}</span>`).join('')}</div>`:'';
- if(w.type==='hbar')return a.map((x,i)=>`<div class="hb"><span class="l" title="${esc(x.k)}">${esc(x.k)}</span><div class="t"><i style="width:${x.v/max*100}%;background:${col(i)}"></i></div><b>${fmt(x.v,met)}</b></div>`).join('');
- if(w.type==='bar')return`<div class="vb">${a.map((x,i)=>`<div class="c" title="${esc(x.k)}"><b>${fmt(x.v,met)}</b>${sp?`<div class="stk" style="height:${x.v/max*75}%">${sp.S.map((s,j)=>`<i title="${esc(s)}: ${fmt(sp.get(x.k,s),met)}" style="height:${sp.get(x.k,s)/(x.v||1)*100}%;background:${col(j)}"></i>`).join('')}</div>`:`<i style="height:${x.v/max*75}%;background:${col(i)}"></i>`}<span>${esc(x.k)}</span></div>`).join('')}</div>${lg}`;
+ if(w.type==='hbar')return a.map((x,i)=>`<div class="hb"${ta(tipTxt(x,met,all))}><span class="l">${esc(x.k)}</span><div class="t"><i style="width:${x.v/max*100}%;background:${col(i)}"></i></div><b>${fmt(x.v,met)}</b></div>`).join('');
+ if(w.type==='bar')return`<div class="vb">${a.map((x,i)=>`<div class="c"${ta(tipTxt(x,met,all))}><b>${fmt(x.v,met)}</b>${sp?`<div class="stk" style="height:${x.v/max*75}%">${sp.S.map((s,j)=>`<i${ta(segTxt(x,s,sp.get(x.k,s),met))} style="height:${sp.get(x.k,s)/(x.v||1)*100}%;background:${col(j)}"></i>`).join('')}</div>`:`<i style="height:${x.v/max*75}%;background:${col(i)}"></i>`}<span>${esc(x.k)}</span></div>`).join('')}</div>${lg}`;
  if(w.type==='gtable')return gtbl(w,[{k:'k',label:label(w.field),w:200},{k:'v',label:MEAS[met],w:110},{k:'p',label:'%',w:70}],a,(x,k)=>k==='k'?x.k:k==='v'?+x.v.toFixed(2):Math.round(x.v/tot*100));
- if(w.type==='donut'){let acc=0;return`<div class="dn"><svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="15.9155" fill="none" stroke="var(--bg-secondary)" stroke-width="5"/>${a.map((x,i)=>{const p=x.v/tot*100,s=`<circle cx="18" cy="18" r="15.9155" fill="none" stroke="${col(i)}" stroke-width="5" stroke-dasharray="${p} ${100-p}" stroke-dashoffset="${25-acc}"/>`;acc+=p;return s}).join('')}</svg><div class="lg">${a.map((x,i)=>`<div><i style="background:${col(i)}"></i><span>${esc(x.k)}</span><b>${fmt(x.v,met)}</b></div>`).join('')}</div></div>`}
+ if(w.type==='donut'){let acc=0;return`<div class="dn"><svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="15.9155" fill="none" stroke="var(--bg-secondary)" stroke-width="5"/>${a.map((x,i)=>{const p=x.v/tot*100,s=`<circle cx="18" cy="18" r="15.9155" fill="none" stroke="${col(i)}" stroke-width="5" stroke-dasharray="${p} ${100-p}" stroke-dashoffset="${25-acc}"${ta(tipTxt(x,met,all))}/>`;acc+=p;return s}).join('')}</svg><div class="lg">${a.map((x,i)=>`<div${ta(tipTxt(x,met,all))}><i style="background:${col(i)}"></i><span>${esc(x.k)}</span><b>${fmt(x.v,met)}</b></div>`).join('')}</div></div>`}
  if(w.type==='line'){const W=400,H=150,p=14,X=i=>p+(a.length>1?i/(a.length-1):.5)*(W-2*p),series=sp?sp.S:[null],gmax=sp?Math.max(...a.flatMap(x=>sp.S.map(s=>sp.get(x.k,s))),1):max;
-  const line=(vals,c)=>{const pts=vals.map((v,i)=>[X(i),H-p-v/gmax*(H-2*p)]),ln=pts.map(q=>q.join(',')).join(' ');return(sp?'':`<polygon points="${p},${H-p} ${ln} ${pts[pts.length-1][0]},${H-p}" fill="${c}" opacity=".15"/>`)+`<polyline points="${ln}" fill="none" stroke="${c}" stroke-width="2"/>`+pts.map(q=>`<circle cx="${q[0]}" cy="${q[1]}" r="2.4" fill="${c}"/>`).join('')};
-  return`<svg viewBox="0 0 ${W} ${H+16}" style="width:100%;height:auto">${series.map((s,i)=>line(s===null?a.map(x=>x.v):a.map(x=>sp.get(x.k,s)),col(i))).join('')}<g font-size="9" fill="var(--text-secondary)"><text x="${p}" y="${H+12}">${esc(a[0].k)}</text><text x="${W-p}" y="${H+12}" text-anchor="end">${esc(a[a.length-1].k)}</text><text x="${W-p}" y="10" text-anchor="end">max ${fmt(gmax,met)}</text></g></svg>${lg}`}
+  const line=(vals,c,tf)=>{const pts=vals.map((v,i)=>[X(i),H-p-v/gmax*(H-2*p)]),ln=pts.map(q=>q.join(',')).join(' ');return(sp?'':`<polygon points="${p},${H-p} ${ln} ${pts[pts.length-1][0]},${H-p}" fill="${c}" opacity=".15"/>`)+`<polyline points="${ln}" fill="none" stroke="${c}" stroke-width="2"/>`+pts.map((q,j)=>`<circle cx="${q[0]}" cy="${q[1]}" r="2.4" fill="${c}"/><circle cx="${q[0]}" cy="${q[1]}" r="9" fill="transparent"${ta(tf(j))}/>`).join('')};
+  return`<svg viewBox="0 0 ${W} ${H+16}" style="width:100%;height:auto">${series.map((s,i)=>line(s===null?a.map(x=>x.v):a.map(x=>sp.get(x.k,s)),col(i),j=>s===null?tipTxt(a[j],met,all):a[j].k+' · '+s+'\n'+MEAS[met]+': '+fmt(sp.get(a[j].k,s),met))).join('')}<g font-size="9" fill="var(--text-secondary)"><text x="${p}" y="${H+12}">${esc(a[0].k)}</text><text x="${W-p}" y="${H+12}" text-anchor="end">${esc(a[a.length-1].k)}</text><text x="${W-p}" y="10" text-anchor="end">max ${fmt(gmax,met)}</text></g></svg>${lg}`}
  return''}
 const TBL=t=>t==='entries'||t==='tickets'||t==='gtable';
 function render(){CSVS={};document.body.classList.toggle('fsmode',!!FS);const rs=fr();$('#cnt').textContent=rs.length+' / '+rows.length+' entries';sumF();
@@ -318,15 +325,17 @@ const tip=document.createElement('div');tip.id='tip';tip.setAttribute('role','to
 let tipEl=null,tipT=0,tipTouch=false,tipSup=false;
 const tipOf=el=>{if(el.hasAttribute('title')){el.dataset.tip=el.getAttribute('title');el.removeAttribute('title')}return el.dataset.tip||''};
 function hideTip(){clearTimeout(tipT);tipEl=null;tip.classList.remove('on');try{tip.hidePopover()}catch(e){}}
+let pt={x:0,y:0};
+function placeTip(el){const ch=el.hasAttribute('data-ch'),r=ch?{left:pt.x,width:0,top:pt.y-6,bottom:pt.y+12}:el.getBoundingClientRect(),w=tip.offsetWidth,h=tip.offsetHeight;let x=Math.max(8,Math.min(r.left+r.width/2-w/2,innerWidth-w-8)),y=r.bottom+8;if(y+h>innerHeight-8)y=Math.max(8,r.top-h-8);tip.style.left=x+'px';tip.style.top=y+'px'}
 function showTip(el){const t=tipOf(el);if(!t||!el.isConnected)return;tipEl=el;tip.textContent=t;tip.style.left='0px';tip.style.top='0px';try{if(!tip.matches(':popover-open'))tip.showPopover()}catch(e){}
- const r=el.getBoundingClientRect(),w=tip.offsetWidth,h=tip.offsetHeight;let x=Math.max(8,Math.min(r.left+r.width/2-w/2,innerWidth-w-8)),y=r.bottom+8;if(y+h>innerHeight-8)y=Math.max(8,r.top-h-8);
- tip.style.left=x+'px';tip.style.top=y+'px';tip.classList.add('on')}
+ placeTip(el);tip.classList.add('on')}
+document.addEventListener('pointermove',e=>{pt.x=e.clientX;pt.y=e.clientY;if(tipEl&&tipEl.hasAttribute('data-ch')&&tip.classList.contains('on'))placeTip(tipEl)},{passive:true});
 const tipTarget=e=>e.target.closest?e.target.closest('[title],[data-tip]'):null;
-document.addEventListener('pointerover',e=>{if(e.pointerType==='touch')return;const el=tipTarget(e);if(!el){hideTip();return}if(el===tipEl)return;tipOf(el);clearTimeout(tipT);tipT=setTimeout(()=>showTip(el),300)});
-document.addEventListener('pointerout',e=>{if(e.pointerType!=='touch')hideTip()});
+document.addEventListener('pointerover',e=>{if(e.pointerType==='touch')return;pt.x=e.clientX;pt.y=e.clientY;const el=tipTarget(e);if(!el){hideTip();return}if(el===tipEl)return;tipOf(el);clearTimeout(tipT);tipT=setTimeout(()=>showTip(el),el.hasAttribute('data-ch')?90:300)});
+document.addEventListener('pointerout',e=>{if(e.pointerType==='touch')return;const el=tipTarget(e);if(el&&e.relatedTarget&&el.contains(e.relatedTarget))return;hideTip()});
 document.addEventListener('focusin',e=>{const el=tipTarget(e);if(el&&el.matches(':focus-visible'))showTip(el)});
 document.addEventListener('focusout',hideTip);
-document.addEventListener('pointerdown',e=>{if(e.pointerType==='touch'){const el=tipTarget(e);if(el){tipOf(el);clearTimeout(tipT);tipT=setTimeout(()=>{tipTouch=true;showTip(el)},450)}}else hideTip()});
+document.addEventListener('pointerdown',e=>{if(e.pointerType==='touch'){const el=tipTarget(e);if(el){tipOf(el);clearTimeout(tipT);pt.x=e.clientX;pt.y=e.clientY;tipT=setTimeout(()=>{tipTouch=true;showTip(el)},450)}}else hideTip()});
 ['pointerup','pointercancel'].forEach(t=>document.addEventListener(t,e=>{if(e.pointerType!=='touch')return;clearTimeout(tipT);if(tipTouch){tipSup=true;setTimeout(()=>{tipSup=false},700);setTimeout(hideTip,1800);tipTouch=false}}));
 document.addEventListener('click',e=>{if(tipSup){e.preventDefault();e.stopPropagation();tipSup=false;return}hideTip()},true);
 addEventListener('scroll',hideTip,{passive:true});addEventListener('keydown',e=>{if(e.key==='Escape')hideTip()});
