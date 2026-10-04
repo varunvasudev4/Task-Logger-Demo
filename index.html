@@ -21,6 +21,7 @@ header.top h1{font-size:1.1rem;margin:0}header.top small{color:var(--text-second
 #tip{position:fixed;inset:auto;margin:0;border:0;overflow:visible;pointer-events:none;max-width:min(260px,calc(100vw - 16px));padding:6px 10px;border-radius:var(--radius-md);background:var(--text-primary);color:var(--bg);font:500 12px/1.35 var(--font-mono);letter-spacing:.02em;box-shadow:0 4px 14px rgba(0,0,0,.28);opacity:0;transition:opacity .12s}
 #tip.on{opacity:1}
 #tip{white-space:pre-line}
+[data-ch]{-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none}
 .hb[data-ch]:hover .t i,.vb .c[data-ch]:hover>i,.vb .stk i:hover{filter:brightness(1.15)}.hb[data-ch]:hover{background:var(--bg-secondary);border-radius:6px}
 .dn svg circle[data-tip]:hover{stroke-width:6.5}.lg div[data-tip]:hover{background:var(--bg-secondary);border-radius:4px}
 @media print{#tip{display:none!important}}
@@ -322,7 +323,7 @@ function ingest(o){o=o.data||o;const g=(a,b)=>{let v=o[a]!=null?o[a]:o[b];if(typ
  const l=g('ttl_log','logEntries');if(!Array.isArray(l))throw 0;D={log:l,tasks:g('ttl_tasks','tasks')||[],masters:g('ttl_masters','masters')||{},user:o.ttl_username||o.userName||'',theme:D.theme,wpUp:o.wallpaperUpload||'',photo:'',src:'imported file'};F.from='';F.to='';RNG={from:'',to:''};boot()}
 // ---- tooltips: one themed tooltip for every [title]/[data-tip] element (hover, keyboard focus, touch long-press)
 const tip=document.createElement('div');tip.id='tip';tip.setAttribute('role','tooltip');tip.setAttribute('popover','manual');document.body.appendChild(tip);
-let tipEl=null,tipT=0,tipTouch=false,tipSup=false;
+let tipEl=null,tipT=0,tipTouch=false,tipSup=false,tapEl=null,tapX=0,tapY=0,tapT0=0,tapKeep=false,tapHide=0;
 const tipOf=el=>{if(el.hasAttribute('title')){el.dataset.tip=el.getAttribute('title');el.removeAttribute('title')}return el.dataset.tip||''};
 function hideTip(){clearTimeout(tipT);tipEl=null;tip.classList.remove('on');try{tip.hidePopover()}catch(e){}}
 let pt={x:0,y:0};
@@ -335,9 +336,15 @@ document.addEventListener('pointerover',e=>{if(e.pointerType==='touch')return;pt
 document.addEventListener('pointerout',e=>{if(e.pointerType==='touch')return;const el=tipTarget(e);if(el&&e.relatedTarget&&el.contains(e.relatedTarget))return;hideTip()});
 document.addEventListener('focusin',e=>{const el=tipTarget(e);if(el&&el.matches(':focus-visible'))showTip(el)});
 document.addEventListener('focusout',hideTip);
-document.addEventListener('pointerdown',e=>{if(e.pointerType==='touch'){const el=tipTarget(e);if(el){tipOf(el);clearTimeout(tipT);pt.x=e.clientX;pt.y=e.clientY;tipT=setTimeout(()=>{tipTouch=true;showTip(el)},450)}}else hideTip()});
-['pointerup','pointercancel'].forEach(t=>document.addEventListener(t,e=>{if(e.pointerType!=='touch')return;clearTimeout(tipT);if(tipTouch){tipSup=true;setTimeout(()=>{tipSup=false},700);setTimeout(hideTip,1800);tipTouch=false}}));
-document.addEventListener('click',e=>{if(tipSup){e.preventDefault();e.stopPropagation();tipSup=false;return}hideTip()},true);
+// touch: a simple TAP on a chart element (data-ch) shows its summary; it stays until you tap elsewhere, scroll, or ~5s pass.
+// Other titled elements (buttons etc.) keep long-press so a normal tap still activates them.
+document.addEventListener('pointerdown',e=>{if(e.pointerType==='touch'){const el=tipTarget(e);tapEl=null;if(el){tipOf(el);pt.x=e.clientX;pt.y=e.clientY;if(el.hasAttribute('data-ch')){tapEl=el;tapX=e.clientX;tapY=e.clientY;tapT0=performance.now();clearTimeout(tipT)}else{clearTimeout(tipT);tipT=setTimeout(()=>{tipTouch=true;showTip(el)},450)}}}else hideTip()});
+document.addEventListener('pointerup',e=>{if(e.pointerType!=='touch')return;clearTimeout(tipT);
+ if(tapEl){const el=tapEl;tapEl=null;if(Math.hypot(e.clientX-tapX,e.clientY-tapY)<12&&performance.now()-tapT0<600){pt.x=e.clientX;pt.y=e.clientY;showTip(el);tapKeep=true;setTimeout(()=>{tapKeep=false},500);clearTimeout(tapHide);tapHide=setTimeout(hideTip,5000)}return}
+ if(tipTouch){tipSup=true;setTimeout(()=>{tipSup=false},700);setTimeout(hideTip,1800);tipTouch=false}});
+document.addEventListener('pointercancel',e=>{if(e.pointerType!=='touch')return;tapEl=null;clearTimeout(tipT);if(tipTouch){tipSup=true;setTimeout(()=>{tipSup=false},700);setTimeout(hideTip,1800);tipTouch=false}});
+document.addEventListener('scroll',()=>{if(tipEl&&tipEl.hasAttribute('data-ch')&&!tapKeep&&matchMedia('(hover:none)').matches)hideTip()},{passive:true,capture:true});
+document.addEventListener('click',e=>{if(tapKeep){tapKeep=false;return}if(tipSup){e.preventDefault();e.stopPropagation();tipSup=false;return}hideTip()},true);
 addEventListener('scroll',hideTip,{passive:true});addEventListener('keydown',e=>{if(e.key==='Escape')hideTip()});
 // ---- events
 const flt=()=>{F.from=$('#fFrom').value;F.to=$('#fTo').value;F.q=$('#fQ').value;$('#fPre').value=presetOf();render()};
