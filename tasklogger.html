@@ -544,6 +544,7 @@ html:not(.is-touch) .pending-card:hover .pending-history-panel { display: block;
 .ssdd-option:hover, .ssdd-option.active { background: var(--bg-secondary); }
 .ssdd-option.selected { font-weight: 600; color: var(--blue-mid); }
 .ssdd-clear { color: var(--text-tertiary); }
+.ssdd-custom { font-style: italic; border-bottom: 1px solid var(--border-md); }
 .meta-field-ticket  .meta-input  { 
   /* width: 100px;  */
 }
@@ -13699,6 +13700,8 @@ function buildDynamicFieldInput(col, idAttr, value, onChangeExpr, disabledAttr, 
           oninput="ssddFilter('${idAttr}')" onkeydown="ssddKey(event,'${idAttr}')" />
         <div id="${idAttr}-opts">
           <div class="ssdd-option ssdd-clear" data-clear="1" data-val="" onclick="ssddPick('${idAttr}', ''); ${changeExpr}">— clear —</div>
+          <div class="ssdd-option ssdd-custom" data-custom="1" data-val="" style="display:none"
+            onclick="ssddPick('${idAttr}', this.dataset.val); ${changeExpr}"></div>
           ${options.map(o => `<div class="ssdd-option${o === cur ? ' selected' : ''}" data-val="${esc(o)}"
             onclick="ssddPick('${idAttr}', this.dataset.val); ${changeExpr}">${esc(o)}</div>`).join('')}
           <div class="msdd-empty" id="${idAttr}-none" style="display:none">No matches</div>
@@ -13999,19 +14002,34 @@ function ssddToggle(idAttr) {
   if (search) { search.value = ''; ssddFilter(idAttr); search.focus(); }
 }
 function ssddFilter(idAttr) {
-  const q = (document.getElementById(idAttr + '-search').value || '').trim().toLowerCase();
+  const raw = (document.getElementById(idAttr + '-search').value || '').trim();
+  const q = raw.toLowerCase();
   const box = document.getElementById(idAttr + '-opts');
-  let shown = 0, first = null;
+  let shown = 0, first = null, exact = false, custom = null;
   box.querySelectorAll('.ssdd-option').forEach(el => {
     el.classList.remove('active');
     if (el.dataset.clear) { el.style.display = q ? 'none' : ''; return; }
-    const ok = !q || el.dataset.val.toLowerCase().includes(q);
+    if (el.dataset.custom) { custom = el; return; }
+    const v = el.dataset.val.toLowerCase();
+    if (v === q) exact = true;
+    const ok = !q || v.includes(q);
     el.style.display = ok ? '' : 'none';
     if (ok) { shown++; if (!first) first = el; }
   });
+  // Custom value: offer the typed text as its own entry unless it already matches an option exactly.
+  if (custom) {
+    if (raw && !exact) {
+      custom.dataset.val = raw;
+      custom.textContent = 'Use \u201C' + raw + '\u201D (custom value)';
+      custom.style.display = '';
+    } else {
+      custom.style.display = 'none';
+    }
+  }
   if (q && first) first.classList.add('active');
+  else if (q && custom && custom.style.display !== 'none') custom.classList.add('active');
   const none = document.getElementById(idAttr + '-none');
-  if (none) none.style.display = shown ? 'none' : '';
+  if (none) none.style.display = (shown || (custom && custom.style.display !== 'none')) ? 'none' : '';
 }
 function ssddKey(ev, idAttr) {
   const box = document.getElementById(idAttr + '-opts');
