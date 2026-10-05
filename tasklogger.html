@@ -544,7 +544,8 @@ html:not(.is-touch) .pending-card:hover .pending-history-panel { display: block;
 .ssdd-option:hover, .ssdd-option.active { background: var(--bg-secondary); }
 .ssdd-option.selected { font-weight: 600; color: var(--blue-mid); }
 .ssdd-clear { color: var(--text-tertiary); }
-.ssdd-custom { font-style: italic; border-bottom: 1px solid var(--border-md); }
+.ssdd-input { width: 100%; box-sizing: border-box; cursor: text; }
+.ssdd-input:disabled { cursor: default; }
 .meta-field-ticket  .meta-input  { 
   /* width: 100px;  */
 }
@@ -13692,19 +13693,22 @@ function buildDynamicFieldInput(col, idAttr, value, onChangeExpr, disabledAttr, 
     const options = getSearchListOptions(col, value);
     const changeExpr = (onChangeExpr || '').replace(/this\.value/g, `document.getElementById('${idAttr}').value`);
     const cur = String(value || '');
+    // Combobox: the visible text input IS the search box AND the value. Whatever is typed is kept
+    // as-is (committed on Enter / blur / picking an option); the list below only suggests matches.
     return `<div class="msdd" ${disabledAttr}>
       <input type="hidden" id="${idAttr}" value="${esc(cur)}" />
-      <button type="button" id="${idAttr}-trigger" class="meta-select msdd-trigger" ${disabledAttr} onclick="ssddToggle('${idAttr}')">${cur ? esc(cur) : '— select —'}</button>
+      <input type="text" id="${idAttr}-trigger" class="meta-select ssdd-input" ${disabledAttr}
+        value="${esc(cur)}" data-committed="${esc(cur)}" placeholder="— select or type —" autocomplete="off"
+        onfocus="ssddOpen('${idAttr}')" onclick="ssddOpen('${idAttr}')"
+        oninput="ssddInput('${idAttr}')" onkeydown="ssddKey(event,'${idAttr}')"
+        onchange="if (ssddCommit('${idAttr}')) { ${changeExpr} }" />
       <div class="msdd-panel hidden" id="${idAttr}-panel">
-        <input type="text" class="ssdd-search" id="${idAttr}-search" placeholder="Search…" autocomplete="off"
-          oninput="ssddFilter('${idAttr}')" onkeydown="ssddKey(event,'${idAttr}')" />
         <div id="${idAttr}-opts">
-          <div class="ssdd-option ssdd-clear" data-clear="1" data-val="" onclick="ssddPick('${idAttr}', ''); ${changeExpr}">— clear —</div>
-          <div class="ssdd-option ssdd-custom" data-custom="1" data-val="" style="display:none"
-            onclick="ssddPick('${idAttr}', this.dataset.val); ${changeExpr}"></div>
+          <div class="ssdd-option ssdd-clear" data-clear="1" data-val=""
+            onmousedown="event.preventDefault(); ssddPick('${idAttr}', '')">— clear —</div>
           ${options.map(o => `<div class="ssdd-option${o === cur ? ' selected' : ''}" data-val="${esc(o)}"
-            onclick="ssddPick('${idAttr}', this.dataset.val); ${changeExpr}">${esc(o)}</div>`).join('')}
-          <div class="msdd-empty" id="${idAttr}-none" style="display:none">No matches</div>
+            onmousedown="event.preventDefault(); ssddPick('${idAttr}', this.dataset.val)">${esc(o)}</div>`).join('')}
+          <div class="msdd-empty" id="${idAttr}-none" style="display:none">No matches — press Enter to use what you typed</div>
         </div>
       </div>
     </div>`;
@@ -13994,49 +13998,58 @@ function getSearchListOptions(col, currentValue) {
   if (cur && !opts.includes(cur)) opts.unshift(cur);
   return opts;
 }
-function ssddToggle(idAttr) {
-  msddToggle(idAttr);
+function ssddOpen(idAttr) {
   const panel = document.getElementById(idAttr + '-panel');
-  if (!panel || panel.classList.contains('hidden')) return;
-  const search = document.getElementById(idAttr + '-search');
-  if (search) { search.value = ''; ssddFilter(idAttr); search.focus(); }
+  const input = document.getElementById(idAttr + '-trigger');
+  if (!panel || !input || input.disabled) return;
+  if (!panel.classList.contains('hidden')) return;
+  document.querySelectorAll('.msdd-panel').forEach(p => p.classList.add('hidden'));
+  panel.classList.remove('hidden');
+  ssddFilter(idAttr, true);          // show every option on open; filtering starts once the user types
+  input.select();
 }
-function ssddFilter(idAttr) {
-  const raw = (document.getElementById(idAttr + '-search').value || '').trim();
-  const q = raw.toLowerCase();
+function ssddInput(idAttr) {
+  const input = document.getElementById(idAttr + '-trigger');
+  const hidden = document.getElementById(idAttr);
+  const panel = document.getElementById(idAttr + '-panel');
+  // The typed text is the value (kept live so popup-submit reads of the hidden field see it).
+  if (hidden) hidden.value = input.value.trim();
+  if (panel) panel.classList.remove('hidden');
+  ssddFilter(idAttr, false);
+}
+function ssddFilter(idAttr, showAll) {
+  const q = showAll ? '' : (document.getElementById(idAttr + '-trigger').value || '').trim().toLowerCase();
   const box = document.getElementById(idAttr + '-opts');
-  let shown = 0, first = null, exact = false, custom = null;
+  let shown = 0;
   box.querySelectorAll('.ssdd-option').forEach(el => {
     el.classList.remove('active');
     if (el.dataset.clear) { el.style.display = q ? 'none' : ''; return; }
-    if (el.dataset.custom) { custom = el; return; }
-    const v = el.dataset.val.toLowerCase();
-    if (v === q) exact = true;
-    const ok = !q || v.includes(q);
+    const ok = !q || el.dataset.val.toLowerCase().includes(q);
     el.style.display = ok ? '' : 'none';
-    if (ok) { shown++; if (!first) first = el; }
+    if (ok) shown++;
   });
-  // Custom value: offer the typed text as its own entry unless it already matches an option exactly.
-  if (custom) {
-    if (raw && !exact) {
-      custom.dataset.val = raw;
-      custom.textContent = 'Use \u201C' + raw + '\u201D (custom value)';
-      custom.style.display = '';
-    } else {
-      custom.style.display = 'none';
-    }
-  }
-  if (q && first) first.classList.add('active');
-  else if (q && custom && custom.style.display !== 'none') custom.classList.add('active');
   const none = document.getElementById(idAttr + '-none');
-  if (none) none.style.display = (shown || (custom && custom.style.display !== 'none')) ? 'none' : '';
+  if (none) none.style.display = shown ? 'none' : '';
+}
+// Returns true when the value really changed since the last commit (so the caller fires its change handler once).
+function ssddCommit(idAttr) {
+  const input = document.getElementById(idAttr + '-trigger');
+  const hidden = document.getElementById(idAttr);
+  if (!input || !hidden) return false;
+  const val = input.value.trim();
+  hidden.value = val;
+  if (val !== (input.dataset.committed || '')) { input.dataset.committed = val; return true; }
+  return false;
 }
 function ssddKey(ev, idAttr) {
+  const input = document.getElementById(idAttr + '-trigger');
+  const panel = document.getElementById(idAttr + '-panel');
   const box = document.getElementById(idAttr + '-opts');
   const vis = Array.from(box.querySelectorAll('.ssdd-option')).filter(el => el.style.display !== 'none');
   let i = vis.findIndex(el => el.classList.contains('active'));
   if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
     ev.preventDefault();
+    if (panel.classList.contains('hidden')) { ssddOpen(idAttr); return; }
     if (!vis.length) return;
     if (i >= 0) vis[i].classList.remove('active');
     i = ev.key === 'ArrowDown' ? (i + 1) % vis.length : (i <= 0 ? vis.length - 1 : i - 1);
@@ -14044,21 +14057,27 @@ function ssddKey(ev, idAttr) {
     vis[i].scrollIntoView({ block: 'nearest' });
   } else if (ev.key === 'Enter') {
     ev.preventDefault();
-    if (i >= 0) vis[i].click();
+    if (i >= 0) {                       // only an option the user arrowed to wins; otherwise keep typed text
+      ssddPick(idAttr, vis[i].dataset.val || '');
+    } else {
+      panel.classList.add('hidden');
+      input.dispatchEvent(new Event('change'));
+    }
   } else if (ev.key === 'Escape') {
-    document.getElementById(idAttr + '-panel').classList.add('hidden');
+    panel.classList.add('hidden');
+  } else if (ev.key === 'Tab') {
+    panel.classList.add('hidden');
   }
 }
 function ssddPick(idAttr, val) {
-  const hidden = document.getElementById(idAttr);
-  const trigger = document.getElementById(idAttr + '-trigger');
+  const input = document.getElementById(idAttr + '-trigger');
   const panel = document.getElementById(idAttr + '-panel');
-  if (hidden) hidden.value = val;
-  if (trigger) trigger.textContent = val || '— select —';
+  if (input) input.value = val;
   if (panel) {
     panel.classList.add('hidden');
     panel.querySelectorAll('.ssdd-option').forEach(el => el.classList.toggle('selected', !el.dataset.clear && el.dataset.val === val));
   }
+  if (input) input.dispatchEvent(new Event('change'));   // runs ssddCommit + the field's change handler
 }
 
 // Toggle a multi-select checkbox dropdown panel open/closed, closing any other open ones.
