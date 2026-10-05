@@ -545,6 +545,9 @@ html:not(.is-touch) .pending-card:hover .pending-history-panel { display: block;
 .ssdd-option.selected { font-weight: 600; color: var(--blue-mid); }
 .ssdd-clear { color: var(--text-tertiary); }
 .ssdd-input { width: 100%; box-sizing: border-box; cursor: text; }
+.ssdd-input::placeholder { color: var(--text-tertiary); }
+.msdd:has(.ssdd-input) > .msdd-panel { min-width: 100%; box-sizing: border-box; padding: 2px; }
+.ssdd-option b { font-weight: 700; color: var(--blue-mid); }
 .ssdd-input:disabled { cursor: default; }
 .meta-field-ticket  .meta-input  { 
   /* width: 100px;  */
@@ -13698,17 +13701,14 @@ function buildDynamicFieldInput(col, idAttr, value, onChangeExpr, disabledAttr, 
     return `<div class="msdd" ${disabledAttr}>
       <input type="hidden" id="${idAttr}" value="${esc(cur)}" />
       <input type="text" id="${idAttr}-trigger" class="meta-select ssdd-input" ${disabledAttr}
-        value="${esc(cur)}" data-committed="${esc(cur)}" placeholder="— select or type —" autocomplete="off"
-        onfocus="ssddOpen('${idAttr}')" onclick="ssddOpen('${idAttr}')"
+        value="${esc(cur)}" data-committed="${esc(cur)}" placeholder="Type to search…" autocomplete="off" role="combobox" aria-autocomplete="list"
+        onfocus="this.select()"
         oninput="ssddInput('${idAttr}')" onkeydown="ssddKey(event,'${idAttr}')"
         onchange="if (ssddCommit('${idAttr}')) { ${changeExpr} }" />
       <div class="msdd-panel hidden" id="${idAttr}-panel">
         <div id="${idAttr}-opts">
-          <div class="ssdd-option ssdd-clear" data-clear="1" data-val=""
-            onmousedown="event.preventDefault(); ssddPick('${idAttr}', '')">— clear —</div>
           ${options.map(o => `<div class="ssdd-option${o === cur ? ' selected' : ''}" data-val="${esc(o)}"
             onmousedown="event.preventDefault(); ssddPick('${idAttr}', this.dataset.val)">${esc(o)}</div>`).join('')}
-          <div class="msdd-empty" id="${idAttr}-none" style="display:none">No matches — press Enter to use what you typed</div>
         </div>
       </div>
     </div>`;
@@ -13998,38 +13998,50 @@ function getSearchListOptions(col, currentValue) {
   if (cur && !opts.includes(cur)) opts.unshift(cur);
   return opts;
 }
+// Autosuggest: the input is the search box. Suggestions appear only while typing (or on ArrowDown),
+// ranked starts-with first; nothing is shown when there are no matches, and the typed text stays the value.
 function ssddOpen(idAttr) {
-  const panel = document.getElementById(idAttr + '-panel');
   const input = document.getElementById(idAttr + '-trigger');
-  if (!panel || !input || input.disabled) return;
-  if (!panel.classList.contains('hidden')) return;
+  if (!input || input.disabled) return;
   document.querySelectorAll('.msdd-panel').forEach(p => p.classList.add('hidden'));
-  panel.classList.remove('hidden');
-  ssddFilter(idAttr, true);          // show every option on open; filtering starts once the user types
-  input.select();
+  ssddFilter(idAttr, true);
 }
 function ssddInput(idAttr) {
   const input = document.getElementById(idAttr + '-trigger');
   const hidden = document.getElementById(idAttr);
-  const panel = document.getElementById(idAttr + '-panel');
-  // The typed text is the value (kept live so popup-submit reads of the hidden field see it).
-  if (hidden) hidden.value = input.value.trim();
-  if (panel) panel.classList.remove('hidden');
+  if (hidden) hidden.value = input.value.trim();   // typed text is the value
   ssddFilter(idAttr, false);
 }
 function ssddFilter(idAttr, showAll) {
-  const q = showAll ? '' : (document.getElementById(idAttr + '-trigger').value || '').trim().toLowerCase();
+  const input = document.getElementById(idAttr + '-trigger');
+  const panel = document.getElementById(idAttr + '-panel');
   const box = document.getElementById(idAttr + '-opts');
+  const q = (input.value || '').trim().toLowerCase();
+  if (!q && !showAll) { panel.classList.add('hidden'); return; }
+  const items = Array.from(box.querySelectorAll('.ssdd-option'));
   let shown = 0;
-  box.querySelectorAll('.ssdd-option').forEach(el => {
+  const starts = [], contains = [];
+  items.forEach(el => {
     el.classList.remove('active');
-    if (el.dataset.clear) { el.style.display = q ? 'none' : ''; return; }
-    const ok = !q || el.dataset.val.toLowerCase().includes(q);
-    el.style.display = ok ? '' : 'none';
-    if (ok) shown++;
+    const v = el.dataset.val.toLowerCase();
+    if (!q) { starts.push(el); return; }
+    if (v.startsWith(q)) starts.push(el); else if (v.includes(q)) contains.push(el);
+    el.style.display = 'none';
   });
-  const none = document.getElementById(idAttr + '-none');
-  if (none) none.style.display = shown ? 'none' : '';
+  [...starts, ...contains].forEach(el => {
+    el.style.display = ''; box.appendChild(el); shown++;
+    const v = el.dataset.val, i = q ? v.toLowerCase().indexOf(q) : -1;
+    el.textContent = '';
+    if (i < 0) el.textContent = v;
+    else {
+      el.append(v.slice(0, i));
+      const m = document.createElement('b'); m.textContent = v.slice(i, i + q.length); el.append(m);
+      el.append(v.slice(i + q.length));
+    }
+  });
+  // hide when nothing to suggest, or the only suggestion is exactly what's typed
+  const onlyExact = shown === 1 && [...starts, ...contains][0].dataset.val.toLowerCase() === q;
+  if (shown && !onlyExact) panel.classList.remove('hidden'); else panel.classList.add('hidden');
 }
 // Returns true when the value really changed since the last commit (so the caller fires its change handler once).
 function ssddCommit(idAttr) {
@@ -14049,7 +14061,7 @@ function ssddKey(ev, idAttr) {
   let i = vis.findIndex(el => el.classList.contains('active'));
   if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
     ev.preventDefault();
-    if (panel.classList.contains('hidden')) { ssddOpen(idAttr); return; }
+    if (panel.classList.contains('hidden')) { ssddOpen(idAttr); if (panel.classList.contains('hidden')) return; }
     if (!vis.length) return;
     if (i >= 0) vis[i].classList.remove('active');
     i = ev.key === 'ArrowDown' ? (i + 1) % vis.length : (i <= 0 ? vis.length - 1 : i - 1);
