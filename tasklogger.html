@@ -2322,7 +2322,7 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
         <button class="tab-btn" onclick="switchTab('colors')"><i class="ti ti-palette" style="font-size:13px"></i> Colors</button>
         <button class="tab-btn" onclick="switchTab('wallpaper')"><i class="ti ti-photo" style="font-size:13px"></i> Wallpaper</button>
         <button class="tab-btn" onclick="switchTab('data')"><i class="ti ti-database" style="font-size:13px"></i> Data</button>
-        <button class="tab-btn" onclick="switchTab('sync')"><i class="ti ti-cloud" style="font-size:13px"></i> Synchronization</button>
+        <button class="tab-btn" id="master-sync-tab-btn" onclick="switchTab('sync')"><i class="ti ti-cloud" style="font-size:13px"></i> Synchronization</button>
       </nav>
       <div class="master-nav-backdrop" id="master-nav-backdrop" onclick="closeMasterNav()"></div>
       <div class="master-content-workspace">
@@ -9714,7 +9714,7 @@ const BackgroundScheduler = (function () {
   // Each check below reuses an existing status getter — no new
   // authentication, workspace, or connectivity logic is introduced here.
   function isSyncEnabled() {
-    return !!(typeof masters !== 'undefined' && masters && masters.flags && masters.flags.backgroundSyncEnabled !== false);
+    return isSynchronizationFlagOn() && !!(typeof masters !== 'undefined' && masters && masters.flags && masters.flags.backgroundSyncEnabled !== false);
   }
   function isAuthenticatedNow() {
     return (typeof GoogleAuthManager !== 'undefined') && !!GoogleAuthManager.getStatus().authenticated;
@@ -17117,9 +17117,19 @@ function saveWorkHours() {
 // row and the phone grid (auto columns) close the gap by themselves. Cheap and idempotent —
 // called from saveState() and refreshTopSyncIndicator() so every path that changes masters
 // (toggles, backup restore, remote sync merge, startup) keeps the header in step.
+// localStorage flag 'IsSynchronizationEnabled' ("true") is a device-level master switch: unless it
+// is set to "true" the Synchronization tab, the header Sync button and automatic sync stay
+// off, even when "Enable Synchronization" is on in Masters. Set it manually, e.g. in DevTools:
+// localStorage.setItem('IsSynchronizationEnabled','true') then reload.
+function isSynchronizationFlagOn() {
+  try { return localStorage.getItem('IsSynchronizationEnabled') === 'true'; } catch (e) { return false; }
+}
 function applyHeaderButtonVisibility() {
   const flags = (masters && masters.flags) || {};
-  const showSync = flags.backgroundSyncEnabled !== false;
+  const syncFlag = isSynchronizationFlagOn();
+  const showSync = syncFlag && flags.backgroundSyncEnabled !== false;
+  const syncTab = document.getElementById('master-sync-tab-btn');
+  if (syncTab) syncTab.classList.toggle('header-btn-hidden', !syncFlag);
   const showPending = flags.showPending !== false;
   const syncBtn = document.getElementById('top-sync-btn');
   const pendBtn = document.getElementById('pending-tasks-btn');
