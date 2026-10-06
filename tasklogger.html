@@ -416,7 +416,7 @@ html.is-touch .pending-card-actions { opacity: 1; }
   display: none; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border);
 }
 .pending-history-panel.open { display: block; }
-html:not(.is-touch) .pending-card:hover .pending-history-panel { display: block; }
+/* History opens only via the History button (.open class) — no hover expansion. */
 .pending-history-entry { padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
 .pending-history-entry:last-child { border-bottom: none; }
 .pending-history-entry-top { display: flex; justify-content: space-between; gap: 8px; font-weight: 600; color: var(--text-primary); }
@@ -14150,6 +14150,50 @@ function sweepStaleRenderedRows() {
   });
 }
 
+// Caret helpers for the contenteditable text-area editor. When a card is rebuilt (auto-sync
+// merge, periodic refresh) the editor DOM is replaced, which would otherwise drop the caret
+// back to position 0. Offsets count characters of text nodes plus 1 per <br>.
+function rteGetCaretOffsets(editor) {
+  try {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount || !editor.contains(sel.anchorNode)) return null;
+    const off = (node, offset) => {
+      const r = document.createRange();
+      r.selectNodeContents(editor);
+      r.setEnd(node, offset);
+      const frag = r.cloneContents();
+      let n = frag.textContent.length;
+      n += frag.querySelectorAll('br').length;
+      return n;
+    };
+    return { start: off(sel.anchorNode, sel.anchorOffset), end: off(sel.focusNode, sel.focusOffset) };
+  } catch (e) { return null; }
+}
+function rteSetCaretOffsets(editor, c) {
+  try {
+    const locate = (target) => {
+      let remaining = target;
+      const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
+      let node;
+      while ((node = walker.nextNode())) {
+        if (node.nodeType === 3) {
+          if (remaining <= node.nodeValue.length) return [node, remaining];
+          remaining -= node.nodeValue.length;
+        } else if (node.nodeName === 'BR') {
+          if (remaining <= 0) return [node.parentNode, Array.prototype.indexOf.call(node.parentNode.childNodes, node)];
+          remaining -= 1;
+        }
+      }
+      return [editor, editor.childNodes.length];
+    };
+    const [sn, so] = locate(c.start), [en, eo] = locate(c.end);
+    const r = document.createRange();
+    r.setStart(sn, so); r.setEnd(en, eo);
+    const sel = window.getSelection();
+    sel.removeAllRanges(); sel.addRange(r);
+  } catch (e) {}
+}
+
 function renderRow(id) {
   const task = tasks.find(t => t.id === id);
   let container = document.getElementById('row-'+id);
@@ -14219,7 +14263,8 @@ function renderRow(id) {
     focusRestore = {
       id: activeEl.id,
       selectionStart: (typeof activeEl.selectionStart === 'number') ? activeEl.selectionStart : null,
-      selectionEnd: (typeof activeEl.selectionEnd === 'number') ? activeEl.selectionEnd : null
+      selectionEnd: (typeof activeEl.selectionEnd === 'number') ? activeEl.selectionEnd : null,
+      caret: activeEl.isContentEditable ? rteGetCaretOffsets(activeEl) : null
     };
   }
   // Show module/ticket on card only (project & nature shown, no description on card)
@@ -14258,6 +14303,7 @@ function renderRow(id) {
       if (focusRestore.selectionStart !== null && typeof restored.setSelectionRange === 'function') {
         try { restored.setSelectionRange(focusRestore.selectionStart, focusRestore.selectionEnd); } catch (e) {}
       }
+      if (focusRestore.caret && restored.isContentEditable) rteSetCaretOffsets(restored, focusRestore.caret);
     }
   }
 }
