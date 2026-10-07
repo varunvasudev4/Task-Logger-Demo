@@ -17171,8 +17171,10 @@ function groupValueOfRecord(rec, key, isTodo) {
 }
 // Builds list HTML honouring the Primary / Secondary grouping. valueOf(item, key) returns
 // the item's value for a grouping field; itemHtml(item, domIndex) returns one row's HTML.
-// Item order inside each group is whatever order the caller supplied (newest first).
-function buildGroupedHtml(items, valueOf, itemHtml) {
+// Item order inside each group is whatever order the caller supplied (newest first). Groups
+// (in both the Primary and Secondary sections) are ordered by their most recent item, newest
+// first, using tsOf(item) -> timestamp.
+function buildGroupedHtml(items, valueOf, itemHtml, tsOf) {
   const gp = getGroupPrefs();
   let idx = 0;
   if (!gp.primary.length && !gp.secondary.length) return items.map(it => itemHtml(it, idx++)).join('');
@@ -17190,7 +17192,13 @@ function buildGroupedHtml(items, valueOf, itemHtml) {
     if (sk !== null) { (sec[sk] = sec[sk] || []).push(it); return; }
     rest.push(it);
   });
-  const sortKeys = m => Object.keys(m).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true }));
+  const lastTs = arr => arr.reduce((mx, it) => Math.max(mx, (tsOf && Number(tsOf(it))) || 0), 0);
+  const sortKeys = m => {
+    const ts = {};
+    Object.keys(m).forEach(k => { ts[k] = lastTs(m[k]); });
+    return Object.keys(m).sort((a, b) => (ts[b] - ts[a]) ||
+      a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true }));
+  };
   function section(map, fields, cls) {
     return sortKeys(map).map(k => {
       const vals = k.split(SEP);
@@ -19343,7 +19351,7 @@ function renderSearchResults() {
         <div class="pending-card-icon-btn" title="Carry forward to a date" onclick="event.stopPropagation(); carryForwardFromSearch(${e.taskId})"><i class="ti ti-arrow-forward-up"></i></div>
       </div>
     </div>`;
-  });
+  }, hit => hit.sortTs);
 }
 
 // Wrappers so a search result's action icon closes the search overlay first — both target
@@ -21559,7 +21567,7 @@ function renderPendingTasksList() {
       '</div>' +
       '<div class="pending-history-panel">' + historyHtml + '</div>' +
       '</div>';
-  });
+  }, g => g.latest.startTs);
 }
 
 function togglePendingHistory(btn) {
