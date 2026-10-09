@@ -118,7 +118,7 @@ em.hl { background: var(--amber-bg); color: var(--amber-dark); font-style: norma
 
 /* ── Status timeline ── */
 .tl-wrap { padding: 8px 12px 12px; overflow-x: auto; }
-.card.collapsed .tl-wrap, .card.collapsed .journey { display: none; }
+.card.collapsed .tl-wrap, .card.collapsed .journey, .card.collapsed .more-stages { display: none; }
 .tl { list-style: none; display: flex; min-width: min-content; }
 .stage { position: relative; flex: 1 0 96px; text-align: center; padding: 0 4px; outline: none; cursor: pointer; }
 .stage:not(:last-child)::after {
@@ -201,6 +201,18 @@ em.hl { background: var(--amber-bg); color: var(--amber-dark); font-style: norma
     if (s.indexOf('<') === -1) return s.trim();
     var d = new DOMParser().parseFromString(s.replace(/<\s*(br|\/p|\/div|\/li)\s*\/?>/gi, '\n'), 'text/html');
     return (d.body.textContent || '').replace(/\n{3,}/g, '\n\n').trim();
+  }
+  var TITLE_FALLBACK_MAX = 100;
+  function clip(s, n) {
+    s = toPlain(s).replace(/\s+/g, ' ').trim();
+    return s.length > n ? s.slice(0, n).trimEnd() + '…' : s;
+  }
+  // Task name if available (newest stage that has one); otherwise the task description, first 100 characters.
+  function taskTitle(g) {
+    var i, t;
+    for (i = g.history.length - 1; i >= 0; i--) { t = toPlain(g.history[i].heading || ''); if (t) return t; }
+    for (i = g.history.length - 1; i >= 0; i--) { t = clip(g.history[i].description || '', TITLE_FALLBACK_MAX); if (t) return t; }
+    return '';
   }
   function fmtDate(ts) { return new Date(ts).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }); }
   function fmtShort(ts) { return new Date(ts).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }); }
@@ -354,13 +366,13 @@ em.hl { background: var(--amber-bg); color: var(--amber-dark); font-style: norma
   var MAX_STAGES = 8;
   function card(g) {
     var e = g.latest, st = e.taskStatus || '—', col = statusColor(st);
-    var heading = (e.heading && e.heading.trim()) || toPlain(e.description || '');
+    var heading = taskTitle(g);
     var title = g.tier === 'primary' ? g.label : (heading || g.label || 'Untitled');
     var sub = g.tier === 'primary' && heading ? heading : '';
     var tags = ['project', 'module', 'nature', 'ticket'].map(function (k) {
       var v = toPlain(fieldVal(e, k)); return v && v !== title ? '<span class="tag">' + hl(v) + '</span>' : '';
     }).join('');
-    var n = g.history.length, collapsed = !!S.collapsed[g.key];
+    var n = g.history.length, collapsed = S.collapsed[g.key] !== false;   // collapsed by default
     var shown = S.showAll[g.key] ? g.history : g.history.slice(-MAX_STAGES), offset = n - shown.length;
     var first = g.history[0].startTs, last = e.startTs;
 
@@ -427,7 +439,7 @@ em.hl { background: var(--amber-bg); color: var(--amber-dark); font-style: norma
     }
     unpin(); hideTip();
     var tg = ev.target.closest('[data-toggle]');
-    if (tg) { var k = tg.getAttribute('data-toggle'); S.collapsed[k] = !S.collapsed[k]; tg.closest('.card').classList.toggle('collapsed', !!S.collapsed[k]); tg.setAttribute('aria-expanded', !S.collapsed[k]); return; }
+    if (tg) { var k = tg.getAttribute('data-toggle'); S.collapsed[k] = !(S.collapsed[k] !== false); tg.closest('.card').classList.toggle('collapsed', S.collapsed[k]); tg.setAttribute('aria-expanded', !S.collapsed[k]); return; }
     var mo = ev.target.closest('[data-more]');
     if (mo) { S.showAll[mo.getAttribute('data-more')] = true; render(); }
   });
