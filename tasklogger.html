@@ -19263,9 +19263,13 @@ function renderSearchResults() {
     return allKws.every(kw => text.includes(kw));
   });
 
-  // Group matching entries per task (same identity rule as the Pending popup: ticket, else
-  // task name + project + module). One result per task: the newest matching entry, with all
-  // matching entries kept in `matches` (newest first) for the expandable list.
+  const todoHits = todoItems.filter(t => {
+    const text = todoFields(t);
+    return allKws.every(kw => text.includes(kw));
+  }).map(t => ({ type: 'todo', sortTs: t.createdAt || 0, data: t }));
+
+  // Logged tasks only: entries of the same task collapse into one result. Task identity follows
+  // the Primary / Secondary fields from Masters → Pending & Search (same rule as Pending Tasks).
   const taskGroupMap = {};
   entryHits.forEach(e => {
     const k = pendingTaskGroupKey(e);
@@ -19273,13 +19277,8 @@ function renderSearchResults() {
   });
   const entryGroupHits = Object.keys(taskGroupMap).map(k => {
     const matches = taskGroupMap[k].slice().sort((a, b) => (b.startTs || 0) - (a.startTs || 0));
-    return { type: 'entry', sortTs: matches[0].startTs, data: matches[0], matches: matches };
+    return { type: 'entry', sortTs: matches[0].startTs, data: matches[0], matches: matches, total: matches.length };
   });
-
-  const todoHits = todoItems.filter(t => {
-    const text = todoFields(t);
-    return allKws.every(kw => text.includes(kw));
-  }).map(t => ({ type: 'todo', sortTs: t.createdAt || 0, data: t }));
 
   const hits = [...entryGroupHits, ...todoHits];
 
@@ -19319,12 +19318,36 @@ function renderSearchResults() {
     return s;
   }
 
+  const secsOfH = h => h.durationSecs != null ? h.durationSecs
+    : (h.endTs && h.startTs ? Math.floor((h.endTs - h.startTs) / 1000) : null);
+  const ymd = d => d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+  // Expandable list of every matching entry and To Do item of one task group.
+  function groupBadgeAndPanel(hit) {
+    if ((hit.total || 1) <= 1) return { badge: '', toggle: '', panel: '' };
+    const rows = [];
+    (hit.matches || []).forEach(h => {
+      const hd = h.startTs ? new Date(h.startTs) : null;
+      const secs = secsOfH(h);
+      rows.push({ ts: h.startTs || 0, html: `<div class="pending-history-entry${hit.type === 'entry' && h === hit.data ? ' is-current' : ''}" onclick="jumpToDate('${hd ? ymd(hd) : ''}', ${h.startTs || 'null'})" title="Go to this entry">
+        <div class="pending-history-entry-top"><span>${hd ? escHtml(fmtDate(hd)) : ''}${h.taskStatus ? ` <span class="search-history-status">${escHtml(h.taskStatus)}</span>` : ''}</span><span>${secs != null ? escHtml(fmtDuration(secs)) : 'In progress'}</span></div>
+        ${h.description ? `<div class="pending-history-entry-desc">${highlight(h.description)}</div>` : ''}
+        ${h.remark ? `<div class="pending-history-entry-remark">${highlight(h.remark)}</div>` : ''}
+      </div>` });
+    });
+    rows.sort((x, y) => y.ts - x.ts);
+    return {
+      badge: `<span class="search-task-count" title="Logged entries for this task">${hit.total} entries</span>`,
+      toggle: `<div class="pending-card-icon-btn search-group-toggle" title="Show all matching entries" onclick="event.stopPropagation(); toggleSearchGroup(this)"><i class="ti ti-list-details"></i></div>`,
+      panel: `<div class="search-group-panel">${rows.map(r => r.html).join('')}</div>`
+    };
+  }
+
   const kwBadges = _searchKeywords.map(kw =>
     `<span style="display:inline-block;background:var(--blue-bg);color:var(--blue-dark);border:1px solid var(--blue-mid);border-radius:10px;font-size:10px;padding:0 6px;margin-right:4px">${escHtml(kw)}</span>`
   ).join('');
 
   const header = `<div style="padding:6px 14px;font-size:11px;color:var(--text-tertiary);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
-    <span>${kwBadges}${hits.length} task${hits.length!==1?'s':''}${entryHits.length !== entryGroupHits.length ? ' \u00B7 ' + entryHits.length + ' entries' : ''}</span>
+    <span>${kwBadges}${hits.length} task${hits.length!==1?'s':''}${(entryHits.length + todoHits.length) !== hits.length ? ' \u00B7 ' + (entryHits.length + todoHits.length) + ' entries' : ''}</span>
     ${_searchKeywords.length ? `<button class="btn" style="font-size:11px;padding:2px 8px" onclick="clearSearchKeywords()">Clear all</button>` : ''}
   </div>`;
 
@@ -19359,22 +19382,8 @@ function renderSearchResults() {
       e.ticket  ? `<span style="background:var(--amber-bg,#fff8e1);color:var(--amber-dark,#795900);border:1px solid var(--amber-mid,#f0b400);border-radius:10px;font-size:10px;padding:1px 7px">#${highlight(e.ticket)}</span>` : '',
       e.project ? `<span style="font-size:11px;color:var(--text-secondary)">${highlight(e.project)}</span>` : '',
     ].filter(Boolean).join(' ');
-    const matches = hit.matches || [e];
-    const multi = matches.length > 1;
-    const countBadge = multi ? `<span class="search-task-count" title="Matching entries for this task">${matches.length} entries</span>` : '';
-    const allBadges = [metaBadges, countBadge].filter(Boolean).join(' ');
-    const secsOf = h => h.durationSecs != null ? h.durationSecs
-      : (h.endTs && h.startTs ? Math.floor((h.endTs - h.startTs) / 1000) : null);
-    const panel = multi ? `<div class="search-group-panel">${matches.map(h => {
-      const hd = h.startTs ? new Date(h.startTs) : null;
-      const hds = hd ? hd.getFullYear() + '-' + String(hd.getMonth()+1).padStart(2,'0') + '-' + String(hd.getDate()).padStart(2,'0') : '';
-      const secs = secsOf(h);
-      return `<div class="pending-history-entry${h.startTs === e.startTs ? ' is-current' : ''}" onclick="jumpToDate('${hds}', ${h.startTs || 'null'})" title="Go to this entry">
-        <div class="pending-history-entry-top"><span>${hd ? escHtml(fmtDate(hd)) : ''}${h.taskStatus ? ` <span class="search-history-status">${escHtml(h.taskStatus)}</span>` : ''}</span><span>${secs != null ? escHtml(fmtDuration(secs)) : 'In progress'}</span></div>
-        ${h.description ? `<div class="pending-history-entry-desc">${highlight(h.description)}</div>` : ''}
-        ${h.remark ? `<div class="pending-history-entry-remark">${highlight(h.remark)}</div>` : ''}
-      </div>`;
-    }).join('')}</div>` : '';
+    const gx = groupBadgeAndPanel(hit);
+    const allBadges = [metaBadges, gx.badge].filter(Boolean).join(' ');
     return `<div class="search-result-item" data-date="${entryDate}" onclick="jumpToDate('${entryDate}', ${e.startTs})" data-idx="${i}">
       <div class="search-result-date">${dateLabel}</div>
       <div class="search-result-body">
@@ -19382,11 +19391,11 @@ function renderSearchResults() {
         ${allBadges ? `<div class="search-result-meta" style="display:flex;gap:5px;align-items:center;flex-wrap:wrap;margin-top:3px">${allBadges}</div>` : ''}
       </div>
       <div class="search-result-actions">
-        ${multi ? `<div class="pending-card-icon-btn search-group-toggle" title="Show all matching entries" onclick="event.stopPropagation(); toggleSearchGroup(this)"><i class="ti ti-list-details"></i></div>` : ''}
+        ${gx.toggle}
         ${historyBtnFor(e, e.startTs)}
         <div class="pending-card-icon-btn" title="Carry forward to a date" onclick="event.stopPropagation(); carryForwardFromSearch(${e.taskId})"><i class="ti ti-arrow-forward-up"></i></div>
       </div>
-    </div>${panel}`;
+    </div>${gx.panel}`;
   }, hit => hit.sortTs);
 }
 
