@@ -1018,6 +1018,12 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
   font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); margin-top: 2px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+.search-task-count { display: inline-block; font-family: var(--font-mono); font-size: 10px; font-weight: 600; border-radius: 10px; padding: 1px 7px; background: var(--bg-tertiary); color: var(--text-secondary); border: 1px solid var(--border-md); }
+.search-group-toggle.active { color: var(--blue-mid); background: var(--bg-secondary); }
+.search-group-panel { display: none; padding: 2px 14px 8px 38px; border-bottom: 1px solid var(--border); background: var(--bg-secondary); }
+.search-group-panel.open { display: block; }
+.search-group-panel .pending-history-entry { cursor: pointer; padding: 6px 6px; border-radius: 4px; }
+.search-group-panel .pending-history-entry:hover { background: var(--bg-tertiary); }
 .search-empty { padding: 28px 16px; text-align: center; color: var(--text-tertiary); font-size: 13px; }
 /* Masters > Pending & Search: group headers used by the Pending Tasks popup and Search results */
 .grp-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 11px; font-weight: 600; letter-spacing: .04em; color: var(--text-primary); background: var(--bg-secondary); border-bottom: 1px solid var(--border); padding: 5px 14px; position: sticky; top: 0; z-index: 1; }
@@ -19255,14 +19261,27 @@ function renderSearchResults() {
   const entryHits = logEntries.filter(e => {
     const text = fields(e);
     return allKws.every(kw => text.includes(kw));
-  }).map(e => ({ type: 'entry', sortTs: e.startTs, data: e }));
+  });
+
+  // Group matching entries per task (same identity rule as the Pending popup: ticket, else
+  // task name + project + module). One result per task: the newest matching entry, with all
+  // matching entries kept in `matches` (newest first) for the expandable list.
+  const taskGroupMap = {};
+  entryHits.forEach(e => {
+    const k = pendingTaskGroupKey(e);
+    (taskGroupMap[k] = taskGroupMap[k] || []).push(e);
+  });
+  const entryGroupHits = Object.keys(taskGroupMap).map(k => {
+    const matches = taskGroupMap[k].slice().sort((a, b) => (b.startTs || 0) - (a.startTs || 0));
+    return { type: 'entry', sortTs: matches[0].startTs, data: matches[0], matches: matches };
+  });
 
   const todoHits = todoItems.filter(t => {
     const text = todoFields(t);
     return allKws.every(kw => text.includes(kw));
   }).map(t => ({ type: 'todo', sortTs: t.createdAt || 0, data: t }));
 
-  const hits = [...entryHits, ...todoHits];
+  const hits = [...entryGroupHits, ...todoHits];
 
   if (!hits.length) {
     const kwDisplay = allKws.map(k => `<strong>${escHtml(k)}</strong>`).join(' + ');
@@ -19305,7 +19324,7 @@ function renderSearchResults() {
   ).join('');
 
   const header = `<div style="padding:6px 14px;font-size:11px;color:var(--text-tertiary);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
-    <span>${kwBadges}${hits.length} result${hits.length!==1?'s':''}</span>
+    <span>${kwBadges}${hits.length} task${hits.length!==1?'s':''}${entryHits.length !== entryGroupHits.length ? ' \u00B7 ' + entryHits.length + ' entries' : ''}</span>
     ${_searchKeywords.length ? `<button class="btn" style="font-size:11px;padding:2px 8px" onclick="clearSearchKeywords()">Clear all</button>` : ''}
   </div>`;
 
@@ -19340,18 +19359,42 @@ function renderSearchResults() {
       e.ticket  ? `<span style="background:var(--amber-bg,#fff8e1);color:var(--amber-dark,#795900);border:1px solid var(--amber-mid,#f0b400);border-radius:10px;font-size:10px;padding:1px 7px">#${highlight(e.ticket)}</span>` : '',
       e.project ? `<span style="font-size:11px;color:var(--text-secondary)">${highlight(e.project)}</span>` : '',
     ].filter(Boolean).join(' ');
+    const matches = hit.matches || [e];
+    const multi = matches.length > 1;
+    const countBadge = multi ? `<span class="search-task-count" title="Matching entries for this task">${matches.length} entries</span>` : '';
+    const allBadges = [metaBadges, countBadge].filter(Boolean).join(' ');
+    const secsOf = h => h.durationSecs != null ? h.durationSecs
+      : (h.endTs && h.startTs ? Math.floor((h.endTs - h.startTs) / 1000) : null);
+    const panel = multi ? `<div class="search-group-panel">${matches.map(h => {
+      const hd = h.startTs ? new Date(h.startTs) : null;
+      const hds = hd ? hd.getFullYear() + '-' + String(hd.getMonth()+1).padStart(2,'0') + '-' + String(hd.getDate()).padStart(2,'0') : '';
+      const secs = secsOf(h);
+      return `<div class="pending-history-entry${h.startTs === e.startTs ? ' is-current' : ''}" onclick="jumpToDate('${hds}', ${h.startTs || 'null'})" title="Go to this entry">
+        <div class="pending-history-entry-top"><span>${hd ? escHtml(fmtDate(hd)) : ''}${h.taskStatus ? ` <span class="search-history-status">${escHtml(h.taskStatus)}</span>` : ''}</span><span>${secs != null ? escHtml(fmtDuration(secs)) : 'In progress'}</span></div>
+        ${h.description ? `<div class="pending-history-entry-desc">${highlight(h.description)}</div>` : ''}
+        ${h.remark ? `<div class="pending-history-entry-remark">${highlight(h.remark)}</div>` : ''}
+      </div>`;
+    }).join('')}</div>` : '';
     return `<div class="search-result-item" data-date="${entryDate}" onclick="jumpToDate('${entryDate}', ${e.startTs})" data-idx="${i}">
       <div class="search-result-date">${dateLabel}</div>
       <div class="search-result-body">
         <div class="search-result-heading">${highlight(e.heading) || '<span style="color:var(--text-tertiary);font-style:italic">Untitled</span>'}</div>
-        ${metaBadges ? `<div class="search-result-meta" style="display:flex;gap:5px;align-items:center;flex-wrap:wrap;margin-top:3px">${metaBadges}</div>` : ''}
+        ${allBadges ? `<div class="search-result-meta" style="display:flex;gap:5px;align-items:center;flex-wrap:wrap;margin-top:3px">${allBadges}</div>` : ''}
       </div>
       <div class="search-result-actions">
+        ${multi ? `<div class="pending-card-icon-btn search-group-toggle" title="Show all matching entries" onclick="event.stopPropagation(); toggleSearchGroup(this)"><i class="ti ti-list-details"></i></div>` : ''}
         ${historyBtnFor(e, e.startTs)}
         <div class="pending-card-icon-btn" title="Carry forward to a date" onclick="event.stopPropagation(); carryForwardFromSearch(${e.taskId})"><i class="ti ti-arrow-forward-up"></i></div>
       </div>
-    </div>`;
+    </div>${panel}`;
   }, hit => hit.sortTs);
+}
+
+function toggleSearchGroup(btn) {
+  btn.classList.toggle('active');
+  const item = btn.closest('.search-result-item');
+  const panel = item ? item.nextElementSibling : null;
+  if (panel && panel.classList.contains('search-group-panel')) panel.classList.toggle('open');
 }
 
 // Wrappers so a search result's action icon closes the search overlay first — both target
