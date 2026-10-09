@@ -112,43 +112,37 @@ main { flex: 1; overflow-y: auto; padding: 10px 14px 18px; -webkit-overflow-scro
 .stats { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-tertiary); margin-top: 5px; }
 em.hl { background: var(--amber-bg); color: var(--amber-dark); font-style: normal; border-radius: 2px; padding: 0 1px; }
 
-/* Journey bar: one segment per stage */
-.journey { display: flex; gap: 2px; height: 5px; margin: 0 12px 4px; }
-.journey span { flex: 1; background: var(--c); border-radius: 3px; opacity: .85; }
-
-/* ── Status timeline ── */
-.tl-wrap { padding: 8px 12px 12px; overflow-x: auto; }
-.card.collapsed .tl-wrap, .card.collapsed .journey, .card.collapsed .more-stages { display: none; }
-.tl { list-style: none; display: flex; min-width: min-content; }
-.stage { position: relative; flex: 1 0 96px; text-align: center; padding: 0 4px; outline: none; cursor: pointer; }
-.stage:not(:last-child)::after {
-  content: ''; position: absolute; top: 13px; left: 50%; width: 100%; height: 3px; z-index: 0;
-  background: linear-gradient(90deg, var(--c), var(--cn));
-}
-.dot {
-  position: relative; z-index: 1; width: 28px; height: 28px; margin: 0 auto 5px; border-radius: 50%;
-  background: var(--c); color: #fff; display: grid; place-items: center; font-size: 12px; font-weight: 700;
-  border: 2px solid var(--bg-secondary); transition: transform .12s, box-shadow .12s;
-}
-.stage:hover .dot, .stage:focus-visible .dot, .stage.pinned .dot { transform: scale(1.18); box-shadow: 0 0 0 3px color-mix(in srgb, var(--c) 35%, transparent); }
-.stage.current .dot { box-shadow: 0 0 0 4px color-mix(in srgb, var(--c) 30%, transparent); }
-.stage .st { display: block; font-weight: 600; font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.stage .dt { display: block; color: var(--text-tertiary); font-size: 10.5px; font-family: var(--font-mono); }
-.more-stages { margin: 0 12px 8px; border: 1px dashed var(--border-md); background: transparent; border-radius: 12px; font-size: 11.5px; padding: 2px 10px; color: var(--text-secondary); }
-
-/* Narrow card → vertical timeline */
-@container (max-width: 520px) {
-  .tl-wrap { overflow-x: visible; }
-  .tl { flex-direction: column; min-width: 0; }
-  .stage { flex: none; display: flex; align-items: flex-start; gap: 10px; text-align: left; padding: 0 0 14px; }
-  .stage:last-child { padding-bottom: 0; }
-  .stage:not(:last-child)::after { top: 14px; bottom: -14px; left: 12px; width: 3px; height: auto; background: linear-gradient(180deg, var(--c), var(--cn)); }
-  .dot { margin: 0; flex-shrink: 0; }
-  .stage .lbl { min-width: 0; padding-top: 2px; }
-  .stage .st, .stage .dt { white-space: normal; }
-  .stage .dt { display: inline; margin-left: 6px; }
-  .pill { max-width: 38%; }
-}
+/* ── Zoho Sprints–style Status Timeline: chart + table ── */
+.card.collapsed .zs-body { display: none; }
+.zs-body { padding: 4px 12px 12px; border-top: 1px solid var(--border); }
+.zs-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 10px 0 8px; font-family: var(--font-mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--text-tertiary); }
+.zs-export { border: 1px solid var(--border-md); background: var(--bg); border-radius: 12px; font-size: 11px; padding: 2px 10px; color: var(--text-secondary); text-transform: none; letter-spacing: 0; font-family: var(--font-body); }
+.zs-export:hover { background: var(--bg-tertiary); }
+.zs-sum { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.zs-sum span { border: 1px solid var(--border-md); background: var(--bg); border-radius: 10px; padding: 1px 9px; font-size: 11px; color: var(--text-secondary); }
+.zs-sum b { color: var(--text-primary); font-weight: 600; }
+.zs-chartwrap { overflow-x: auto; padding-bottom: 2px; }
+.zs-bar { display: flex; gap: 2px; height: 34px; min-width: 100%; width: max-content; max-width: none; }
+.seg { flex: 1 1 0; min-width: 34px; background: var(--c); color: #fff; border-radius: 4px; display: flex; align-items: center; justify-content: center; padding: 0 6px; font-size: 11px; font-weight: 600; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; cursor: pointer; outline: none; transition: filter .12s; position: relative; }
+.seg:hover, .seg:focus-visible, .seg.pinned { filter: brightness(1.12); box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--c); z-index: 1; }
+.seg.open { background-image: repeating-linear-gradient(135deg, rgba(255,255,255,.22) 0 6px, transparent 6px 12px); }
+.zs-axis { display: flex; justify-content: space-between; margin-top: 4px; font-family: var(--font-mono); font-size: 10.5px; color: var(--text-tertiary); }
+.zs-tblwrap { overflow-x: auto; margin-top: 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg); }
+.zs-tbl { width: 100%; border-collapse: collapse; font-size: 12px; min-width: 520px; }
+.zs-tbl th { text-align: left; font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: .07em; color: var(--text-tertiary); font-weight: 500; padding: 7px 10px; background: var(--bg-secondary); border-bottom: 1px solid var(--border); white-space: nowrap; }
+.zs-tbl td { padding: 7px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; white-space: nowrap; }
+.zs-tbl tr:last-child td { border-bottom: 0; }
+.zs-tbl tbody tr.hv { cursor: pointer; outline: none; }
+.zs-tbl tbody tr.hv:hover, .zs-tbl tbody tr.hv:focus-visible, .zs-tbl tbody tr.pinned { background: var(--bg-secondary); }
+.zs-tbl td.num, .zs-tbl th.num { text-align: right; font-family: var(--font-mono); }
+.zs-st { display: inline-flex; align-items: center; gap: 7px; font-weight: 600; }
+.zs-st i { width: 10px; height: 10px; border-radius: 50%; background: var(--c); flex-shrink: 0; }
+.badge { display: inline-block; border-radius: 9px; font-size: 10px; font-weight: 600; padding: 0 6px; margin-left: 4px; border: 1px solid var(--border-md); color: var(--text-secondary); }
+.badge.max { background: var(--red-bg); color: var(--red-mid); border-color: var(--red-mid); }
+.badge.min { background: var(--green-bg); color: var(--green-dark); border-color: var(--green-mid); }
+.badge.open { background: var(--amber-bg); color: var(--amber-dark); border-color: var(--amber-mid); }
+.pill { }
+@container (max-width: 520px) { .pill { max-width: 38%; } }
 
 /* ── Hover tooltip ── */
 #tip {
@@ -363,7 +357,33 @@ em.hl { background: var(--amber-bg); color: var(--amber-dark); font-style: norma
     $('results').innerHTML = out;
   }
 
-  var MAX_STAGES = 8;
+  function movedBy(h) {
+    var cols = logCols().filter(function (c) { return c && c.isEmployeeColumn; }), i, v;
+    for (i = 0; i < cols.length; i++) { v = toPlain(fieldVal(h, cols[i].key)); if (v) return v; }
+    ['employee', 'employeeName', 'user', 'userName', 'empName', 'movedBy'].some(function (k) { v = toPlain(fieldVal(h, k)); return !!v; });
+    return v || '';
+  }
+  function fmtSpan(ms) {
+    var m = Math.floor(ms / 60000); if (m < 1) return '<1m';
+    var d = Math.floor(m / 1440), h = Math.floor((m % 1440) / 60), mm = m % 60;
+    if (d) return d + 'd' + (h ? ' ' + h + 'h' : '');
+    if (h) return h + 'h' + (mm ? ' ' + mm + 'm' : '');
+    return mm + 'm';
+  }
+  function fmtStamp(ts) { return ts ? fmtDate(ts) + ', ' + fmtTime(ts) : '—'; }
+  // One stage per status change: time in status = until the next status change (or until now while still open).
+  function stagesOf(g) {
+    var n = g.history.length, now = Date.now(), seen = {};
+    return g.history.map(function (h, i) {
+      var from = h.startTs || 0, open = false, to;
+      if (i < n - 1) to = g.history[i + 1].startTs;
+      else if (isClosed(h.taskStatus)) to = h.endTs || from;
+      else { to = now; open = true; }
+      var k = norm(h.taskStatus); seen[k] = (seen[k] || 0) + 1;
+      return { h: h, i: i, from: from, to: to || from, ms: Math.max(0, (to || from) - from), open: open, nth: seen[k] };
+    });
+  }
+
   function card(g) {
     var e = g.latest, st = e.taskStatus || '—', col = statusColor(st);
     var heading = taskTitle(g);
@@ -373,17 +393,41 @@ em.hl { background: var(--amber-bg); color: var(--amber-dark); font-style: norma
       var v = toPlain(fieldVal(e, k)); return v && v !== title ? '<span class="tag">' + hl(v) + '</span>' : '';
     }).join('');
     var n = g.history.length, collapsed = S.collapsed[g.key] !== false;   // collapsed by default
-    var shown = S.showAll[g.key] ? g.history : g.history.slice(-MAX_STAGES), offset = n - shown.length;
-    var first = g.history[0].startTs, last = e.startTs;
+    var stages = stagesOf(g), first = stages[0].from, lastS = stages[n - 1];
+    var total = stages.reduce(function (a, x) { return a + x.ms; }, 0);
+    var meas = stages.filter(function (x) { return x.ms > 0; }), maxS = null, minS = null;
+    if (meas.length > 1) {
+      maxS = meas.reduce(function (a, x) { return x.ms > a.ms ? x : a; });
+      minS = meas.reduce(function (a, x) { return x.ms < a.ms ? x : a; });
+      if (maxS === minS) maxS = minS = null;
+    }
+    var hasUser = stages.some(function (x) { return movedBy(x.h); });
+    var floor = Math.max(total * 0.08, 1);
 
-    var journey = g.history.map(function (h) { return '<span style="--c:' + statusColor(h.taskStatus) + '"></span>'; }).join('');
-    var items = shown.map(function (h, i) {
-      var gi = offset + i, c = statusColor(h.taskStatus), nx = i < shown.length - 1 ? statusColor(shown[i + 1].taskStatus) : c;
-      return '<li class="stage' + (gi === n - 1 ? ' current' : '') + '" tabindex="0" data-g="' + esc(g.key) + '" data-i="' + gi + '" style="--c:' + c + ';--cn:' + nx + '"' +
-        ' aria-label="' + esc((h.taskStatus || '') + ', stage ' + (gi + 1) + ' of ' + n + ', ' + fmtDate(h.startTs)) + '">' +
-        '<span class="dot">' + statusGlyph(h.taskStatus, gi) + '</span>' +
-        '<span class="lbl"><span class="st">' + esc(h.taskStatus || '—') + '</span><span class="dt">' + (h.startTs ? fmtShort(h.startTs) : '—') + '</span></span></li>';
+    var segs = stages.map(function (x) {
+      var c = statusColor(x.h.taskStatus);
+      return '<div class="seg hv' + (x.open ? ' open' : '') + '" tabindex="0" data-g="' + esc(g.key) + '" data-i="' + x.i + '" style="--c:' + c + ';flex-grow:' + Math.max(x.ms, floor) + '"' +
+        ' aria-label="' + esc((x.h.taskStatus || '') + ', ' + fmtSpan(x.ms)) + '">' + esc(x.h.taskStatus || '—') + '</div>';
     }).join('');
+
+    var rows = stages.map(function (x) {
+      var c = statusColor(x.h.taskStatus), badges = '';
+      if (x === maxS) badges += '<span class="badge max">Max</span>';
+      if (x === minS) badges += '<span class="badge min">Min</span>';
+      if (x.nth > 1) badges += '<span class="badge">↻ ' + x.nth + (x.nth === 2 ? 'nd' : x.nth === 3 ? 'rd' : 'th') + '</span>';
+      var toCell = x.open ? '<span class="badge open" style="margin:0">Yet to close</span>' : (x.i === n - 1 ? '—' : fmtStamp(x.to));
+      return '<tr class="hv" tabindex="0" data-g="' + esc(g.key) + '" data-i="' + x.i + '" style="--c:' + c + '">' +
+        '<td><span class="zs-st"><i></i>' + esc(x.h.taskStatus || '—') + '</span>' + badges + '</td>' +
+        (hasUser ? '<td>' + (esc(movedBy(x.h)) || '—') + '</td>' : '') +
+        '<td>' + fmtStamp(x.from) + '</td><td>' + toCell + '</td>' +
+        '<td class="num">' + (x.i === n - 1 && !x.open ? '—' : fmtSpan(x.ms)) + '</td>' +
+        '<td class="num">' + fmtDur(dur(x.h)) + '</td></tr>';
+    }).join('');
+
+    var sum = '<span>Total <b>' + fmtSpan(total) + '</b></span>' +
+      (maxS ? '<span>Longest <b>' + esc(maxS.h.taskStatus) + ' · ' + fmtSpan(maxS.ms) + '</b></span>' : '') +
+      (minS ? '<span>Shortest <b>' + esc(minS.h.taskStatus) + ' · ' + fmtSpan(minS.ms) + '</b></span>' : '') +
+      (lastS.open ? '<span>Yet to close</span>' : '');
 
     return '<section class="card' + (collapsed ? ' collapsed' : '') + '" data-key="' + esc(g.key) + '">' +
       '<button type="button" class="card-head" data-toggle="' + esc(g.key) + '" aria-expanded="' + !collapsed + '">' +
@@ -391,12 +435,29 @@ em.hl { background: var(--amber-bg); color: var(--amber-dark); font-style: norma
         '<span class="card-main"><div class="card-title">' + hl(title) + '</div>' +
           (sub ? '<div class="card-sub">' + hl(sub) + '</div>' : '') +
           (tags ? '<div class="meta">' + tags + '</div>' : '') +
-          '<div class="stats">' + n + ' stage' + (n === 1 ? '' : 's') + ' · ' + fmtShort(first) + (first !== last ? ' → ' + fmtShort(last) : '') + ' · ' + fmtDur(g.total) + ' effort</div></span>' +
+          '<div class="stats">' + n + ' status change' + (n === 1 ? '' : 's') + ' · ' + fmtShort(first) + (lastS.open ? ' → Today' : (first !== lastS.from ? ' → ' + fmtShort(lastS.from) : '')) + ' · ' + fmtDur(g.total) + ' effort</div></span>' +
         '<span class="pill" style="--c:' + col + '">' + esc(st) + '</span>' +
       '</button>' +
-      '<div class="journey" aria-hidden="true">' + journey + '</div>' +
-      (offset > 0 ? '<button type="button" class="more-stages" data-more="' + esc(g.key) + '">+ ' + offset + ' earlier stage' + (offset === 1 ? '' : 's') + '</button>' : '') +
-      '<div class="tl-wrap"><ol class="tl">' + items + '</ol></div></section>';
+      '<div class="zs-body">' +
+        '<div class="zs-title"><span>Status timeline</span><button type="button" class="zs-export" data-export="' + esc(g.key) + '">Export CSV</button></div>' +
+        '<div class="zs-sum">' + sum + '</div>' +
+        '<div class="zs-chartwrap"><div class="zs-bar">' + segs + '</div>' +
+          '<div class="zs-axis"><span>' + fmtShort(first) + '</span><span>' + (lastS.open ? 'Today' : fmtShort(lastS.to)) + '</span></div></div>' +
+        '<div class="zs-tblwrap"><table class="zs-tbl"><thead><tr><th>Status</th>' + (hasUser ? '<th>Moved by</th>' : '') +
+          '<th>From</th><th>To</th><th class="num">Time in status</th><th class="num">Effort</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+      '</div></section>';
+  }
+
+  function exportCsv(g) {
+    var stages = stagesOf(g), q = function (v) { return '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"'; };
+    var lines = [['Status', 'Moved by', 'From', 'To', 'Time in status', 'Effort'].map(q).join(',')];
+    stages.forEach(function (x) {
+      lines.push([x.h.taskStatus, movedBy(x.h), fmtStamp(x.from), x.open ? 'Yet to close' : fmtStamp(x.to), fmtSpan(x.ms), fmtDur(dur(x.h))].map(q).join(','));
+    });
+    var a = document.createElement('a'), name = (taskTitle(g) || g.label || 'ticket').replace(/[^\w\-]+/g, '_').slice(0, 40);
+    a.href = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/csv' }));
+    a.download = 'status-timeline-' + name + '.csv';
+    document.body.appendChild(a); a.click(); a.remove();
   }
 
   /* ── Tooltip (hover / keyboard focus / tap to pin) ───────────────────── */
@@ -426,13 +487,13 @@ em.hl { background: var(--amber-bg); color: var(--amber-dark); font-style: norma
   function unpin() { if (pinned) pinned.classList.remove('pinned'); pinned = null; }
 
   var res = $('results');
-  res.addEventListener('mouseover', function (ev) { var li = ev.target.closest('.stage'); if (li && !pinned) showTip(li); });
-  res.addEventListener('mouseout', function (ev) { var li = ev.target.closest('.stage'); if (li && !pinned) hideTip(); });
-  res.addEventListener('focusin', function (ev) { var li = ev.target.closest && ev.target.closest('.stage'); if (li && !pinned) showTip(li); });
+  res.addEventListener('mouseover', function (ev) { var li = ev.target.closest('.hv'); if (li && !pinned) showTip(li); });
+  res.addEventListener('mouseout', function (ev) { var li = ev.target.closest('.hv'); if (li && !pinned) hideTip(); });
+  res.addEventListener('focusin', function (ev) { var li = ev.target.closest && ev.target.closest('.hv'); if (li && !pinned) showTip(li); });
   res.addEventListener('focusout', function () { if (!pinned) hideTip(); });
   res.addEventListener('scroll', function () { hideTip(); unpin(); }, true);
   res.addEventListener('click', function (ev) {
-    var li = ev.target.closest('.stage');
+    var li = ev.target.closest('.hv');
     if (li) {                                           // tap / click pins the tooltip (touch has no hover)
       if (pinned === li) { unpin(); hideTip(); } else { unpin(); pinned = li; li.classList.add('pinned'); showTip(li); }
       return;
@@ -440,10 +501,10 @@ em.hl { background: var(--amber-bg); color: var(--amber-dark); font-style: norma
     unpin(); hideTip();
     var tg = ev.target.closest('[data-toggle]');
     if (tg) { var k = tg.getAttribute('data-toggle'); S.collapsed[k] = !(S.collapsed[k] !== false); tg.closest('.card').classList.toggle('collapsed', S.collapsed[k]); tg.setAttribute('aria-expanded', !S.collapsed[k]); return; }
-    var mo = ev.target.closest('[data-more]');
-    if (mo) { S.showAll[mo.getAttribute('data-more')] = true; render(); }
+    var ex = ev.target.closest('[data-export]');
+    if (ex) { var gg = byKey(ex.getAttribute('data-export')); if (gg) exportCsv(gg); }
   });
-  document.addEventListener('click', function (ev) { if (!ev.target.closest('.stage') && !ev.target.closest('#tip')) { unpin(); hideTip(); } });
+  document.addEventListener('click', function (ev) { if (!ev.target.closest('.hv') && !ev.target.closest('#tip')) { unpin(); hideTip(); } });
 
   /* ── Controls ────────────────────────────────────────────────────────── */
   function drawChips() {
