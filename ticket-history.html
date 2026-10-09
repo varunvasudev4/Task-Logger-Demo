@@ -1,0 +1,534 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ticket History</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  color-scheme: light;
+  --bg: #fffdf8; --bg-secondary: #f7f0dd; --bg-tertiary: #ede1c3;
+  --text-primary: #26211a; --text-secondary: #5a4f3c; --text-tertiary: #8a7f68;
+  --border: rgba(38,33,26,0.16); --border-md: rgba(38,33,26,0.30);
+  --green-bg: #dcefe8; --green-mid: #2f8f76; --green-dark: #1f6350;
+  --amber-bg: #f3e9c9; --amber-mid: #a3821f; --amber-dark: #7a5f13;
+  --blue-bg: #fbe2d3; --blue-mid: #c94f1f; --blue-dark: #9c3c15;
+  --red-bg: #f6dede; --red-mid: #b1403c;
+  --radius-md: 6px; --radius-lg: 10px;
+  --font-body: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --c-extra1: #7a5cc4; --c-extra2: #1f8aa3; --c-extra3: #8a7f68; --c-extra4: #c2548f;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-themed]) {
+    color-scheme: dark;
+    --bg: #1c2230; --bg-secondary: #232a3d; --bg-tertiary: #0c0e13;
+    --text-primary: #edeff4; --text-secondary: #8b93a7; --text-tertiary: #5b6478;
+    --border: #2e3549; --border-md: #454f6b;
+    --green-bg: #1c332e; --green-mid: #3fab8f; --green-dark: #7fd4bc;
+    --amber-bg: #2b2a1f; --amber-mid: #d1b954; --amber-dark: #e8cf7a;
+    --blue-bg: #3a2a20; --blue-mid: #e8622c; --blue-dark: #ff8f5c;
+    --red-bg: #331f1f; --red-mid: #d9534f;
+    --c-extra1: #9d84e0; --c-extra2: #4cb4cf; --c-extra3: #8b93a7; --c-extra4: #e07ab0;
+  }
+}
+html, body { height: 100%; }
+body {
+  background: var(--bg); color: var(--text-primary); font-family: var(--font-body);
+  font-size: 13px; line-height: 1.45; display: flex; flex-direction: column; overflow: hidden;
+}
+button { font: inherit; color: inherit; cursor: pointer; }
+
+/* ── Top controls ── */
+.top { padding: 10px 14px 8px; border-bottom: 1px solid var(--border); background: var(--bg); flex-shrink: 0; }
+.standalone-title { font-weight: 600; font-size: 15px; margin-bottom: 8px; }
+.search-row { display: flex; gap: 8px; align-items: center; }
+.search-box {
+  flex: 1; min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 5px;
+  border: 1px solid var(--border-md); border-radius: var(--radius-md); background: var(--bg-secondary);
+  padding: 4px 8px; min-height: 36px;
+}
+.search-box:focus-within { border-color: var(--blue-mid); }
+.search-box svg { flex-shrink: 0; color: var(--text-tertiary); }
+.search-box input {
+  flex: 1; min-width: 110px; border: 0; outline: 0; background: transparent;
+  color: var(--text-primary); font: inherit; font-size: 13px; padding: 3px 0;
+}
+.kw {
+  display: inline-flex; align-items: center; gap: 4px; background: var(--blue-bg); color: var(--blue-dark);
+  border: 1px solid var(--blue-mid); border-radius: 10px; padding: 0 4px 0 8px; font-size: 11.5px;
+}
+.kw button { border: 0; background: transparent; width: 18px; height: 18px; border-radius: 50%; line-height: 1; font-size: 14px; }
+.kw button:hover { background: rgba(0,0,0,.12); }
+.scope {
+  display: inline-flex; border: 1px solid var(--border-md); border-radius: var(--radius-md); overflow: hidden; flex-shrink: 0;
+}
+.scope button { border: 0; background: transparent; padding: 0 12px; height: 36px; font-size: 12px; color: var(--text-secondary); }
+.scope button + button { border-left: 1px solid var(--border-md); }
+.scope button[aria-pressed="true"] { background: var(--text-primary); color: var(--bg); }
+
+.legend { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center; }
+.legend .count { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: .06em; margin-right: 4px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border-md); background: var(--bg);
+  border-radius: 12px; padding: 2px 10px 2px 7px; font-size: 11.5px; color: var(--text-primary);
+}
+.chip i { width: 9px; height: 9px; border-radius: 50%; background: var(--c); display: inline-block; }
+.chip b { font-weight: 600; font-family: var(--font-mono); font-size: 11px; color: var(--text-secondary); }
+.chip[aria-pressed="true"] { background: var(--c); border-color: var(--c); color: #fff; }
+.chip[aria-pressed="true"] i { background: #fff; }
+.chip[aria-pressed="true"] b { color: #fff; }
+
+/* ── Results ── */
+main { flex: 1; overflow-y: auto; padding: 10px 14px 18px; -webkit-overflow-scrolling: touch; }
+.sec-head {
+  display: flex; align-items: center; gap: 8px; margin: 12px 0 8px; font-family: var(--font-mono);
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--text-tertiary);
+}
+.sec-head:first-child { margin-top: 2px; }
+.sec-head::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+.sec-head em { font-style: normal; color: var(--text-secondary); text-transform: none; letter-spacing: 0; font-family: var(--font-body); font-size: 11.5px; }
+.empty { text-align: center; color: var(--text-secondary); padding: 40px 12px; }
+.empty b { color: var(--text-primary); }
+.sample-note { background: var(--amber-bg); color: var(--amber-dark); border: 1px solid var(--amber-mid); border-radius: var(--radius-md); padding: 6px 10px; margin-bottom: 10px; font-size: 12px; }
+
+.card {
+  container-type: inline-size; border: 1px solid var(--border); background: var(--bg-secondary);
+  border-radius: var(--radius-lg); margin-bottom: 10px; overflow: hidden;
+}
+.card-head { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; width: 100%; border: 0; background: transparent; text-align: left; }
+.caret { margin-top: 3px; flex-shrink: 0; color: var(--text-tertiary); transition: transform .15s; }
+.card.collapsed .caret { transform: rotate(-90deg); }
+.card-main { flex: 1; min-width: 0; }
+.card-title { font-weight: 600; font-size: 14px; overflow-wrap: anywhere; }
+.card-sub { color: var(--text-secondary); font-size: 12px; overflow-wrap: anywhere; }
+.meta { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
+.tag { border: 1px solid var(--border-md); background: var(--bg); border-radius: 10px; font-size: 10.5px; padding: 0 7px; color: var(--text-secondary); }
+.pill {
+  flex-shrink: 0; background: var(--c); color: #fff; border-radius: 12px; padding: 1px 10px; font-size: 11.5px; font-weight: 600;
+  max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.stats { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-tertiary); margin-top: 5px; }
+em.hl { background: var(--amber-bg); color: var(--amber-dark); font-style: normal; border-radius: 2px; padding: 0 1px; }
+
+/* Journey bar: one segment per stage */
+.journey { display: flex; gap: 2px; height: 5px; margin: 0 12px 4px; }
+.journey span { flex: 1; background: var(--c); border-radius: 3px; opacity: .85; }
+
+/* ── Status timeline ── */
+.tl-wrap { padding: 8px 12px 12px; overflow-x: auto; }
+.card.collapsed .tl-wrap, .card.collapsed .journey { display: none; }
+.tl { list-style: none; display: flex; min-width: min-content; }
+.stage { position: relative; flex: 1 0 96px; text-align: center; padding: 0 4px; outline: none; cursor: pointer; }
+.stage:not(:last-child)::after {
+  content: ''; position: absolute; top: 13px; left: 50%; width: 100%; height: 3px; z-index: 0;
+  background: linear-gradient(90deg, var(--c), var(--cn));
+}
+.dot {
+  position: relative; z-index: 1; width: 28px; height: 28px; margin: 0 auto 5px; border-radius: 50%;
+  background: var(--c); color: #fff; display: grid; place-items: center; font-size: 12px; font-weight: 700;
+  border: 2px solid var(--bg-secondary); transition: transform .12s, box-shadow .12s;
+}
+.stage:hover .dot, .stage:focus-visible .dot, .stage.pinned .dot { transform: scale(1.18); box-shadow: 0 0 0 3px color-mix(in srgb, var(--c) 35%, transparent); }
+.stage.current .dot { box-shadow: 0 0 0 4px color-mix(in srgb, var(--c) 30%, transparent); }
+.stage .st { display: block; font-weight: 600; font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stage .dt { display: block; color: var(--text-tertiary); font-size: 10.5px; font-family: var(--font-mono); }
+.more-stages { margin: 0 12px 8px; border: 1px dashed var(--border-md); background: transparent; border-radius: 12px; font-size: 11.5px; padding: 2px 10px; color: var(--text-secondary); }
+
+/* Narrow card → vertical timeline */
+@container (max-width: 520px) {
+  .tl-wrap { overflow-x: visible; }
+  .tl { flex-direction: column; min-width: 0; }
+  .stage { flex: none; display: flex; align-items: flex-start; gap: 10px; text-align: left; padding: 0 0 14px; }
+  .stage:last-child { padding-bottom: 0; }
+  .stage:not(:last-child)::after { top: 14px; bottom: -14px; left: 12px; width: 3px; height: auto; background: linear-gradient(180deg, var(--c), var(--cn)); }
+  .dot { margin: 0; flex-shrink: 0; }
+  .stage .lbl { min-width: 0; padding-top: 2px; }
+  .stage .st, .stage .dt { white-space: normal; }
+  .stage .dt { display: inline; margin-left: 6px; }
+  .pill { max-width: 38%; }
+}
+
+/* ── Hover tooltip ── */
+#tip {
+  position: fixed; z-index: 50; width: min(300px, calc(100vw - 16px)); pointer-events: none; opacity: 0;
+  background: var(--bg); color: var(--text-primary); border: 1px solid var(--border-md); border-radius: var(--radius-lg);
+  box-shadow: 0 10px 28px rgba(0,0,0,.30); padding: 0; overflow: hidden; transition: opacity .1s;
+}
+#tip.show { opacity: 1; }
+#tip .th { background: var(--c); color: #fff; padding: 7px 12px; display: flex; justify-content: space-between; gap: 10px; font-weight: 600; }
+#tip .th small { font-weight: 500; opacity: .9; white-space: nowrap; }
+#tip .tb { padding: 8px 12px 10px; }
+#tip .when { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-tertiary); margin-bottom: 6px; }
+#tip .lab { font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--text-tertiary); margin-top: 6px; }
+#tip .txt { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12.5px; max-height: 120px; overflow: hidden; }
+#tip .none { color: var(--text-tertiary); font-style: italic; }
+</style>
+</head>
+<body>
+<div class="top">
+  <div class="standalone-title" id="standalone-title" hidden>Ticket History</div>
+  <div class="search-row">
+    <label class="search-box" id="search-box">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <span id="chips" style="display:contents"></span>
+      <input id="q" type="text" autocomplete="off" spellcheck="false" placeholder="Search ticket, task, project, remark… press Enter" aria-label="Search tickets">
+    </label>
+    <div class="scope" role="group" aria-label="Scope">
+      <button type="button" id="scope-pending" aria-pressed="true">Pending</button>
+      <button type="button" id="scope-all" aria-pressed="false">All</button>
+    </div>
+  </div>
+  <div class="legend" id="legend" aria-label="Filter by current status"></div>
+</div>
+<main id="results"></main>
+<div id="tip" role="tooltip"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ── State ───────────────────────────────────────────────────────────── */
+  var S = { entries: [], masters: {}, scope: 'pending', kws: [], statusFilter: {}, collapsed: {}, showAll: {}, sample: false };
+  var TASKNAME = 'taskname';
+  var embedded = window.parent !== window;
+
+  /* ── Helpers ─────────────────────────────────────────────────────────── */
+  function esc(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function toPlain(s) {
+    s = String(s == null ? '' : s);
+    if (s.indexOf('<') === -1) return s.trim();
+    var d = new DOMParser().parseFromString(s.replace(/<\s*(br|\/p|\/div|\/li)\s*\/?>/gi, '\n'), 'text/html');
+    return (d.body.textContent || '').replace(/\n{3,}/g, '\n\n').trim();
+  }
+  function fmtDate(ts) { return new Date(ts).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }); }
+  function fmtShort(ts) { return new Date(ts).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }); }
+  function fmtTime(ts) { return new Date(ts).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }); }
+  function fmtDur(secs) {
+    secs = Math.max(0, Math.round(secs || 0));
+    var h = Math.floor(secs / 3600), m = Math.floor((secs % 3600) / 60), p = [];
+    if (h) p.push(h + 'h'); if (m) p.push(m + 'm'); if (!h && !m) p.push((secs % 60) + 's');
+    return p.join(' ');
+  }
+  function dur(e) {
+    if (e.durationSecs != null && e.durationSecs !== '') return +e.durationSecs || 0;
+    return e.endTs && e.startTs ? Math.floor((e.endTs - e.startTs) / 1000) : 0;
+  }
+  function norm(s) { return String(s == null ? '' : s).trim().toLowerCase(); }
+
+  /* ── Status config / colours ─────────────────────────────────────────── */
+  function statusCfg() {
+    var sc = S.masters.statusConfig || { closed: ['Completed'], blocked: ['Blocked'] };
+    return { closed: sc.closed || [], blocked: sc.blocked || [] };
+  }
+  function inList(list, v) { v = norm(v); return !!v && list.some(function (x) { return norm(x) === v; }); }
+  function isClosed(s) { return inList(statusCfg().closed, s); }
+  function isBlocked(s) { return inList(statusCfg().blocked, s); }
+  var extraMap = {}, extraN = 0;
+  function statusColor(s) {
+    if (isClosed(s)) return 'var(--green-mid)';
+    if (isBlocked(s)) return 'var(--red-mid)';
+    var n = norm(s);
+    if (/progress|ongoing|wip|doing|working|started/.test(n)) return 'var(--blue-mid)';
+    if (/pending|open|new|todo|to do|wait|hold|review/.test(n)) return 'var(--amber-mid)';
+    if (!extraMap[n]) extraMap[n] = 'var(--c-extra' + ((extraN++ % 4) + 1) + ')';
+    return extraMap[n];
+  }
+  function statusGlyph(s, i) {
+    if (isClosed(s)) return '✓';
+    if (isBlocked(s)) return '!';
+    return String(i + 1);
+  }
+
+  /* ── Grouping (mirrors the Pending Tasks popup: Primary / Secondary fields) ── */
+  function logCols() {
+    var c = S.masters.logColumns;
+    if (c && c.length) return c;
+    return [{ key: 'project', label: 'Project', type: 'list' }, { key: 'nature', label: 'Nature', type: 'list' },
+            { key: 'module', label: 'Module', type: 'text' }, { key: 'ticket', label: 'Ticket', type: 'text' },
+            { key: 'remark', label: 'Remark', type: 'text' }, { key: 'description', label: 'Description', type: 'text' }];
+  }
+  function fieldOptions() {
+    return logCols().filter(function (c) {
+      return c && c.key && (c.type === 'list' || c.type === 'text' || c.type === 'searchlist') &&
+        !c.isDateColumn && !c.isEmployeeColumn && !c.isEffortColumn;
+    }).concat([{ key: TASKNAME, label: 'Task Name' }]);
+  }
+  function fieldLabel(k) { var c = fieldOptions().filter(function (x) { return x.key === k; })[0]; return c ? (c.label || k) : k; }
+  function groupPrefs() {
+    var gp = S.masters.groupPrefs || {}, keys = fieldOptions().map(function (c) { return c.key; });
+    function pick(v) { var a = Array.isArray(v) ? v : (v && v !== 'none' ? [v] : []); return keys.filter(function (k) { return a.indexOf(k) !== -1; }); }
+    var primary = pick(gp.primary), secondary = pick(gp.secondary).filter(function (k) { return primary.indexOf(k) === -1; });
+    return { primary: primary, secondary: secondary };
+  }
+  function identity() {
+    var gp = groupPrefs(), def = { primary: ['ticket'], fallback: [TASKNAME, 'project', 'module'] };
+    if (!gp.primary.length && !gp.secondary.length) return def;
+    return { primary: gp.primary, fallback: gp.secondary.length ? gp.secondary : def.fallback };
+  }
+  function fieldVal(rec, key) {
+    if (key === TASKNAME) return String(rec.heading || '');
+    if (key === 'status') return String(rec.taskStatus || '');
+    var v = rec[key];
+    if ((v == null || v === '') && rec.customFields) v = rec.customFields[key];
+    return v == null ? '' : String(v);
+  }
+  function groupInfo(e, idn) {
+    if (idn.primary.length) {
+      var vals = idn.primary.map(function (k) { return toPlain(fieldVal(e, k)); });
+      if (vals.every(Boolean)) return { key: 'p:' + vals.join('|').toLowerCase(), tier: 'primary', label: vals.join(' · ') };
+    }
+    var fv = idn.fallback.map(function (k) { return toPlain(fieldVal(e, k)); });
+    return { key: 's:' + fv.join('|').toLowerCase(), tier: 'secondary', label: fv.filter(Boolean).join(' · ') };
+  }
+  function searchKeys() {
+    return logCols().filter(function (c) { return c && c.key && !c.isDateColumn && !c.isEffortColumn && !c.isEmployeeColumn && !c.isStatusColumn; })
+      .map(function (c) { return c.key; }).concat([TASKNAME]);
+  }
+  function textOf(e, keys) { return keys.map(function (k) { return norm(toPlain(fieldVal(e, k))); }).join(' '); }
+
+  function buildGroups() {
+    var idn = identity(), map = {}, order = [];
+    S.entries.forEach(function (e) {
+      if (!e || !e.endTs) return;                       // only completed entries carry a final status
+      var gi = groupInfo(e, idn);
+      if (!map[gi.key]) { map[gi.key] = { key: gi.key, tier: gi.tier, label: gi.label, history: [] }; order.push(gi.key); }
+      map[gi.key].history.push(e);
+    });
+    var sk = searchKeys();
+    return order.map(function (k) {
+      var g = map[k];
+      g.history.sort(function (a, b) { return (a.startTs || 0) - (b.startTs || 0); });   // oldest → newest
+      g.latest = g.history[g.history.length - 1];
+      g.text = g.history.map(function (e) { return textOf(e, sk); }).join(' ');
+      g.total = g.history.reduce(function (n, e) { return n + dur(e); }, 0);
+      return g;
+    }).sort(function (a, b) { return (b.latest.startTs || 0) - (a.latest.startTs || 0); });
+  }
+
+  /* ── Render ──────────────────────────────────────────────────────────── */
+  var $ = function (id) { return document.getElementById(id); };
+  function allKws() { var cur = norm($('q').value); return S.kws.concat(cur ? [cur] : []); }
+  function hl(str) {
+    var s = esc(str);
+    allKws().forEach(function (kw) {
+      s = s.replace(new RegExp(esc(kw).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), function (m) { return '<em class="hl">' + m + '</em>'; });
+    });
+    return s;
+  }
+
+  function render() {
+    var kws = allKws(), groups = buildGroups();
+    if (S.scope === 'pending') groups = groups.filter(function (g) { return !isClosed(g.latest.taskStatus) && !isBlocked(g.latest.taskStatus); });
+    if (kws.length) groups = groups.filter(function (g) { return kws.every(function (k) { return g.text.indexOf(k) !== -1; }); });
+
+    // Legend = current status of every ticket in scope (before the status filter), click to filter
+    var counts = {}, names = [];
+    groups.forEach(function (g) { var s = g.latest.taskStatus || '—'; if (!(s in counts)) { counts[s] = 0; names.push(s); } counts[s]++; });
+    Object.keys(S.statusFilter).forEach(function (k) { if (!(k in counts)) delete S.statusFilter[k]; });
+    var anyF = Object.keys(S.statusFilter).length;
+    $('legend').innerHTML = '<span class="count">' + groups.length + ' ticket' + (groups.length === 1 ? '' : 's') + '</span>' +
+      names.map(function (s) {
+        return '<button type="button" class="chip" style="--c:' + statusColor(s) + '" data-status="' + esc(s) + '" aria-pressed="' + !!S.statusFilter[s] + '"><i></i>' + esc(s) + ' <b>' + counts[s] + '</b></button>';
+      }).join('');
+    if (anyF) groups = groups.filter(function (g) { return S.statusFilter[g.latest.taskStatus || '—']; });
+
+    var out = (S.sample ? '<div class="sample-note">Showing sample data — open this page from Task Logger (Tickets button) to see your own tickets.</div>' : '');
+    if (!groups.length) {
+      var scopeNote = S.scope === 'pending' ? ' <span>Try <b>All</b> to include completed and blocked tickets.</span>' : '';
+      out += '<div class="empty">' + (kws.length
+        ? 'No tickets match ' + kws.map(function (k) { return '<b>' + esc(k) + '</b>'; }).join(' + ') + '.'
+        : (S.scope === 'pending' ? 'No pending tickets right now.' : 'No ticket history yet.')) + scopeNote + '</div>';
+      $('results').innerHTML = out; return;
+    }
+
+    var idn = identity();
+    var prim = groups.filter(function (g) { return g.tier === 'primary'; });
+    var sec = groups.filter(function (g) { return g.tier === 'secondary'; });
+    if (prim.length) out += '<div class="sec-head">Primary <em>' + esc(idn.primary.map(fieldLabel).join(' + ')) + '</em> · ' + prim.length + '</div>' + prim.map(card).join('');
+    if (sec.length) out += '<div class="sec-head">Secondary <em>' + esc(idn.fallback.map(fieldLabel).join(' + ')) + '</em> · ' + sec.length + '</div>' + sec.map(card).join('');
+    $('results').innerHTML = out;
+  }
+
+  var MAX_STAGES = 8;
+  function card(g) {
+    var e = g.latest, st = e.taskStatus || '—', col = statusColor(st);
+    var heading = (e.heading && e.heading.trim()) || toPlain(e.description || '');
+    var title = g.tier === 'primary' ? g.label : (heading || g.label || 'Untitled');
+    var sub = g.tier === 'primary' && heading ? heading : '';
+    var tags = ['project', 'module', 'nature', 'ticket'].map(function (k) {
+      var v = toPlain(fieldVal(e, k)); return v && v !== title ? '<span class="tag">' + hl(v) + '</span>' : '';
+    }).join('');
+    var n = g.history.length, collapsed = !!S.collapsed[g.key];
+    var shown = S.showAll[g.key] ? g.history : g.history.slice(-MAX_STAGES), offset = n - shown.length;
+    var first = g.history[0].startTs, last = e.startTs;
+
+    var journey = g.history.map(function (h) { return '<span style="--c:' + statusColor(h.taskStatus) + '"></span>'; }).join('');
+    var items = shown.map(function (h, i) {
+      var gi = offset + i, c = statusColor(h.taskStatus), nx = i < shown.length - 1 ? statusColor(shown[i + 1].taskStatus) : c;
+      return '<li class="stage' + (gi === n - 1 ? ' current' : '') + '" tabindex="0" data-g="' + esc(g.key) + '" data-i="' + gi + '" style="--c:' + c + ';--cn:' + nx + '"' +
+        ' aria-label="' + esc((h.taskStatus || '') + ', stage ' + (gi + 1) + ' of ' + n + ', ' + fmtDate(h.startTs)) + '">' +
+        '<span class="dot">' + statusGlyph(h.taskStatus, gi) + '</span>' +
+        '<span class="lbl"><span class="st">' + esc(h.taskStatus || '—') + '</span><span class="dt">' + (h.startTs ? fmtShort(h.startTs) : '—') + '</span></span></li>';
+    }).join('');
+
+    return '<section class="card' + (collapsed ? ' collapsed' : '') + '" data-key="' + esc(g.key) + '">' +
+      '<button type="button" class="card-head" data-toggle="' + esc(g.key) + '" aria-expanded="' + !collapsed + '">' +
+        '<svg class="caret" width="12" height="12" viewBox="0 0 12 12"><path d="M2 4l4 4 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
+        '<span class="card-main"><div class="card-title">' + hl(title) + '</div>' +
+          (sub ? '<div class="card-sub">' + hl(sub) + '</div>' : '') +
+          (tags ? '<div class="meta">' + tags + '</div>' : '') +
+          '<div class="stats">' + n + ' stage' + (n === 1 ? '' : 's') + ' · ' + fmtShort(first) + (first !== last ? ' → ' + fmtShort(last) : '') + ' · ' + fmtDur(g.total) + ' effort</div></span>' +
+        '<span class="pill" style="--c:' + col + '">' + esc(st) + '</span>' +
+      '</button>' +
+      '<div class="journey" aria-hidden="true">' + journey + '</div>' +
+      (offset > 0 ? '<button type="button" class="more-stages" data-more="' + esc(g.key) + '">+ ' + offset + ' earlier stage' + (offset === 1 ? '' : 's') + '</button>' : '') +
+      '<div class="tl-wrap"><ol class="tl">' + items + '</ol></div></section>';
+  }
+
+  /* ── Tooltip (hover / keyboard focus / tap to pin) ───────────────────── */
+  var tip = $('tip'), pinned = null;
+  var byKey = function (k) { return buildGroups().filter(function (g) { return g.key === k; })[0]; };
+  function tipHtml(g, i) {
+    var h = g.history[i], c = statusColor(h.taskStatus);
+    var desc = toPlain(h.description || ''), rem = toPlain(h.remark || '');
+    var when = (h.startTs ? fmtDate(h.startTs) + ' · ' + fmtTime(h.startTs) + (h.endTs ? '–' + fmtTime(h.endTs) : '') : '—') + ' · ' + fmtDur(dur(h));
+    var cut = function (t) { return t.length > 320 ? t.slice(0, 320) + '…' : t; };
+    return { c: c, html:
+      '<div class="th"><span>' + esc(h.taskStatus || '—') + '</span><small>Stage ' + (i + 1) + ' of ' + g.history.length + '</small></div>' +
+      '<div class="tb"><div class="when">' + esc(when) + '</div>' +
+      '<div class="lab">Stage description</div>' + (desc ? '<div class="txt">' + esc(cut(desc)) + '</div>' : '<div class="txt none">No description</div>') +
+      '<div class="lab">Remarks</div>' + (rem ? '<div class="txt">' + esc(cut(rem)) + '</div>' : '<div class="txt none">No remarks</div>') + '</div>' };
+  }
+  function showTip(li) {
+    var g = byKey(li.getAttribute('data-g')); if (!g) return;
+    var t = tipHtml(g, +li.getAttribute('data-i'));
+    tip.style.setProperty('--c', t.c); tip.innerHTML = t.html;
+    var r = li.getBoundingClientRect(), tw = tip.offsetWidth, th = tip.offsetHeight, vw = window.innerWidth, vh = window.innerHeight;
+    var left = Math.min(Math.max(8, r.left + r.width / 2 - tw / 2), vw - tw - 8);
+    var top = r.bottom + 8; if (top + th > vh - 8) top = Math.max(8, r.top - th - 8);
+    tip.style.left = left + 'px'; tip.style.top = top + 'px'; tip.classList.add('show');
+  }
+  function hideTip() { tip.classList.remove('show'); }
+  function unpin() { if (pinned) pinned.classList.remove('pinned'); pinned = null; }
+
+  var res = $('results');
+  res.addEventListener('mouseover', function (ev) { var li = ev.target.closest('.stage'); if (li && !pinned) showTip(li); });
+  res.addEventListener('mouseout', function (ev) { var li = ev.target.closest('.stage'); if (li && !pinned) hideTip(); });
+  res.addEventListener('focusin', function (ev) { var li = ev.target.closest && ev.target.closest('.stage'); if (li && !pinned) showTip(li); });
+  res.addEventListener('focusout', function () { if (!pinned) hideTip(); });
+  res.addEventListener('scroll', function () { hideTip(); unpin(); }, true);
+  res.addEventListener('click', function (ev) {
+    var li = ev.target.closest('.stage');
+    if (li) {                                           // tap / click pins the tooltip (touch has no hover)
+      if (pinned === li) { unpin(); hideTip(); } else { unpin(); pinned = li; li.classList.add('pinned'); showTip(li); }
+      return;
+    }
+    unpin(); hideTip();
+    var tg = ev.target.closest('[data-toggle]');
+    if (tg) { var k = tg.getAttribute('data-toggle'); S.collapsed[k] = !S.collapsed[k]; tg.closest('.card').classList.toggle('collapsed', !!S.collapsed[k]); tg.setAttribute('aria-expanded', !S.collapsed[k]); return; }
+    var mo = ev.target.closest('[data-more]');
+    if (mo) { S.showAll[mo.getAttribute('data-more')] = true; render(); }
+  });
+  document.addEventListener('click', function (ev) { if (!ev.target.closest('.stage') && !ev.target.closest('#tip')) { unpin(); hideTip(); } });
+
+  /* ── Controls ────────────────────────────────────────────────────────── */
+  function drawChips() {
+    $('chips').innerHTML = S.kws.map(function (k, i) {
+      return '<span class="kw">' + esc(k) + '<button type="button" data-rm="' + i + '" aria-label="Remove ' + esc(k) + '">×</button></span>';
+    }).join('');
+  }
+  $('q').addEventListener('input', render);
+  $('q').addEventListener('keydown', function (ev) {
+    if (ev.key === 'Enter') {
+      var v = norm(this.value);
+      if (v && S.kws.indexOf(v) === -1) S.kws.push(v);
+      this.value = ''; drawChips(); render(); ev.preventDefault();
+    } else if (ev.key === 'Backspace' && !this.value && S.kws.length) { S.kws.pop(); drawChips(); render(); }
+  });
+  $('chips').addEventListener('click', function (ev) {
+    var b = ev.target.closest('[data-rm]'); if (!b) return;
+    S.kws.splice(+b.getAttribute('data-rm'), 1); drawChips(); render(); $('q').focus();
+  });
+  $('legend').addEventListener('click', function (ev) {
+    var b = ev.target.closest('[data-status]'); if (!b) return;
+    var s = b.getAttribute('data-status'); if (S.statusFilter[s]) delete S.statusFilter[s]; else S.statusFilter[s] = true;
+    render();
+  });
+  function setScope(s) {
+    S.scope = s; S.statusFilter = {};
+    $('scope-pending').setAttribute('aria-pressed', s === 'pending'); $('scope-all').setAttribute('aria-pressed', s === 'all'); render();
+  }
+  $('scope-pending').onclick = function () { setScope('pending'); };
+  $('scope-all').onclick = function () { setScope('all'); };
+  document.addEventListener('keydown', function (ev) {
+    if (ev.key === 'Escape') {
+      if (pinned || tip.classList.contains('show')) { unpin(); hideTip(); return; }
+      if (embedded) window.parent.postMessage({ type: 'ttl-tickets:close' }, '*');
+    }
+  });
+
+  /* ── Data in ─────────────────────────────────────────────────────────── */
+  function applyTheme(vars) {
+    if (!vars) return;
+    var root = document.documentElement;
+    Object.keys(vars).forEach(function (k) { if (/^--[\w-]+$/.test(k) && vars[k]) root.style.setProperty(k, vars[k]); });
+    root.setAttribute('data-themed', '1');
+    var m = /^#?([0-9a-f]{6})$/i.exec(String(vars['--bg'] || '').trim());
+    if (m) {
+      var n = parseInt(m[1], 16), lum = (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
+      root.style.colorScheme = lum < 0.5 ? 'dark' : 'light';
+    }
+  }
+  function setData(entries, masters) {
+    S.entries = Array.isArray(entries) ? entries : []; S.masters = masters || {}; S.sample = false;
+    render();
+  }
+  window.addEventListener('message', function (ev) {
+    var d = ev.data;
+    if (!d || d.type !== 'ttl-tickets:data') return;
+    if (embedded && ev.source !== window.parent) return;
+    applyTheme(d.vars); setData(d.logEntries, d.masters);
+  });
+
+  function sampleData() {
+    var D = 86400000, base = Date.now() - 30 * D, id = 0;
+    function mk(ticket, heading, project, module, status, off, mins, desc, remark) {
+      var s = base + off * D + 9 * 3600000; return { taskId: ++id, ticket: ticket, heading: heading, project: project, module: module, nature: 'Support',
+        taskStatus: status, startTs: s, endTs: s + mins * 60000, durationSecs: mins * 60, description: desc, remark: remark };
+    }
+    return [
+      mk('NAV-1042', 'Scanner sync fails on handheld', 'Navision', 'Scanner Integration', 'Pending', 1, 45, 'Logged the ticket and reproduced the failure on device HH-07.', 'Waiting for device logs from site.'),
+      mk('NAV-1042', 'Scanner sync fails on handheld', 'Navision', 'Scanner Integration', 'In Progress', 4, 120, 'Traced the error to an expired API token in the sync service.', ''),
+      mk('NAV-1042', 'Scanner sync fails on handheld', 'Navision', 'Scanner Integration', 'Blocked', 8, 30, 'Token rotation needs a change window.', 'Blocked by infra approval (CR-5531).'),
+      mk('NAV-1042', 'Scanner sync fails on handheld', 'Navision', 'Scanner Integration', 'In Progress', 14, 90, 'Rotated token in staging, regression tests running.', ''),
+      mk('NAV-1042', 'Scanner sync fails on handheld', 'Navision', 'Scanner Integration', 'Pending', 20, 25, 'Fix deployed to staging; awaiting customer verification.', 'Customer to confirm by Friday.'),
+      mk('NAV-1107', 'Wrong VAT on invoice export', 'Navision', 'Finance', 'Pending', 6, 30, 'Collected sample invoices from finance.', ''),
+      mk('NAV-1107', 'Wrong VAT on invoice export', 'Navision', 'Finance', 'In Progress', 11, 150, 'Found rounding issue in the VAT group mapping.', 'Patch drafted.'),
+      mk('NAV-0988', 'Print layout broken for delivery notes', 'Navision', 'Warehouse', 'Pending', 2, 20, 'Initial triage.', ''),
+      mk('NAV-0988', 'Print layout broken for delivery notes', 'Navision', 'Warehouse', 'Completed', 5, 75, 'Fixed report layout and released.', 'Verified by warehouse lead.'),
+      mk('', 'Weekly data cleanup', 'Operations', 'Housekeeping', 'In Progress', 9, 60, 'Cleaned stale batch records.', 'Continue next week.'),
+      mk('', 'Weekly data cleanup', 'Operations', 'Housekeeping', 'Pending', 16, 40, 'Second pass on archive tables.', '')
+    ];
+  }
+
+  // Standalone / fallback: try same-origin localStorage, else show sample data.
+  function fallbackLoad() {
+    try {
+      var l = JSON.parse(localStorage.getItem('ttl_log') || 'null'), m = JSON.parse(localStorage.getItem('ttl_masters') || 'null');
+      if (Array.isArray(l) && l.length) { setData(l, m || {}); return; }
+    } catch (e) {}
+    S.entries = sampleData(); S.masters = {}; S.sample = true; render();
+  }
+
+  if (!embedded) { $('standalone-title').hidden = false; fallbackLoad(); }
+  else {
+    render();                                                      // empty shell until data arrives
+    window.parent.postMessage({ type: 'ttl-tickets:ready' }, '*');
+  }
+  drawChips();
+})();
+</script>
+</body>
+</html>

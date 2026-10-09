@@ -283,6 +283,7 @@ body {
 .header-actions .btn-highlight      { order: 1; } /* Dashboard */
 .header-actions .sync-btn           { order: 2; } /* Sync */
 .header-actions .pending-tasks-btn  { order: 2; } /* Pending (ties with Sync; DOM order keeps it right after) */
+.header-actions .tickets-btn        { order: 2; } /* Tickets (ties with Sync/Pending; DOM order keeps it after Pending) */
 .header-actions .search-btn         { order: 3; } /* Search (touch only) */
 .header-actions .more-menu-wrap     { order: 4; } /* More */
 .header-actions .date-picker-wrap   { order: 5; } /* Date */
@@ -895,6 +896,23 @@ tbody td:first-child { color: var(--text-primary); font-weight: 500; }
   display: flex; align-items: center; justify-content: center; padding: 1rem;
 }
 .modal-overlay.hidden { display: none; }
+
+/* Ticket History popup: medium dialog on tablet/desktop, full screen on phones */
+#ticket-history-modal { z-index: 110; }
+#ticket-history-modal .tk-modal {
+  width: min(940px, 100%); max-width: none; height: min(82vh, 780px); max-height: none; overflow: hidden;
+}
+#ticket-history-modal .tk-frame { flex: 1; width: 100%; border: 0; background: var(--bg); min-height: 0; }
+#ticket-history-modal .tk-fallback { padding: 24px 20px; color: var(--text-secondary); font-size: 13px; }
+#ticket-history-modal .tk-fallback.hidden { display: none; }
+@media (max-width: 640px) {
+  #ticket-history-modal { padding: 0; }
+  #ticket-history-modal .tk-modal {
+    width: 100%; height: 100vh; height: 100dvh; border-radius: 0; border: 0;
+  }
+  #ticket-history-modal .modal-header { padding-top: max(12px, env(safe-area-inset-top, 0px)); }
+}
+
 .modal {
   background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-lg);
   box-shadow: 0 10px 30px rgba(0,0,0,0.35); width: 100%; max-width: 520px;
@@ -1483,6 +1501,7 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
   .header-row-1 .btn-primary        { order: 3; } /* Add task */
   .header-row-2 .sync-btn           { order: 1; } /* Sync */
   .header-row-2 .pending-tasks-btn  { order: 1; } /* Pending (ties with Sync; DOM order keeps it right after) */
+  .header-row-2 .tickets-btn        { order: 1; } /* Tickets (after Pending by DOM order) */
   .header-row-2 .header-masters-btn { order: 2; } /* Masters */
   .header-row-2 .search-btn         { order: 3; } /* Search (touch only) */
   .header-row-2 .more-menu-wrap     { order: 4; } /* More */
@@ -1510,6 +1529,7 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
   .header-row-1 .btn-primary span,
   .header-row-2 .header-masters-btn span,
   .header-row-2 .pending-tasks-btn > span:not(.pending-tasks-badge),
+  .header-row-2 .tickets-btn span,
   .header-row-2 .search-btn span,
   #more-menu-btn > span,
   .more-menu-chevron {
@@ -1754,6 +1774,7 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
           <button class="pending-menu-item" onclick="pendingMenuOpenPending()"><span><i class="ti ti-clock-exclamation"></i>Pending Tasks</span><span class="pending-tasks-badge" id="pending-menu-count-pending">0</span></button>
           <button class="pending-menu-item" onclick="pendingMenuOpenTodo()"><span><i class="ti ti-list-check"></i>To Do</span><span class="pending-tasks-badge" id="pending-menu-count-todo">0</span></button>
         </div>
+        <button class="btn tickets-btn" id="tickets-btn" onclick="openTicketHistory()" aria-label="Ticket history" title="Ticket history"><i class="ti ti-ticket"></i> <span>Tickets</span></button>
         <!-- Phase 25: touch-only entry point into the existing search overlay/
              openSearch() — hidden on non-touch devices via html.is-touch (see
              <head>); desktop keyboard users keep using Ctrl+Shift+F. -->
@@ -1763,9 +1784,7 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
         <div class="more-menu-wrap" id="more-menu-wrap">
           <button class="btn" id="more-menu-btn" onclick="toggleMoreMenu(event)" title="More actions"><i class="ti ti-dots"></i> <span>More</span> <i class="ti ti-chevron-down more-menu-chevron" style="font-size:11px"></i></button>
           <div class="more-menu-dropdown hidden" id="more-menu-dropdown">
-            <button class="btn" onclick="openCSVModal()" title="Import or export the log as CSV or Excel"><i class="ti ti-file-import"></i> Import / Export</button>
             <button class="btn" onclick="startTour()" id="tour-btn" title="App Tour"><i class="ti ti-route"></i> Tour</button>
-            <button class="btn" onclick="cycleTheme()" id="theme-toggle-btn" title="Switch theme"><i class="ti ti-sun" id="theme-toggle-icon"></i> <span id="theme-toggle-label">Light</span></button>
           </div>
         </div>
       </div>
@@ -2062,6 +2081,18 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
   </div>
 </div>
 
+<!-- Ticket History popup (hosts ticket-history.html in an iframe) -->
+<div class="modal-overlay hidden" id="ticket-history-modal" onclick="if(event.target===this)closeTicketHistory()">
+  <div class="modal tk-modal" role="dialog" aria-modal="true" aria-label="Ticket history">
+    <div class="modal-header">
+      <div class="modal-title"><i class="ti ti-ticket" style="vertical-align:-2px;margin-right:6px;color:var(--blue-mid)"></i>Ticket History</div>
+      <button class="btn-icon" onclick="closeTicketHistory()" title="Close" aria-label="Close"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="tk-fallback hidden" id="tk-fallback">Couldn't load <strong>ticket-history.html</strong>. Keep it in the same folder as this page.</div>
+    <iframe class="tk-frame" id="tk-frame" title="Ticket history" data-src="ticket-history.html"></iframe>
+  </div>
+</div>
+
 <!-- Pending Tasks modal -->
 <div class="modal-overlay hidden" id="pending-tasks-modal">
   <div class="modal" style="max-width:560px">
@@ -2319,8 +2350,8 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
         <button class="tab-btn" onclick="switchTab('weekends')"><i class="ti ti-calendar-off" style="font-size:13px"></i> Weekends</button>
         <button class="tab-btn" onclick="switchTab('workhours')"><i class="ti ti-clock" style="font-size:13px"></i> Work Hours</button>
         <button class="tab-btn" onclick="switchTab('email')"><i class="ti ti-mail" style="font-size:13px"></i> Email</button>
-        <button class="tab-btn" onclick="switchTab('colors')"><i class="ti ti-palette" style="font-size:13px"></i> Colors</button>
-        <button class="tab-btn" onclick="switchTab('wallpaper')"><i class="ti ti-photo" style="font-size:13px"></i> Wallpaper</button>
+        <button class="tab-btn" onclick="switchTab('appearance')"><i class="ti ti-palette" style="font-size:13px"></i> Appearance</button>
+        <button class="tab-btn" onclick="switchTab('importexport')"><i class="ti ti-file-import" style="font-size:13px"></i> Import / Export</button>
         <button class="tab-btn" onclick="switchTab('data')"><i class="ti ti-database" style="font-size:13px"></i> Data</button>
         <button class="tab-btn" onclick="switchTab('sync')"><i class="ti ti-cloud" style="font-size:13px"></i> Synchronization</button>
       </nav>
@@ -2398,63 +2429,6 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
   </div>
 </div>
 <!-- CSV Export/Import modal -->
-<div class="modal-overlay hidden" id="csv-modal">
-  <div class="modal" style="max-width:520px">
-    <div class="modal-header">
-      <div class="modal-title"><i class="ti ti-file-text" style="vertical-align:-2px;margin-right:6px"></i>Import / Export Log</div>
-      <button class="btn-icon" onclick="document.getElementById('csv-modal').classList.add('hidden')"><i class="ti ti-x"></i></button>
-    </div>
-    <div class="modal-body">
-      <!-- Export -->
-      <div class="csv-section-title"><i class="ti ti-download" style="font-size:12px;margin-right:4px"></i>Export Log</div>
-      <div class="csv-modal-row">
-        <div class="csv-field">
-          <label class="csv-label">From date</label>
-          <input type="date" class="csv-input" id="csv-from" />
-        </div>
-        <div class="csv-field">
-          <label class="csv-label">To date</label>
-          <input type="date" class="csv-input" id="csv-to" />
-        </div>
-        <div style="display:flex;gap:8px;flex-shrink:0">
-          <button class="btn btn-primary" onclick="exportCSV()" title="Download a .csv file">
-            <i class="ti ti-download"></i> Export as CSV
-          </button>
-          <button class="btn btn-primary" onclick="exportLogExcel()" title="Download an .xlsx file">
-            <i class="ti ti-file-spreadsheet"></i> Export as Excel
-          </button>
-        </div>
-      </div>
-      <div style="font-size:11px;color:var(--text-tertiary);margin-bottom:16px">Leave dates blank to export all records.</div>
-
-      <!-- Import -->
-      <div class="csv-section-title"><i class="ti ti-upload" style="font-size:12px;margin-right:4px"></i>Import Log from CSV or Excel</div>
-      <div class="csv-modal-row">
-        <div class="csv-field">
-          <label class="csv-label">Import from date</label>
-          <input type="date" class="csv-input" id="csv-import-from" />
-        </div>
-        <div class="csv-field">
-          <label class="csv-label">Import to date</label>
-          <input type="date" class="csv-input" id="csv-import-to" />
-        </div>
-      </div>
-      <div class="csv-import-drop" id="csv-drop-zone"
-        onclick="document.getElementById('csv-file-input').click()"
-        ondragover="event.preventDefault();this.classList.add('dragover')"
-        ondragleave="this.classList.remove('dragover')"
-        ondrop="handleCSVDrop(event)">
-        <i class="ti ti-file-upload" style="font-size:24px;display:block;margin-bottom:6px;opacity:.5"></i>
-        Click to choose a CSV or Excel file (.csv, .xlsx, .xls) or drag &amp; drop here
-        <input type="file" id="csv-file-input" accept=".csv,.xlsx,.xls" style="display:none" onchange="handleCSVFile(this)" />
-      </div>
-      <div class="csv-import-preview" id="csv-import-preview"></div>
-    </div>
-    <div class="modal-footer">
-      <button class="btn" onclick="document.getElementById('csv-modal').classList.add('hidden')">Close</button>
-    </div>
-  </div>
-</div>
 <!-- Break timer -->
 <div class="break-widget" id="break-widget">
   <div class="break-label">
@@ -14589,7 +14563,6 @@ const FS_PORTAL_IDS = [
   'email-preview-modal',
   'masters-modal',
   'weekend-prompt-overlay',
-  'csv-modal',
   'confirm-overlay',
   'username-prompt-overlay',
   'tour-backdrop',
@@ -15386,7 +15359,7 @@ function colorResetAll() {
   if (!_colorResetAllArmed) {
     _colorResetAllArmed = true;
     clearTimeout(_colorResetAllTimer);
-    _colorResetAllTimer = setTimeout(() => { _colorResetAllArmed = false; if (activeMastersTab === 'colors') renderMastersContent(); }, 5000);
+    _colorResetAllTimer = setTimeout(() => { _colorResetAllArmed = false; if (activeMastersTab === 'appearance') renderMastersContent(); }, 5000);
     renderMastersContent();
     return;
   }
@@ -15443,7 +15416,7 @@ function renderColorsTabHTML() {
 function switchTab(tab) {
   activeMastersTab = tab;
   _grpDdOpen = null;
-  const TAB_ORDER = ['user','pending','lists','columns','weekends','workhours','email','colors','wallpaper','data','sync'];
+  const TAB_ORDER = ['user','pending','lists','columns','weekends','workhours','email','appearance','importexport','data','sync'];
   document.querySelectorAll('.master-nav .tab-btn').forEach((b,i) => {
     b.classList.toggle('active', TAB_ORDER[i] === tab);
   });
@@ -15658,6 +15631,82 @@ function selectActiveList(listKey) {
   renderMastersContent();
 }
 
+// ── Import / Export master (content of the former Import / Export popup) ──
+function renderImportExportTabHTML() {
+  return `
+      <!-- Export -->
+      <div class="csv-section-title"><i class="ti ti-download" style="font-size:12px;margin-right:4px"></i>Export Log</div>
+      <div class="csv-modal-row">
+        <div class="csv-field">
+          <label class="csv-label">From date</label>
+          <input type="date" class="csv-input" id="csv-from" />
+        </div>
+        <div class="csv-field">
+          <label class="csv-label">To date</label>
+          <input type="date" class="csv-input" id="csv-to" />
+        </div>
+        <div style="display:flex;gap:8px;flex-shrink:0">
+          <button class="btn btn-primary" onclick="exportCSV()" title="Download a .csv file">
+            <i class="ti ti-download"></i> Export as CSV
+          </button>
+          <button class="btn btn-primary" onclick="exportLogExcel()" title="Download an .xlsx file">
+            <i class="ti ti-file-spreadsheet"></i> Export as Excel
+          </button>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--text-tertiary);margin-bottom:16px">Leave dates blank to export all records.</div>
+
+      <!-- Import -->
+      <div class="csv-section-title"><i class="ti ti-upload" style="font-size:12px;margin-right:4px"></i>Import Log from CSV or Excel</div>
+      <div class="csv-modal-row">
+        <div class="csv-field">
+          <label class="csv-label">Import from date</label>
+          <input type="date" class="csv-input" id="csv-import-from" />
+        </div>
+        <div class="csv-field">
+          <label class="csv-label">Import to date</label>
+          <input type="date" class="csv-input" id="csv-import-to" />
+        </div>
+      </div>
+      <div class="csv-import-drop" id="csv-drop-zone"
+        onclick="document.getElementById('csv-file-input').click()"
+        ondragover="event.preventDefault();this.classList.add('dragover')"
+        ondragleave="this.classList.remove('dragover')"
+        ondrop="handleCSVDrop(event)">
+        <i class="ti ti-file-upload" style="font-size:24px;display:block;margin-bottom:6px;opacity:.5"></i>
+        Click to choose a CSV or Excel file (.csv, .xlsx, .xls) or drag &amp; drop here
+        <input type="file" id="csv-file-input" accept=".csv,.xlsx,.xls" style="display:none" onchange="handleCSVFile(this)" />
+      </div>
+      <div class="csv-import-preview" id="csv-import-preview"></div>
+  `;
+}
+// ── Appearance master: Theme → Wallpaper → Colors (merged from the old Wallpaper / Colors tabs) ──
+function appearanceSetTheme(theme) {
+  setTheme(theme);
+  colorEditTheme = null;           // Colors section follows the newly active theme
+  renderMastersContent();
+}
+function renderAppearanceTabHTML() {
+  const cur = getStoredTheme();
+  const seg = (k, icon, label) => `<button class="btn ${cur === k ? 'btn-primary' : ''}" onclick="appearanceSetTheme('${k}')" aria-pressed="${cur === k}" style="flex:1;justify-content:center;padding:8px 10px"><i class="ti ${icon}"></i> ${label}</button>`;
+  const head = (txt) => `<label class="complete-label" style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.06em;font-weight:600;display:block;margin-bottom:8px">${txt}</label>`;
+  return `
+    <div style="margin-bottom:6px">
+      ${head('Theme')}
+      <div style="display:flex;gap:8px;flex-wrap:wrap" role="group" aria-label="Theme">
+        ${seg('dark', 'ti-moon', 'Dark')}${seg('system', 'ti-device-desktop', 'System')}${seg('light', 'ti-sun', 'Light')}
+      </div>
+      <div style="font-size:11px;color:var(--text-tertiary);margin-top:6px">System follows your device's light / dark setting.</div>
+    </div>
+    <div style="margin-top:18px;padding-top:16px;border-top:1px solid var(--border)">
+      ${head('Wallpaper')}
+      ${renderWallpaperTabHTML()}
+    </div>
+    <div style="margin-top:18px;padding-top:16px;border-top:1px solid var(--border)">
+      ${head('Colors')}
+      ${renderColorsTabHTML()}
+    </div>`;
+}
 function renderMastersContent() {
   const content = document.getElementById('masters-content');
   if (activeMastersTab === 'workhours') {
@@ -15750,7 +15799,7 @@ function renderMastersContent() {
         <div style="font-size:11px;color:var(--text-tertiary);margin-top:6px">This name appears in the effort log and XLSX export.</div>
       </div>
       <div style="margin-top:18px;padding-top:16px;border-top:1px solid var(--border)">
-        <label class="complete-label" style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.06em;font-weight:600;display:block;margin-bottom:5px">Appearance</label>
+        <label class="complete-label" style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.06em;font-weight:600;display:block;margin-bottom:5px">Font</label>
         <div class="complete-row" style="margin-top:8px">
           <div class="complete-field">
             <label class="complete-label">Font family</label>
@@ -15805,12 +15854,13 @@ function renderMastersContent() {
       </div>`;
     return;
   }
-  if (activeMastersTab === 'colors') {
-    content.innerHTML = renderColorsTabHTML();
+  if (activeMastersTab === 'importexport') {
+    content.innerHTML = renderImportExportTabHTML();
+    csvInitFields();
     return;
   }
-  if (activeMastersTab === 'wallpaper') {
-    content.innerHTML = renderWallpaperTabHTML();
+  if (activeMastersTab === 'appearance') {
+    content.innerHTML = renderAppearanceTabHTML();
     wpAfterRender();
     return;
   }
@@ -17710,7 +17760,7 @@ function wpBindStage() {
 
 // Masters tabs visible when the popup is opened from the header photo (User, Colors,
 // Wallpaper and Synchronization). The Masters button shows every other tab.
-const PROFILE_ONLY_TABS = ['user', 'colors', 'wallpaper', 'sync'];
+const PROFILE_ONLY_TABS = ['user', 'appearance', 'importexport', 'sync'];
 function applyMastersTabFilter(profileOnly) {
   document.querySelectorAll('#master-nav .tab-btn').forEach(b => {
     const m = /switchTab\('([^']+)'\)/.exec(b.getAttribute('onclick') || '');
@@ -19510,9 +19560,9 @@ function escHtml(str) {
 
 
 // ── CSV / Excel Export / Import ────────────────────────────────────────────────
-function openCSVModal() {
+// Fills the date fields of the Import / Export master (first of this month → today).
+function csvInitFields() {
   const today = todayStr();
-  // Default from: first day of current month
   const d = new Date(); d.setDate(1);
   const firstOfMonth = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-01';
   document.getElementById('csv-from').value = firstOfMonth;
@@ -19520,7 +19570,12 @@ function openCSVModal() {
   document.getElementById('csv-import-from').value = firstOfMonth;
   document.getElementById('csv-import-to').value = today;
   document.getElementById('csv-import-preview').textContent = '';
-  document.getElementById('csv-modal').classList.remove('hidden');
+}
+// Import / Export now lives in the profile masters (header picture → Import / Export).
+function openCSVModal() {
+  openMasters();
+  applyMastersTabFilter(true);
+  switchTab('importexport');
 }
 
 function csvEscape(val) {
@@ -21338,6 +21393,55 @@ function shutdownSyncInfrastructure() {
 // End Synchronization Infrastructure
 // ════════════════════════════════════════════════════════════════════════════
 
+// ── Ticket History popup ──────────────────────────────────────────────────────
+// Hosts the separate ticket-history.html in an iframe. The page is handed the log entries,
+// the Primary/Secondary group settings and the current theme colours via postMessage, so it
+// works even when the two files are opened from file:// (no shared storage needed).
+let _tkReadyTimer = null;
+function ticketHistoryPayload() {
+  const keep = ['taskId','heading','project','nature','module','ticket','taskStatus','startTs','endTs','durationSecs','description','remark','customFields'];
+  const entries = logEntries.map(e => { const o = {}; keep.forEach(k => { if (e[k] !== undefined) o[k] = e[k]; }); return o; });
+  const cols = (masters.logColumns || []).map(c => ({ key: c.key, label: c.label, type: c.type, isDateColumn: !!c.isDateColumn,
+    isEffortColumn: !!c.isEffortColumn, isEmployeeColumn: !!c.isEmployeeColumn, isStatusColumn: !!c.isStatusColumn }));
+  const cs = getComputedStyle(document.documentElement), vars = {};
+  ['--bg','--bg-secondary','--bg-tertiary','--text-primary','--text-secondary','--text-tertiary','--border','--border-md',
+   '--green-bg','--green-mid','--green-dark','--amber-bg','--amber-mid','--amber-dark','--blue-bg','--blue-mid','--blue-dark',
+   '--red-bg','--red-mid','--radius-md','--radius-lg'].forEach(n => { const v = cs.getPropertyValue(n).trim(); if (v) vars[n] = v; });
+  return { type: 'ttl-tickets:data', logEntries: entries, vars,
+    masters: { groupPrefs: masters.groupPrefs, statusConfig: getStatusConfig(), logColumns: cols } };
+}
+function sendTicketHistoryData() {
+  const fr = document.getElementById('tk-frame');
+  if (!fr || !fr.contentWindow) return;
+  clearTimeout(_tkReadyTimer);
+  document.getElementById('tk-fallback').classList.add('hidden');
+  fr.contentWindow.postMessage(ticketHistoryPayload(), '*');
+}
+function openTicketHistory() {
+  const fr = document.getElementById('tk-frame');
+  document.getElementById('ticket-history-modal').classList.remove('hidden');
+  if (!fr.getAttribute('src')) {
+    fr.setAttribute('src', fr.getAttribute('data-src'));       // first open: load; the page announces 'ready'
+    clearTimeout(_tkReadyTimer);
+    _tkReadyTimer = setTimeout(() => document.getElementById('tk-fallback').classList.remove('hidden'), 4000);
+  } else {
+    sendTicketHistoryData();                                    // already loaded: just refresh its data
+  }
+}
+function closeTicketHistory() {
+  document.getElementById('ticket-history-modal').classList.add('hidden');
+}
+window.addEventListener('message', function (ev) {
+  const fr = document.getElementById('tk-frame');
+  if (!fr || ev.source !== fr.contentWindow || !ev.data) return;
+  if (ev.data.type === 'ttl-tickets:ready') sendTicketHistoryData();
+  else if (ev.data.type === 'ttl-tickets:close') closeTicketHistory();
+});
+document.addEventListener('keydown', function (ev) {
+  const m = document.getElementById('ticket-history-modal');
+  if (ev.key === 'Escape' && m && !m.classList.contains('hidden')) closeTicketHistory();
+});
+
 // ── Pending Tasks popup ───────────────────────────────────────────────────────
 // Groups every log entry that is still open (Status is neither "Completed" nor
 // "Blocked") by task identity: primarily by ticket number, and only when no
@@ -22423,8 +22527,7 @@ const TOUR_STEPS = [
   { target: '#copy-btn', pos: 'top', title: '📋 Copy Log', body: 'Copy the effort log as a tab-separated table — paste directly into Excel or Google Sheets.' },
   { target: '#mail-btn', pos: 'top', title: '✉️ Email Log', body: 'Opens your mail app pre-filled and simultaneously copies a styled Excel-compatible table to clipboard. Template is configured in Masters → Email.' },
   { target: '#work-widget', pos: 'left', title: '⏱ Work & Break Tracker', body: 'Shows your <strong>total work time</strong> for today, updated live as timers run.' },
-  { target: '#theme-toggle-btn', pos: 'bottom', title: '🌙 Theme', body: 'Switch between <strong>Light</strong>, <strong>Dark</strong>, and <strong>System</strong> themes. Now tucked into the <strong>More</strong> menu.', onShow: () => { if (typeof openMoreMenu === 'function') openMoreMenu(); } },
-  { target: 'button[onclick="openCSVModal()"]', pos: 'bottom', title: '📄 CSV', body: 'Export your log to a spreadsheet or import historical data, filtered by date range. Found in the <strong>More</strong> menu.', onShow: () => { if (typeof openMoreMenu === 'function') openMoreMenu(); } },
+  { target: '#header-avatar', pos: 'bottom', title: '👤 Profile, Appearance &amp; Import / Export', body: 'Click your <strong>profile picture</strong> to open your own masters: <strong>User</strong> (name, photo, font), <strong>Appearance</strong> (Dark / System / Light theme, wallpaper and colors), <strong>Import / Export</strong> of the log as CSV or Excel, and Synchronization.' },
   { target: '#tour-btn', pos: 'bottom', title: '🗺 Tour', body: 'Restart this tour anytime from the <strong>More</strong> menu.', onShow: () => { if (typeof openMoreMenu === 'function') openMoreMenu(); } },
   // Masters — open it
   { target: 'button[onclick="openMasters()"]', pos: 'bottom', title: '⚙️ Masters', body: 'The <strong>Masters</strong> panel is your settings hub. Click Next to open it and explore each tab.', onNext: () => { openMasters(); } },
