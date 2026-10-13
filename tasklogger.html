@@ -13978,6 +13978,8 @@ function toggleTaskCardFieldCollapse(id, key) {
   const k = id + ':' + key;
   if (expandedTaskCardFields.has(k)) expandedTaskCardFields.delete(k);
   else expandedTaskCardFields.add(k);
+  const _ed = document.getElementById('meta-' + key + '-' + id + '-trigger');
+  if (_ed) _ed.style.height = ''; // let the collapsed/expanded CSS height apply
   renderRow(id);
 }
 
@@ -14200,6 +14202,45 @@ function rteSetCaretOffsets(editor, c) {
   } catch (e) {}
 }
 
+// ── Text-area field state preservation across task-card rebuilds ──────────────
+// A card rebuild (periodic refresh, sync merge, etc.) replaces the editor DOM, which used
+// to reset the field to the master Rows height and scroll position. These helpers keep
+// the user's dragged height and scroll, and let a card be patched around a focused editor.
+function rteCaptureCardUiState(container) {
+  const memo = {};
+  container.querySelectorAll('.rte-editor').forEach(ed => {
+    if (!ed.id) return;
+    const collapsed = !!ed.closest('.tc-field-collapsed');
+    memo[ed.id] = { h: (!collapsed && ed.style.height) ? ed.style.height : '', st: ed.scrollTop };
+  });
+  return memo;
+}
+function rteRestoreCardUiState(container, memo, skipEl) {
+  container.querySelectorAll('.rte-editor').forEach(ed => {
+    if (ed === skipEl || !ed.id || !memo[ed.id]) return;
+    const m = memo[ed.id];
+    if (m.h && !ed.closest('.tc-field-collapsed')) ed.style.height = m.h;
+    if (m.st) ed.scrollTop = m.st;
+  });
+}
+function rtePatchCardAroundEditor(container, newHtml, editor) {
+  const tmp = document.createElement('div');
+  tmp.innerHTML = newHtml;
+  const oldMeta = container.querySelector(':scope > .task-meta');
+  const newMeta = tmp.querySelector(':scope > .task-meta');
+  const keepField = editor.closest('.meta-field');
+  if (!oldMeta || !newMeta || !keepField || keepField.parentNode !== oldMeta) return false;
+  const oldFields = Array.from(oldMeta.children), newFields = Array.from(newMeta.children);
+  if (oldFields.length !== newFields.length) return false;
+  const idx = oldFields.indexOf(keepField);
+  if (!newFields[idx] || !newFields[idx].querySelector('#' + CSS.escape(editor.id))) return false;
+  const oldTop = container.querySelector(':scope > .task-top');
+  const newTop = tmp.querySelector(':scope > .task-top');
+  if (oldTop && newTop) oldTop.replaceWith(newTop);
+  oldFields.forEach((f, i) => { if (f !== keepField) f.replaceWith(newFields[i]); });
+  return true;
+}
+
 function renderRow(id) {
   const task = tasks.find(t => t.id === id);
   let container = document.getElementById('row-'+id);
@@ -14274,7 +14315,10 @@ function renderRow(id) {
     };
   }
   // Show module/ticket on card only (project & nature shown, no description on card)
-  container.innerHTML = `
+  // Remember each text-area field's user-dragged height and scroll position so a rebuild
+  // of this card does not snap them back to the master Rows setting.
+  const rteMemo = rteCaptureCardUiState(container);
+  const newCardHtml = `
     <div class="task-top">
       <div class="task-drag-handle" draggable="true" ondragstart="taskDragStart(event, ${id})" ondragend="taskDragEnd(event)" title="Drag to reorder">
         <i class="ti ti-grip-vertical"></i>
@@ -14298,6 +14342,18 @@ function renderRow(id) {
       <i class="ti ti-alert-circle"></i> Enter a task name.
     </div>
   `;
+  // While the user is typing in a text-area field of this card, never destroy that editor:
+  // patch everything around it and leave the live node untouched (keeps caret, scroll,
+  // manual height and Ctrl+Z history). Falls back to a full rebuild if the card's field
+  // structure itself changed.
+  const typingEditor = (activeEl && activeEl.classList && activeEl.classList.contains('rte-editor') &&
+    container.contains(activeEl) && activeEl.isContentEditable) ? activeEl : null;
+  if (typingEditor && rtePatchCardAroundEditor(container, newCardHtml, typingEditor)) {
+    rteRestoreCardUiState(container, rteMemo, typingEditor);
+    return;
+  }
+  container.innerHTML = newCardHtml;
+  rteRestoreCardUiState(container, rteMemo, null);
   // Phase 19F: restore focus/selection captured just above, now that the
   // replacement DOM exists. Only fires when the user was actually focused
   // in this exact card, so it never steals focus into a card the user
@@ -17998,6 +18054,7 @@ function changeColumnRows(key, rows) {
   if (!col) return;
   const n = parseInt(rows, 10);
   col.rows = (Number.isFinite(n) && n >= 1) ? n : DEFAULT_TEXTAREA_ROWS;
+  document.querySelectorAll('.rte-editor').forEach(e => { e.style.height = ''; });
   saveState();
   refreshAfterColumnConfigChange();
 }
