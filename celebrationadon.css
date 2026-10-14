@@ -202,15 +202,15 @@ body::after {
 
 /* Primary buttons: red with a soft candy-cane sheen */
 .btn-primary {
-  background-image: linear-gradient(135deg, var(--blue-mid) 0%, var(--blue-dark) 100%);
+  background-image: linear-gradient(135deg, #d6353c 0%, #a81d24 100%);   /* fixed reds: stays readable in Light and Dark */
   color: #fff;   /* the app's default dark text is unreadable on red */
   box-shadow: 0 0 0 3px var(--blue-bg), 0 2px 10px rgba(192, 38, 45, .30);
 }
 
 /* Dashboard / highlight button: pine green */
 .btn-highlight {
-  background-image: linear-gradient(135deg, var(--green-mid) 0%, var(--green-dark) 100%);
-  border-color: var(--green-dark);
+  background-image: linear-gradient(135deg, #2a7d4f 0%, #1b5a37 100%);
+  border-color: #1b5a37;
   color: #fff;
   box-shadow: 0 0 0 3px var(--green-bg), 0 2px 10px rgba(42, 125, 79, .30);
 }
@@ -230,16 +230,166 @@ body::after {
 
 
 /* ---------------------------------------------------------------------
+   3b. TASK CARDS — Santa cap on the right corner + snow on top edge
+   (.task-card gets position:relative so the cap can sit on its corner;
+   both pieces ignore clicks.)
+   --------------------------------------------------------------------- */
+.task-card { position: relative; }
+
+/* Santa cap: red cap + white brim + pom-pom, tilted over the top-right corner */
+.task-card::after {
+  content: "";
+  position: absolute;
+  top: -17px;
+  right: -3px;
+  width: 38px;
+  height: 30px;
+  pointer-events: none;
+  z-index: 3;
+  transform: rotate(14deg);
+  transform-origin: 50% 100%;
+  background:
+    radial-gradient(circle at 33px 5px, #fff 0 5px, transparent 5.6px),          /* pom-pom */
+    linear-gradient(#fff, #fff) 0 22px / 100% 7px no-repeat,                      /* fur brim */
+    linear-gradient(to top left, #d62828 50%, transparent 50%) 0 0 / 100% 23px no-repeat; /* cap */
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .28));
+  border-radius: 0 0 4px 4px;
+}
+
+/* Snow drifting along the top edge of each card */
+.task-card::before {
+  content: "";
+  position: absolute;
+  top: -2px;
+  left: 14px;
+  right: 56px;                 /* stops short of the cap */
+  height: 7px;
+  pointer-events: none;
+  z-index: 2;
+  background: radial-gradient(circle at 9px 0, #fff 0 6px, transparent 6.6px) 0 0 / 18px 7px repeat-x;
+  filter: drop-shadow(0 1px 0 rgba(90, 120, 160, .35));
+}
+
+/* Running card gets a soft festive-green glow */
+.task-card.running { box-shadow: 0 0 0 2px var(--green-bg), 0 0 14px rgba(63, 176, 114, .25); }
+
+
+/* ---------------------------------------------------------------------
+   3c. EFFORT TABLE — Santa's sleigh flying left → right across the top
+   A sky strip is added above the table header; the sleigh (Santa 🎅 on a
+   sled pulled by two reindeer) loops across it. Emoji are mirrored so
+   the reindeer lead the way to the right.
+   --------------------------------------------------------------------- */
+.log-panel {
+  position: relative;
+  padding-top: 38px;
+  background-image:
+    radial-gradient(1.5px 1.5px at 8% 10px,  #ffe9a8 50%, transparent 55%),
+    radial-gradient(1.5px 1.5px at 27% 24px, #ffe9a8 50%, transparent 55%),
+    radial-gradient(1.5px 1.5px at 46% 9px,  #ffe9a8 50%, transparent 55%),
+    radial-gradient(1.5px 1.5px at 63% 26px, #ffe9a8 50%, transparent 55%),
+    radial-gradient(1.5px 1.5px at 81% 12px, #ffe9a8 50%, transparent 55%),
+    radial-gradient(1.5px 1.5px at 94% 25px, #ffe9a8 50%, transparent 55%),
+    linear-gradient(to bottom, #12304a 0%, #1c4a6a 70%, var(--bg) 100%);
+  background-size: 100% 38px;
+  background-repeat: no-repeat;
+}
+.log-panel::before {
+  content: "\1F98C\1F98C\1F6F7\1F385";      /* 🦌🦌🛷🎅  (mirrored → 🎅🛷🦌🦌 heading right) */
+  position: absolute;
+  top: 4px;
+  left: -190px;
+  font-size: 22px;
+  line-height: 1;
+  letter-spacing: .12em;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 6;
+  transform: scaleX(-1);
+  filter: drop-shadow(0 0 4px rgba(255, 255, 255, .55));
+  animation: celeb-sleigh 16s linear infinite, celeb-bob 1.6s ease-in-out infinite;
+}
+@keyframes celeb-sleigh { from { left: -190px; } to { left: 100%; } }
+@keyframes celeb-bob    { 0%, 100% { top: 4px; } 50% { top: 9px; } }
+
+/* A small greeting in the sky that fades in and out */
+.log-panel::after {
+  content: "\2728  Merry Christmas  \2728";   /* ✨ */
+  position: absolute;
+  top: 8px;
+  right: 16px;
+  font-family: var(--font-head);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  color: #ffe9a8;
+  pointer-events: none;
+  z-index: 5;
+  animation: celeb-glow 3.2s ease-in-out infinite;
+}
+@keyframes celeb-glow { 0%, 100% { opacity: .35; } 50% { opacity: 1; text-shadow: 0 0 8px rgba(255, 233, 168, .9); } }
+
+/* Table header: festive red underline */
+.log-table thead th { border-bottom: 2px solid var(--blue-mid); }
+.log-header { border-bottom-color: var(--blue-mid); }
+
+/* In fullscreen the sky strip is not needed */
+.log-panel.fullscreen, .log-panel.fullscreen-sim { padding-top: 0; background-image: none; }
+.log-panel.fullscreen::before, .log-panel.fullscreen-sim::before,
+.log-panel.fullscreen::after,  .log-panel.fullscreen-sim::after { display: none; }
+
+
+/* ---------------------------------------------------------------------
+   3d. EXTRA CELEBRATION VIBE
+   --------------------------------------------------------------------- */
+
+/* Snowy ground along the bottom of the screen */
+html::after {
+  content: "";
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 16px;
+  pointer-events: none;
+  z-index: 39;
+  background:
+    radial-gradient(circle at 14px 16px, #fff 0 13px, transparent 13.6px) 0 0 / 28px 16px repeat-x;
+  filter: drop-shadow(0 -1px 2px rgba(90, 120, 160, .35));
+  opacity: .92;
+}
+
+/* Dim the ground snow in Dark so it doesn't glare */
+html:root[data-theme="dark"]::after { opacity: .3; }
+@media (prefers-color-scheme: dark) { html:root:not([data-theme="light"]):not([data-theme="dark"])::after { opacity: .3; } }
+
+/* Text selection + keyboard focus in holiday colours */
+::selection { background: rgba(192, 38, 45, .28); }
+:focus-visible { outline-color: var(--green-mid); }
+
+/* Red band along the top of every popup */
+.modal { border-top: 4px solid var(--blue-mid); }
+
+/* Headline sparkle: subtitle gets a greeting that fades with the lights */
+.subtitle::after { content: "  \00b7  Happy Holidays \2744\FE0F"; color: var(--blue-mid); }
+
+
+/* ---------------------------------------------------------------------
    4. KEEP IN EVERY HOLIDAY FILE
    --------------------------------------------------------------------- */
 
 /* Respect "reduce motion": decorations stay, animation stops */
 @media (prefers-reduced-motion: reduce) {
-  .header::before, .header::after, body::before, body::after { animation: none; }
+  .header::before, .header::after, body::before, body::after,
+  .log-panel::before, .log-panel::after { animation: none; }
+  .log-panel::before { left: 12px; }   /* park the sleigh instead of flying */
 }
 
 /* Never print the decorations */
 @media print {
-  .header::before, .header::after, body::before, body::after,
-  .title::before, .title::after { display: none !important; content: none !important; }
+  .header::before, .header::after, body::before, body::after, html::after,
+  .title::before, .title::after, .subtitle::after,
+  .task-card::before, .task-card::after,
+  .log-panel::before, .log-panel::after { display: none !important; content: none !important; }
+  .log-panel { padding-top: 0 !important; background-image: none !important; }
 }
