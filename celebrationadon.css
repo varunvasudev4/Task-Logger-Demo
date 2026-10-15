@@ -1,7 +1,13 @@
 /* =====================================================================
    celebrationadon.css  —  Task Time Logger (TTL) holiday add-on theme
    ---------------------------------------------------------------------
-   CURRENT HOLIDAY : Navarathri 🪔🌺
+   CURRENT HOLIDAY : Navaratri 🪔
+
+   THEME IDEA
+   Nine nights of Goddess Durga: warm lamp-light, marigold garlands (toran),
+   kumkum / rani-pink, leaf green and gold. Night mode is a deep wine-maroon
+   evening (garba night). Decorations are diya sparks rising and marigold
+   petals drifting down — no snow, no cold colours.
 
    HOW IT WORKS
    • tasklogger.html loads this file by its fixed name: celebrationadon.css
@@ -15,57 +21,70 @@
    This file is purely visual: CSS only, no JavaScript, no data access.
    ===================================================================== */
 
-/* 1. PALETTE ----------------------------------------------------------
-   Accent = kumkum magenta · Running = leaf green · Paused = turmeric gold
-   Red (danger) and purple (tags) are left to the app.                  */
+/* 1. PALETTE ---------------------------------------------------------- */
 
-/* Light: explicit Light, or System in light mode */
+/* Light: explicit Light, or System in light mode — warm ivory / saffron cream */
 html:root:not([data-theme="dark"]) {
-  --bg: #FFFBF5;  --bg-primary: #FFFBF5;
-  --bg-secondary: #FBF0E4;  --bg-tertiary: #F5E4D2;
-  --text-primary: #2E1420;  --text-secondary: #5A3A47;  --text-tertiary: #8A6672;
-  --border: rgba(122, 28, 72, 0.16);  --border-md: rgba(122, 28, 72, 0.32);
-  --blue-mid: #C2185B;   --blue-dark: #8E0F43;   --blue-bg: #FCE4EE;
-  --green-mid: #2E7D4F;  --green-dark: #1B5E3A;  --green-bg: #DDF0E3;
-  --amber-mid: #E5A400;  --amber-dark: #7A5200;  --amber-bg: #FFF1C7;
-  --shadow: 0 2px 10px rgba(122, 28, 72, 0.12);
+  --bg: #fffaf2;  --bg-primary: #fffaf2;
+  --bg-secondary: #fbefdb;
+  --bg-tertiary: #f4e0c2;
+  --text-primary: #2b1620;
+  --text-secondary: #5e3d4a;
+  --text-tertiary: #84636d;
+  --border: rgba(94, 29, 48, 0.16);
+  --border-md: rgba(94, 29, 48, 0.32);
+  --blue-mid: #b3194f;   --blue-dark: #861139;   --blue-bg: #fbe0e8;   /* accent: kumkum / rani pink */
+  --green-mid: #2f7d4f;  --green-dark: #1d5a37;  --green-bg: #dff0e3;  /* running: mango-leaf green */
+  --amber-mid: #b07a0a;  --amber-dark: #7a5300;  --amber-bg: #fbefc6;  /* paused: marigold gold */
+  --shadow: 0 1px 2px rgba(94, 29, 48, 0.10), 0 2px 8px rgba(94, 29, 48, 0.06);
 }
 
-/* Dark: System preference (no explicit theme chosen) */
+/* Dark: System preference (no explicit theme chosen) — wine-maroon night */
 @media (prefers-color-scheme: dark) {
   html:root:not([data-theme="light"]):not([data-theme="dark"]) {
-    --bg: #2A1020;  --bg-primary: #2A1020;
-    --bg-secondary: #36172B;  --bg-tertiary: #1D0A16;
-    --text-primary: #FFF1F6;  --text-secondary: #EBCBD9;  --text-tertiary: #BE97A8;
-    --border: #4F2740;  --border-md: #6B3A58;
-    --blue-mid: #D81B6A;   --blue-dark: #FF8DB8;   --blue-bg: #5A1634;
-    --green-mid: #3FA96B;  --green-dark: #8EE0AF;  --green-bg: #17402B;
-    --amber-mid: #E9B02A;  --amber-dark: #FFD878;  --amber-bg: #4D3708;
-    --shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
+    --bg: #2a1420;  --bg-primary: #2a1420;
+    --bg-secondary: #371b2b;
+    --bg-tertiary: #170a10;
+    --text-primary: #fdf0e6;
+    --text-secondary: #dcbcc3;
+    --text-tertiary: #ab8792;
+    --border: #4a2a3b;
+    --border-md: #6a3f55;
+    --blue-mid: #e0457b;   --blue-dark: #ff9fbf;   --blue-bg: #4a1a30;
+    --green-mid: #4caf72;  --green-dark: #9fe0b6;  --green-bg: #1d3a2a;
+    --amber-mid: #e8b02e;  --amber-dark: #f5d37a;  --amber-bg: #3d2e12;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
   }
 }
 
-/* Dark: explicit Dark */
+/* Dark: explicit Dark (values identical to the block above) */
 html:root[data-theme="dark"] {
-  --bg: #2A1020;  --bg-primary: #2A1020;
-  --bg-secondary: #36172B;  --bg-tertiary: #1D0A16;
-  --text-primary: #FFF1F6;  --text-secondary: #EBCBD9;  --text-tertiary: #BE97A8;
-  --border: #4F2740;  --border-md: #6B3A58;
-  --blue-mid: #D81B6A;   --blue-dark: #FF8DB8;   --blue-bg: #5A1634;
-  --green-mid: #3FA96B;  --green-dark: #8EE0AF;  --green-bg: #17402B;
-  --amber-mid: #E9B02A;  --amber-dark: #FFD878;  --amber-bg: #4D3708;
-  --shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
+  --bg: #2a1420;  --bg-primary: #2a1420;
+  --bg-secondary: #371b2b;
+  --bg-tertiary: #170a10;
+  --text-primary: #fdf0e6;
+  --text-secondary: #dcbcc3;
+  --text-tertiary: #ab8792;
+  --border: #4a2a3b;
+  --border-md: #6a3f55;
+  --blue-mid: #e0457b;   --blue-dark: #ff9fbf;   --blue-bg: #4a1a30;
+  --green-mid: #4caf72;  --green-dark: #9fe0b6;  --green-bg: #1d3a2a;
+  --amber-mid: #e8b02e;  --amber-dark: #f5d37a;  --amber-bg: #3d2e12;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
   --scroll-thumb: rgba(255, 255, 255, 0.28);
 }
 
 /* 2. DECORATIONS ------------------------------------------------------ */
 
-/* Title: 🪔 … 🌺 */
+/* Title: diya before, hibiscus (the Devi's flower) after */
 .title::before { content: "\1FA94\00a0"; }
 .title::after  { content: "\00a0\1F33A"; }
 
-/* Header: marigold-and-diya garland on a thread, twinkling in turns */
-.header::before, .header::after {
+/* Header: marigold garland (toran) hanging in the page's top padding.
+   ::before = orange marigolds on a gold string
+   ::after  = yellow marigolds with a kumkum centre, offset between them */
+.header::before,
+.header::after {
   content: "";
   position: absolute;
   left: 0; right: 0;
@@ -73,83 +92,101 @@ html:root[data-theme="dark"] {
   height: 14px;
   pointer-events: none;
   z-index: 1;
-  background-repeat: repeat-x;
-  filter: drop-shadow(0 0 3px rgba(255, 190, 60, 0.7));
+  background-repeat: repeat-x, no-repeat;
+  background-size: 26px 14px, 100% 2px;
 }
 .header::before {
   background-image:
-    radial-gradient(circle at 7px 8px,  #FFC83D 0 3.5px, transparent 4.5px),
-    radial-gradient(circle at 25px 8px, #FF7A1A 0 3.5px, transparent 4.5px),
-    linear-gradient(var(--amber-mid), var(--amber-mid));
-  background-size: 36px 14px, 36px 14px, 100% 1px;
-  background-position: 0 0, 0 0, 0 2px;
-  background-repeat: repeat-x, repeat-x, no-repeat;
-  animation: celeb-twinkle 2.4s ease-in-out infinite;
+    radial-gradient(circle at 13px 8px, #ffd54a 0 1.8px, #f9a11b 2.4px 4.6px, #e8730c 5px 5.4px, transparent 5.8px),
+    linear-gradient(#c58a1c, #c58a1c);
+  background-position: 0 0, 0 2px;
+  animation: celeb-diya-glow 3.2s ease-in-out infinite;
 }
 .header::after {
   background-image:
-    radial-gradient(circle at 16px 8px, #FF4F9A 0 3.5px, transparent 4.5px),
-    radial-gradient(circle at 34px 8px, #FFE08A 0 3.5px, transparent 4.5px);
-  background-size: 36px 14px;
-  animation: celeb-twinkle 2.4s ease-in-out -1.2s infinite;
+    radial-gradient(circle at 13px 8px, #c2185b 0 1.2px, #ffe066 1.8px 4.2px, #f5b800 4.6px 5px, transparent 5.4px),
+    linear-gradient(transparent, transparent);
+  background-position: 13px 0, 0 2px;
+  animation: celeb-diya-glow 3.2s ease-in-out 1.6s infinite;
 }
-@keyframes celeb-twinkle {
-  0%, 100% { opacity: 1; }
-  50%      { opacity: .35; }
+@keyframes celeb-diya-glow {
+  0%, 100% { opacity: .78; filter: brightness(1); }
+  50%      { opacity: 1;   filter: brightness(1.18); }
 }
 
-/* Floating sparkles: golden specks drift down, a second layer rises
-   like sparks from a lamp. Tiles loop on whole multiples → seamless. */
-body::before, body::after {
+/* Rising diya sparks (gold/saffron embers). 240px tile, rises exactly one tile = seamless loop */
+body::before {
   content: "";
   position: fixed;
   inset: 0;
   pointer-events: none;
   z-index: 40;
-  filter: drop-shadow(0 0 2px rgba(180, 90, 0, 0.35));
-}
-body::before {
   background-image:
-    radial-gradient(circle at 20px 30px,  rgba(255, 200, 70, .95) 0 2px,   transparent 3px),
-    radial-gradient(circle at 150px 120px, rgba(255, 120, 40, .9) 0 2.5px, transparent 3.5px),
-    radial-gradient(circle at 280px 190px, rgba(236, 72, 153, .85) 0 2px,  transparent 3px),
-    radial-gradient(circle at 80px 200px,  rgba(255, 200, 70, .9) 0 1.5px, transparent 2.5px),
-    radial-gradient(circle at 230px 60px,  rgba(255, 140, 60, .9) 0 1.5px, transparent 2.5px);
-  background-size: 340px 240px;
-  opacity: .75;
-  animation: celeb-fall 16s linear infinite;
+    radial-gradient(circle at 28px 36px,  #ffd23f 0 1.2px, rgba(255, 160, 30, .35) 1.8px, transparent 4px),
+    radial-gradient(circle at 120px 90px, #ffb52e 0 1.5px, rgba(255, 140, 20, .30) 2.2px, transparent 5px),
+    radial-gradient(circle at 210px 20px, #ffe27a 0 1px,   rgba(255, 170, 40, .35) 1.6px, transparent 3.5px),
+    radial-gradient(circle at 70px 160px, #ffc93c 0 1.3px, rgba(255, 150, 30, .30) 2px,   transparent 4.5px),
+    radial-gradient(circle at 250px 130px,#ffd23f 0 1.6px, rgba(255, 140, 20, .30) 2.3px, transparent 5px),
+    radial-gradient(circle at 170px 210px,#ffb52e 0 1.1px, rgba(255, 160, 30, .35) 1.7px, transparent 3.8px);
+  background-size: 300px 240px;
+  opacity: .7;
+  animation: celeb-sparks-rise 22s linear infinite;
 }
+@keyframes celeb-sparks-rise {
+  from { background-position: 0 0; }
+  to   { background-position: 0 -240px; }
+}
+
+/* Drifting marigold & rose petals. 360px tile, falls exactly one tile = seamless loop */
 body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 40;
   background-image:
-    radial-gradient(circle at 40px 150px,  rgba(255, 215, 100, .9) 0 1.5px, transparent 2.5px),
-    radial-gradient(circle at 170px 40px,  rgba(255, 150, 70, .85) 0 2px,   transparent 3px),
-    radial-gradient(circle at 240px 120px, rgba(255, 90, 160, .8) 0 1.5px,  transparent 2.5px);
-  background-size: 280px 200px;
+    radial-gradient(ellipse 3.2px 2px at 50px 40px,   #f59e0b 0 85%, transparent 100%),
+    radial-gradient(ellipse 2.6px 1.8px at 190px 110px, #fb7a1e 0 85%, transparent 100%),
+    radial-gradient(ellipse 3px 2px at 300px 60px,    #e0457b 0 85%, transparent 100%),
+    radial-gradient(ellipse 2.8px 1.8px at 110px 220px, #ffc21a 0 85%, transparent 100%),
+    radial-gradient(ellipse 3.2px 2px at 260px 270px, #f59e0b 0 85%, transparent 100%),
+    radial-gradient(ellipse 2.6px 1.8px at 20px 320px,  #e0457b 0 85%, transparent 100%);
+  background-size: 360px 360px;
   opacity: .6;
-  animation: celeb-rise 22s linear infinite;
+  animation: celeb-petals-fall 30s linear infinite;
 }
-@keyframes celeb-fall {
+@keyframes celeb-petals-fall {
   from { background-position: 0 0; }
-  to   { background-position: 0 240px; }
-}
-@keyframes celeb-rise {
-  from { background-position: 0 0; }
-  to   { background-position: 0 -200px; }
+  to   { background-position: 0 360px; }
 }
 
 /* 3. ACCENTS ---------------------------------------------------------- */
+
+/* Subtitle: accent tone (darker in light mode, lighter in dark mode) */
 .subtitle { color: var(--blue-dark); }
 
-.btn-primary {
-  background: linear-gradient(135deg, var(--blue-mid), #D2461E);
+/* Primary buttons: kumkum → saffron gradient, white text, warm glow.
+   Fixed colours (same in Light/Dark); hover re-declared with !important. */
+.btn-primary,
+.btn-highlight {
+  background: linear-gradient(135deg, #a8154b, #c2410c);
   color: #fff;
-  box-shadow: 0 0 10px rgba(255, 160, 50, 0.45);
+  border-color: #a8154b;
+  box-shadow: 0 0 0 3px var(--blue-bg), 0 2px 12px rgba(245, 158, 11, 0.35);
+}
+.btn-primary:hover,
+.btn-highlight:hover {
+  background: linear-gradient(135deg, #8e1240, #a8350a) !important;
+  border-color: #8e1240 !important;
+  color: #fff;
 }
 
-/* Profile photo: gold ring with a magenta halo (no size/layout change) */
+/* Avatar: dandiya-style ring of gold and rani-pink beads on the border */
 .user-avatar-btn {
-  border-color: var(--amber-mid);
-  box-shadow: 0 0 0 2px var(--blue-mid);
+  border-color: transparent;
+  background:
+    linear-gradient(var(--green-mid), var(--green-mid)) padding-box,
+    repeating-conic-gradient(#f5b800 0 18deg, #c2185b 18deg 36deg) border-box;
 }
 
 /* 4. KEEP IN EVERY HOLIDAY FILE --------------------------------------- */
