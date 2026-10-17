@@ -13868,6 +13868,25 @@ function rteIsEditorEmpty(editor) { return !editor.textContent.trim(); }
 // breaks preserved, everything else discarded) — never store the editor's innerHTML — and
 // clear any leftover empty markup (a stray <br>) once the user has deleted everything, so
 // the placeholder reappears correctly.
+// Converts the live contenteditable DOM to plain text. Unlike richTextToPlain (built for legacy
+// HTML), this puts a newline BEFORE each block (<div>/<p>/<li>) as well as after it, so
+// browsers that wrap each new line in a <div> never merge adjacent lines, and blank lines survive.
+function rteEditorToPlain(editor) {
+  let out = '';
+  const BLOCK = /^(DIV|P|LI)$/;
+  (function walk(node) {
+    node.childNodes.forEach(n => {
+      if (n.nodeType === 3) { out += n.nodeValue; return; }
+      if (n.nodeType !== 1) return;
+      if (n.tagName === 'BR') { out += '\n'; return; }
+      const blk = BLOCK.test(n.tagName);
+      if (blk && out && !out.endsWith('\n')) out += '\n';
+      walk(n);
+      if (blk && !out.endsWith('\n')) out += '\n';
+    });
+  })(editor);
+  return out.replace(/\u00A0/g, ' ').replace(/\n$/, '');
+}
 function rteSync(idAttr) {
   const editor = document.getElementById(idAttr + '-trigger');
   const hidden = document.getElementById(idAttr);
@@ -13876,7 +13895,7 @@ function rteSync(idAttr) {
     if (editor.innerHTML !== '') editor.innerHTML = '';
     hidden.value = '';
   } else {
-    hidden.value = richTextToPlain(editor.innerHTML) || editor.textContent;
+    hidden.value = rteEditorToPlain(editor) || editor.textContent;
     editor.classList.remove('invalid');
   }
 }
@@ -20138,7 +20157,8 @@ let weekendWorkday = null; // null=not asked, true=working, false=day off
 
 function checkWeekendPrompt() {
   if (!isTodayWeekend()) return;
-  const stored = localStorage.getItem('ttl_weekend_' + todayStr());
+  let stored = null;
+  try { stored = localStorage.getItem('ttl_weekend_' + todayStr()); } catch (e) {}
   if (stored !== null) { weekendWorkday = stored === 'true'; return; }
   const day = new Date().toLocaleDateString('en-GB', { weekday: 'long' });
   document.getElementById('weekend-prompt-day').textContent =
@@ -20148,7 +20168,7 @@ function checkWeekendPrompt() {
 
 function setWeekendWorkday(isWorking) {
   weekendWorkday = isWorking;
-  localStorage.setItem('ttl_weekend_' + todayStr(), String(isWorking));
+  try { localStorage.setItem('ttl_weekend_' + todayStr(), String(isWorking)); } catch (e) {}
   // Phase 19E: entityId = the date itself — each date is its own record, per
   // SYNC_STATE_INVENTORY.md's weekendOverrides row and applyRemoteWeekendOverrides()'s
   // per-date merge.
@@ -20167,7 +20187,8 @@ function isWorkingDay() {
 
 // ── Username prompt on first run ──────────────────────────────────────────────
 function checkUserNamePrompt() {
-  const stored = localStorage.getItem('ttl_username');
+  let stored = '';
+  try { stored = localStorage.getItem('ttl_username'); } catch (e) {} // storage blocked (sandboxed preview)
   if (!stored || !stored.trim()) {
     document.getElementById('username-prompt-overlay').classList.remove('hidden');
     setTimeout(() => {
