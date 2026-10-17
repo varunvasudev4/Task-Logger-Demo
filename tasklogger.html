@@ -11632,6 +11632,7 @@ function loadState() {
       ];
       Object.keys(masters.customLists).forEach(lk => {
         if (PROTECTED_LIST_KEYS.includes(lk)) return;
+        if (masters.listMeta && masters.listMeta[lk] && masters.listMeta[lk].keep) return; // created directly in Masters → Lists
         const stillOwned = colsForSweep.some(c => c.listSource === lk);
         if (!stillOwned) delete masters.customLists[lk];
       });
@@ -15544,6 +15545,7 @@ function renderColorsTabHTML() {
 }
 function switchTab(tab) {
   activeMastersTab = tab;
+  _cfgIoMsg = null;
   _grpDdOpen = null;
   const TAB_ORDER = ['user','pending','lists','columns','weekends','workhours','email','colors','wallpaper','data','sync'];
   document.querySelectorAll('.master-nav .tab-btn').forEach(b => {
@@ -15658,6 +15660,7 @@ function renderColumnsTabHTML() {
       column — including Status — can be renamed, retyped, made mandatory or optional, or removed.
       Changes apply to exports and CSV import mapping too.
     </div>
+    ${renderColumnConfigIOHTML('logColumns')}
     <div class="master-list" id="columns-list-container">${rows}</div>
     <div style="display:flex;gap:8px;margin-top:14px;border-top:1px solid var(--border);padding-top:14px">
       <input class="master-add-input" id="new-column-label" placeholder="New column name…" style="flex:1" onkeydown="if(event.key==='Enter') addCustomColumn()" />
@@ -15672,6 +15675,134 @@ function renderColumnsTabHTML() {
       <button class="btn btn-primary" onclick="addCustomColumn()"><i class="ti ti-plus"></i> Add Column</button>
     </div>
   `;
+}
+
+
+// ── Lists tab: create / delete a list without going through a column ───────
+function createStandaloneList() {
+  const inp = document.getElementById('new-list-name');
+  const err = document.getElementById('new-list-error');
+  if (!inp) return;
+  const label = inp.value.trim();
+  const fail = msg => { inp.classList.add('invalid'); if (err) { err.textContent = msg; err.style.display = 'block'; } };
+  if (!label) return fail('Enter a name for the list.');
+  const clash = Object.keys(masters.customLists || {}).some(k => listLabel(k).trim().toLowerCase() === label.toLowerCase());
+  if (clash) return fail('A list named "' + label + '" already exists.');
+  const key = makeNewListKey(label);
+  masters.customLists[key] = [];
+  if (!masters.listMeta || typeof masters.listMeta !== 'object') masters.listMeta = {};
+  masters.listMeta[key] = { label, keep: true };
+  activeListKey = key;
+  listItemEditIdx = null;
+  saveState();
+  renderMastersContent();
+  setTimeout(() => { const b = document.getElementById('bulk-list-input'); if (b) b.focus(); }, 0);
+}
+function deleteStandaloneList() {
+  const key = activeListKey;
+  if (!key || ['projects', 'natures', 'statuses'].includes(key)) return;
+  if (getAllListColumns().some(c => c.listSource === key)) return;
+  showConfirm('Delete list "' + listLabel(key) + '"?', 'The list and its items will be removed. No column uses it.', () => {
+    delete masters.customLists[key];
+    if (masters.listMeta) delete masters.listMeta[key];
+    activeListKey = '';
+    saveState();
+    renderMastersContent();
+  }, 'Delete');
+}
+
+// ── Column masters: export / import config as JSON (with the lists they use) ──
+const COLUMN_CONFIG_FORMAT = 'tasklogger-column-config';
+const COLUMN_STORE_TITLES = { logColumns: 'Columns', lambdaFunctionColumns: 'Function Columns', lambdaChangeColumns: 'Change Columns' };
+let _cfgIoMsg = null;
+function getColumnStore(storeKey) {
+  return storeKey === 'logColumns' ? getLogColumns() : getLambdaColumns(storeKey);
+}
+function renderColumnConfigIOHTML(storeKey) {
+  const m = _cfgIoMsg; _cfgIoMsg = null;
+  return `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;padding:8px 10px;border:1px solid var(--border);border-radius:8px">
+      <span style="font-size:12px;color:var(--text-secondary);flex:1;min-width:140px">Column config (with linked lists)</span>
+      <button class="btn" style="font-size:12px;padding:4px 10px" onclick="exportColumnConfig('${storeKey}')"><i class="ti ti-download"></i> Export JSON</button>
+      <button class="btn" style="font-size:12px;padding:4px 10px" onclick="this.nextElementSibling.click()"><i class="ti ti-upload"></i> Import JSON</button>
+      <input type="file" accept=".json,application/json" style="display:none" onchange="importColumnConfigFile(event,'${storeKey}')" />
+      ${m ? `<div style="flex-basis:100%;font-size:12px;color:${m.ok ? 'var(--green-mid)' : 'var(--red-dark)'}">${esc(m.text)}</div>` : ''}
+    </div>`;
+}
+function exportColumnConfig(storeKey) {
+  const cols = JSON.parse(JSON.stringify(getColumnStore(storeKey)));
+  const lists = {};
+  cols.forEach(c => {
+    const lk = c.listSource;
+    if (lk && !lists[lk]) lists[lk] = { label: listLabel(lk), items: [...((masters.customLists && masters.customLists[lk]) || [])] };
+  });
+  const out = { format: COLUMN_CONFIG_FORMAT, version: 1, exportedAt: new Date().toISOString(), store: storeKey, storeTitle: COLUMN_STORE_TITLES[storeKey], columns: cols, lists };
+  const blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const d = new Date();
+  const ds = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+  a.href = url; a.download = 'TTL_' + (COLUMN_STORE_TITLES[storeKey] || 'Columns').replace(/\s+/g, '_') + '_Config_' + ds + '.json';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+  _cfgIoMsg = { ok: true, text: 'Exported ' + cols.length + ' column(s) and ' + Object.keys(lists).length + ' linked list(s).' };
+  renderMastersContent();
+}
+function importColumnConfigFile(ev, storeKey) {
+  const input = ev.target, file = input.files && input.files[0];
+  input.value = '';
+  if (!file) return;
+  const fail = msg => { _cfgIoMsg = { ok: false, text: 'Import failed: ' + msg }; renderMastersContent(); };
+  const reader = new FileReader();
+  reader.onerror = () => fail('could not read the file.');
+  reader.onload = () => {
+    let data;
+    try { data = JSON.parse(reader.result); } catch (e) { return fail('not valid JSON.'); }
+    if (!data || data.format !== COLUMN_CONFIG_FORMAT || !Array.isArray(data.columns)) return fail('not a column config export.');
+    const TYPES = ['text', 'textarea', 'list', 'multilist', 'searchlist', 'date'];
+    const seen = new Set();
+    for (const c of data.columns) {
+      if (!c || typeof c !== 'object' || typeof c.key !== 'string' || !c.key || typeof c.label !== 'string') return fail('a column is missing its key or label.');
+      if (!TYPES.includes(c.type)) return fail('column "' + c.label + '" has an unknown type.');
+      if (seen.has(c.key)) return fail('duplicate column key "' + c.key + '".');
+      seen.add(c.key);
+    }
+    if (storeKey === 'logColumns' && !(data.columns.some(c => c.isDateColumn) && data.columns.some(c => c.isEffortColumn))) return fail('Columns must include the Date and Effort columns.');
+    const lists = (data.lists && typeof data.lists === 'object') ? data.lists : {};
+    const missing = Object.keys(lists).filter(k => !masters.customLists[k]);
+    const mismatch = data.store && data.store !== storeKey
+      ? 'This file was exported from "' + (COLUMN_STORE_TITLES[data.store] || data.store) + '". ' : '';
+    showConfirm('Import column config?',
+      mismatch + 'This replaces the current "' + COLUMN_STORE_TITLES[storeKey] + '" configuration (' + getColumnStore(storeKey).length + ' column(s)) with ' + data.columns.length + ' column(s) from the file. ' +
+      (missing.length ? missing.length + ' list(s) not yet in List master will be added. ' : 'All linked lists already exist. ') +
+      'Existing lists keep their current items.',
+      () => applyColumnConfigImport(storeKey, data, lists), 'Import');
+  };
+  reader.readAsText(file);
+}
+function applyColumnConfigImport(storeKey, data, lists) {
+  const newCols = JSON.parse(JSON.stringify(data.columns));
+  const oldSources = getColumnStore(storeKey).map(c => c.listSource).filter(Boolean);
+  if (storeKey === 'logColumns') masters.logColumns = newCols; else masters[storeKey] = newCols;
+  if (!masters.listMeta || typeof masters.listMeta !== 'object') masters.listMeta = {};
+  let added = 0;
+  newCols.forEach(c => {
+    const lk = c.listSource;
+    if (!lk) return;
+    if (!masters.customLists[lk]) {
+      const src = lists[lk] || {};
+      const items = Array.isArray(src.items) ? src.items.map(String).filter(Boolean) : [];
+      masters.customLists[lk] = [...new Set(items)];
+      added++;
+      if (typeof src.label === 'string' && src.label && getAllListColumns().filter(x => x.listSource === lk).length !== 1) {
+        masters.listMeta[lk] = { label: src.label, keep: false };
+      }
+    }
+  });
+  new Set(oldSources).forEach(lk => cleanupOrphanedList(lk, null));
+  saveState();
+  _cfgIoMsg = { ok: true, text: 'Imported ' + newCols.length + ' column(s); ' + added + ' new list(s) added to List master.' };
+  renderMastersContent();
+  refreshAfterColumnConfigChange();
 }
 
 // Every column master that can point at a list: main Columns + Lambda Function/Change Columns.
@@ -15692,7 +15823,13 @@ function makeNewListKey(label) {
   return newKey;
 }
 
+// Lists created directly from Masters → Lists (no column needed) carry a saved display name and
+// are never auto-removed when the last column using them is deleted.
+function isKeptList(listKey) {
+  return !!(masters.listMeta && masters.listMeta[listKey] && masters.listMeta[listKey].keep);
+}
 function listLabel(listKey) {
+  if (masters.listMeta && masters.listMeta[listKey] && masters.listMeta[listKey].label) return masters.listMeta[listKey].label;
   const ownerCols = getAllListColumns().filter(c => c.listSource === listKey);
   if (ownerCols.length === 1) return ownerCols[0].label;
   if (listKey === 'projects') return 'Projects';
@@ -15708,13 +15845,25 @@ function renderListsTabHTML() {
   const items = (masters.customLists && masters.customLists[activeListKey]) || [];
   const usedByCols = getAllListColumns().filter(c => c.listSource === activeListKey).map(c => c.label);
 
+  const isBuiltInList = ['projects', 'natures', 'statuses'].includes(activeListKey);
+  const canDeleteList = activeListKey && !isBuiltInList && usedByCols.length === 0;
   return `
+    <div style="margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--border)">
+      <label class="complete-label" style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.06em;font-weight:600;display:block;margin-bottom:5px">Create a new list</label>
+      <div style="display:flex;gap:8px">
+        <input class="master-add-input" id="new-list-name" placeholder="New list name — e.g. Priority" style="flex:1;min-width:0" onkeydown="if(event.key==='Enter') createStandaloneList()" />
+        <button class="btn btn-primary" onclick="createStandaloneList()"><i class="ti ti-plus"></i> Create list</button>
+      </div>
+      <div id="new-list-error" style="display:none;font-size:12px;color:var(--red-dark);margin-top:6px"></div>
+      <div style="font-size:11px;color:var(--text-tertiary);margin-top:6px">Lists made here don't need a column. Link one later from a column's "choose list" dropdown.</div>
+    </div>
     <div style="margin-bottom:12px">
       <label class="complete-label" style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.06em;font-weight:600;display:block;margin-bottom:5px">Choose a list to manage</label>
       <select class="meta-select" style="width:100%" onchange="selectActiveList(this.value)">
         ${allListKeys.map(lk => `<option value="${esc(lk)}" ${lk===activeListKey?'selected':''}>${esc(listLabel(lk))}</option>`).join('')}
       </select>
-      ${usedByCols.length ? `<div style="font-size:11px;color:var(--text-tertiary);margin-top:6px">Used by column: ${esc(usedByCols.join(', '))}</div>` : ''}
+      ${usedByCols.length ? `<div style="font-size:11px;color:var(--text-tertiary);margin-top:6px">Used by column: ${esc(usedByCols.join(', '))}</div>` : (activeListKey ? `<div style="font-size:11px;color:var(--text-tertiary);margin-top:6px">Not used by any column yet.</div>` : '')}
+      ${canDeleteList ? `<button class="btn" style="font-size:11px;padding:4px 8px;margin-top:8px" onclick="deleteStandaloneList()"><i class="ti ti-trash"></i> Delete this list</button>` : ''}
     </div>
     <div style="display:flex;gap:8px;margin-bottom:10px">
       <input class="master-add-input" id="bulk-list-input" placeholder="Add items, comma-separated — e.g. Low, Medium, High" style="flex:1" onkeydown="if(event.key==='Enter') bulkAddCustomListItems(activeListKey)" />
@@ -18122,7 +18271,7 @@ function changeColumnType(key, newType) {
 // Delete a custom list from masters.customLists if it's not one of the shared built-in
 // lists (projects/natures/statuses) and no column other than `excludeKey` still uses it.
 function cleanupOrphanedList(listKey, excludeKey) {
-  if (!listKey || listKey === 'projects' || listKey === 'natures' || listKey === 'statuses') return;
+  if (!listKey || listKey === 'projects' || listKey === 'natures' || listKey === 'statuses' || isKeptList(listKey)) return;
   const stillUsed = getAllListColumns().some(c => c.key !== excludeKey && c.listSource === listKey);
   if (!stillUsed && masters.customLists && masters.customLists[listKey]) {
     delete masters.customLists[listKey];
@@ -18219,7 +18368,7 @@ function confirmDeleteColumn(key) {
   const listKey = col.listSource;
   // Only offer to remove the list if it's a custom one (not the shared built-in
   // Projects/Nature/Status lists) and no other column still points to it.
-  const isRemovableList = listKey && listKey !== 'projects' && listKey !== 'natures' && listKey !== 'statuses'
+  const isRemovableList = listKey && listKey !== 'projects' && listKey !== 'natures' && listKey !== 'statuses' && !isKeptList(listKey)
     && getAllListColumns().filter(c => c.key !== key && c.listSource === listKey).length === 0;
 
   const extraMsg = isRemovableList
@@ -18349,6 +18498,7 @@ function renderLambdaColumnsTabHTML(storeKey) {
       Columns master — drag rows to reorder, rename the label, choose the input type, and mark a field mandatory.
       This master is separate from the Task Logger Columns and is used for later Lambda logging changes.
     </div>
+    ${renderColumnConfigIOHTML(storeKey)}
     ${cols.length === 0 ? '<div style="color:var(--text-tertiary);font-size:13px;padding:8px 0">No columns yet. Add the first one below.</div>' : ''}
     <div class="master-list" id="lambda-columns-list-container">${rows}</div>
     <div style="display:flex;gap:8px;margin-top:14px;border-top:1px solid var(--border);padding-top:14px;flex-wrap:wrap">
@@ -18435,7 +18585,7 @@ function lcConfirmDelete(storeKey, key) {
   const col = getLambdaColumnByKey(storeKey, key);
   if (!col) return;
   const listKey = col.listSource;
-  const isRemovableList = listKey && listKey !== 'projects' && listKey !== 'natures' && listKey !== 'statuses'
+  const isRemovableList = listKey && listKey !== 'projects' && listKey !== 'natures' && listKey !== 'statuses' && !isKeptList(listKey)
     && getAllListColumns().filter(c => c.key !== key && c.listSource === listKey).length === 0;
   const extraMsg = isRemovableList
     ? ' Its dedicated list "' + listLabel(listKey) + '" will also be deleted since no other column uses it.'
