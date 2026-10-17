@@ -2660,7 +2660,7 @@ let masters = {
   workHours: { startH: DEFAULT_WORK_START_H, startM: DEFAULT_WORK_START_M, endH: DEFAULT_WORK_END_H, endM: DEFAULT_WORK_END_M },
   // First load: Pending and Synchronization start OFF; the user can enable either later
   // (Masters → User → Show Pending / Masters → Synchronization → Enable Synchronization).
-  flags: { sleepAutoPause: true, backgroundSyncEnabled: false, showPending: false, reviewBeforeCopy: false }, // future flags can be added here
+  flags: { sleepAutoPause: true, backgroundSyncEnabled: false, showPending: false, reviewBeforeCopy: false, lambdaLoggingEnabled: false }, // future flags can be added here
   colorPrefs: { light: {}, dark: {} }, // Masters → Colors: only the colours you changed (CSS variable → hex)
   fontPrefs: { family: 'default', size: 'md' }, // 'default' = built-in IBM Plex Sans stack, unscaled
   statusConfig: { closed: [...DEFAULT_STATUS_CONFIG.closed], blocked: [...DEFAULT_STATUS_CONFIG.blocked], defaultOnComplete: DEFAULT_STATUS_CONFIG.defaultOnComplete, todoLabel: DEFAULT_STATUS_CONFIG.todoLabel }, // Masters > Lists > Status roles
@@ -11499,6 +11499,8 @@ function loadState() {
       if (masters.flags.showPending === undefined) masters.flags.showPending = true;
       // Review & select rows before Copy / Email: moved here from the email template. Keep the user's old choice.
       if (masters.flags.reviewBeforeCopy === undefined) masters.flags.reviewBeforeCopy = !!(masters.emailTemplate && masters.emailTemplate.reviewBeforeCopy);
+      // Lambda logging (Masters → User): not set for this user → OFF.
+      if (typeof masters.flags.lambdaLoggingEnabled !== 'boolean') masters.flags.lambdaLoggingEnabled = false;
       if (!masters.colorPrefs || typeof masters.colorPrefs !== 'object') masters.colorPrefs = { light: {}, dark: {} };
       if (!masters.colorPrefs.light) masters.colorPrefs.light = {};
       if (!masters.colorPrefs.dark) masters.colorPrefs.dark = {};
@@ -15883,6 +15885,14 @@ function renderMastersContent() {
           <span>Review &amp; select rows before copying table</span>
         </label>
         <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px;margin-left:26px">Applies to both Copy and Email. A review popup lets you exclude rows first; whichever you do first, the same selection is used for the next one without asking again. Copy puts the rows on the clipboard without the header; Email copies them with the header.</div>
+      </div>
+      <div style="margin-top:18px;padding-top:16px;border-top:1px solid var(--border)">
+        <label class="complete-label" style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.06em;font-weight:600;display:block;margin-bottom:8px">Lambda Logging</label>
+        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;color:var(--text-primary)">
+          <input type="checkbox" id="flag-lambda-logging" ${isLambdaLoggingEnabled() ? 'checked' : ''} onchange="toggleLambdaLoggingFlag()" style="width:16px;height:16px;cursor:pointer" />
+          <span>Enable Lambda logging</span>
+        </label>
+        <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px;margin-left:26px">Off by default. Controls the Lambda logging masters and related features.</div>
       </div>`;
     return;
   }
@@ -17390,6 +17400,18 @@ function toggleReviewBeforeCopyFlag() {
   if (!masters.flags) masters.flags = {};
   masters.flags.reviewBeforeCopy = document.getElementById('flag-review-before-copy').checked;
   _reviewCarry = null;
+  saveState();
+}
+
+// Lambda logging flag (masters.flags.lambdaLoggingEnabled, Masters → User). Step 1 of the
+// Lambda logging plan: the flag only exists and is stored/synced with the user's masters.
+// Later Lambda-logging masters and behaviour read it via isLambdaLoggingEnabled().
+function isLambdaLoggingEnabled() {
+  return !!(masters && masters.flags && masters.flags.lambdaLoggingEnabled === true);   // unset → false
+}
+function toggleLambdaLoggingFlag() {
+  if (!masters.flags) masters.flags = {};
+  masters.flags.lambdaLoggingEnabled = document.getElementById('flag-lambda-logging').checked;
   saveState();
 }
 
