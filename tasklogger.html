@@ -11625,7 +11625,11 @@ function loadState() {
       // up lists left behind by earlier app versions (before column deletion correctly
       // cleaned up its dedicated list) or by any interrupted/partial edit.
       const PROTECTED_LIST_KEYS = ['projects', 'natures', 'statuses'];
-      const colsForSweep = masters.logColumns || [];
+      const colsForSweep = [
+        ...(masters.logColumns || []),
+        ...(Array.isArray(masters.lambdaFunctionColumns) ? masters.lambdaFunctionColumns : []),
+        ...(Array.isArray(masters.lambdaChangeColumns) ? masters.lambdaChangeColumns : [])
+      ];
       Object.keys(masters.customLists).forEach(lk => {
         if (PROTECTED_LIST_KEYS.includes(lk)) return;
         const stillOwned = colsForSweep.some(c => c.listSource === lk);
@@ -15670,8 +15674,26 @@ function renderColumnsTabHTML() {
   `;
 }
 
+// Every column master that can point at a list: main Columns + Lambda Function/Change Columns.
+function getAllListColumns() {
+  return [
+    ...getLogColumns(),
+    ...getLambdaColumns('lambdaFunctionColumns'),
+    ...getLambdaColumns('lambdaChangeColumns')
+  ];
+}
+// Build a unique, storage-safe key for a brand-new custom list.
+function makeNewListKey(label) {
+  const proposed = (label || 'List') + ' Options';
+  let baseKey = 'custom_' + proposed.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  if (!baseKey || baseKey === 'custom_') baseKey = 'custom_list';
+  let newKey = baseKey, n = 1;
+  while (masters.customLists[newKey]) { newKey = baseKey + '_' + (++n); }
+  return newKey;
+}
+
 function listLabel(listKey) {
-  const ownerCols = getLogColumns().filter(c => c.listSource === listKey);
+  const ownerCols = getAllListColumns().filter(c => c.listSource === listKey);
   if (ownerCols.length === 1) return ownerCols[0].label;
   if (listKey === 'projects') return 'Projects';
   if (listKey === 'natures') return 'Nature of Task';
@@ -15684,7 +15706,7 @@ function renderListsTabHTML() {
   const allListKeys = Object.keys(masters.customLists || {});
   if (!allListKeys.includes(activeListKey)) activeListKey = allListKeys[0] || '';
   const items = (masters.customLists && masters.customLists[activeListKey]) || [];
-  const usedByCols = getLogColumns().filter(c => c.listSource === activeListKey).map(c => c.label);
+  const usedByCols = getAllListColumns().filter(c => c.listSource === activeListKey).map(c => c.label);
 
   return `
     <div style="margin-bottom:12px">
@@ -18101,7 +18123,7 @@ function changeColumnType(key, newType) {
 // lists (projects/natures/statuses) and no column other than `excludeKey` still uses it.
 function cleanupOrphanedList(listKey, excludeKey) {
   if (!listKey || listKey === 'projects' || listKey === 'natures' || listKey === 'statuses') return;
-  const stillUsed = getLogColumns().some(c => c.key !== excludeKey && c.listSource === listKey);
+  const stillUsed = getAllListColumns().some(c => c.key !== excludeKey && c.listSource === listKey);
   if (!stillUsed && masters.customLists && masters.customLists[listKey]) {
     delete masters.customLists[listKey];
   }
@@ -18198,7 +18220,7 @@ function confirmDeleteColumn(key) {
   // Only offer to remove the list if it's a custom one (not the shared built-in
   // Projects/Nature/Status lists) and no other column still points to it.
   const isRemovableList = listKey && listKey !== 'projects' && listKey !== 'natures' && listKey !== 'statuses'
-    && getLogColumns().filter(c => c.key !== key && c.listSource === listKey).length === 0;
+    && getAllListColumns().filter(c => c.key !== key && c.listSource === listKey).length === 0;
 
   const extraMsg = isRemovableList
     ? ' Its dedicated master list "' + listLabel(listKey) + '" will also be deleted since no other column uses it.'
@@ -18306,6 +18328,7 @@ function renderLambdaColumnsTabHTML(storeKey) {
           ${isList ? `<select class="meta-select" style="font-size:12px;padding:4px 6px;width:auto" onchange="lcChangeListSource(${k},'${c.key}', this.value)">
             <option value="">${c.type === 'searchlist' ? '— none —' : '— choose list —'}</option>
             ${listOptions.map(lk => `<option value="${esc(lk)}" ${c.listSource===lk?'selected':''}>${esc(listLabel(lk))}</option>`).join('')}
+            <option value="__new__">+ Create new list&hellip;</option>
           </select>
           ${c.listSource ? `<button class="btn" style="font-size:11px;padding:4px 8px" onclick="goToListInListsTab('${esc(c.listSource)}')"><i class="ti ti-list"></i> Manage list</button>` : ''}` : ''}
         </div>
@@ -18352,10 +18375,14 @@ function lcRename(storeKey, key, newLabel) {
 function lcChangeType(storeKey, key, newType) {
   const col = getLambdaColumnByKey(storeKey, key);
   if (!col) return;
+  const oldListSource = col.listSource;
   col.type = newType;
   if (newType === 'date' && !col.dateFormat) col.dateFormat = 'YYYY-MM-DD';
   if (newType === 'textarea' && !(col.rows > 0)) col.rows = DEFAULT_TEXTAREA_ROWS;
-  if (newType !== 'list' && newType !== 'multilist' && newType !== 'searchlist') col.listSource = undefined;
+  if (newType !== 'list' && newType !== 'multilist' && newType !== 'searchlist') {
+    col.listSource = undefined;
+    cleanupOrphanedList(oldListSource, key);
+  }
   saveState();
   renderMastersContent();
 }
@@ -18378,7 +18405,23 @@ function lcChangeRows(storeKey, key, rows) {
 function lcChangeListSource(storeKey, key, listSource) {
   const col = getLambdaColumnByKey(storeKey, key);
   if (!col) return;
+  const oldListSource = col.listSource;
+  if (listSource === '__new__') {
+    // Create a brand-new empty list, connect it to this column, then jump to the
+    // Lists tab so the options can be added straight away.
+    const newKey = makeNewListKey(col.label);
+    masters.customLists[newKey] = [];
+    col.listSource = newKey;
+    cleanupOrphanedList(oldListSource, key);
+    saveState();
+    switchTab('lists');
+    activeListKey = newKey;
+    renderMastersContent();
+    return;
+  }
   col.listSource = listSource || undefined;
+  if (listSource && !masters.customLists[listSource]) masters.customLists[listSource] = [];
+  cleanupOrphanedList(oldListSource, key);
   saveState();
   renderMastersContent();
 }
@@ -18391,12 +18434,19 @@ function lcToggleRequired(storeKey, key) {
 function lcConfirmDelete(storeKey, key) {
   const col = getLambdaColumnByKey(storeKey, key);
   if (!col) return;
+  const listKey = col.listSource;
+  const isRemovableList = listKey && listKey !== 'projects' && listKey !== 'natures' && listKey !== 'statuses'
+    && getAllListColumns().filter(c => c.key !== key && c.listSource === listKey).length === 0;
+  const extraMsg = isRemovableList
+    ? ' Its dedicated list "' + listLabel(listKey) + '" will also be deleted since no other column uses it.'
+    : '';
   showConfirm('Delete column "' + col.label + '"?',
-    'This removes the column from the ' + LAMBDA_COLUMN_STORES[storeKey].title + ' master.',
+    'This removes the column from the ' + LAMBDA_COLUMN_STORES[storeKey].title + ' master.' + extraMsg,
     () => {
       const cols = getLambdaColumns(storeKey);
       const idx = cols.findIndex(c => c.key === key);
       if (idx >= 0) cols.splice(idx, 1);
+      if (isRemovableList && masters.customLists) delete masters.customLists[listKey];
       saveState();
       renderMastersContent();
     }, 'Delete');
@@ -18418,8 +18468,17 @@ function lcAddColumn(storeKey) {
   const col = { key, label, type, required: false };
   if (type === 'date') col.dateFormat = 'DD-MM-YYYY';
   if (type === 'textarea') col.rows = DEFAULT_TEXTAREA_ROWS;
+  if (type === 'list' || type === 'multilist') {
+    col.listSource = key; // each new list column gets its own dedicated list
+    if (!masters.customLists[key]) masters.customLists[key] = [];
+  }
   getLambdaColumns(storeKey).push(col);
   saveState();
+  inp.value = '';
+  if (type === 'list' || type === 'multilist') {
+    switchTab('lists');
+    activeListKey = key;
+  }
   renderMastersContent();
 }
 let lcDragSrcIdx = null;
@@ -20375,7 +20434,7 @@ function exportXLSX() {
     });
   });
   const customListRows = Object.entries(masters.customLists || {}).flatMap(([listKey, vals]) => {
-    const ownerCol = getLogColumns().find(c => c.listSource === listKey);
+    const ownerCol = getAllListColumns().find(c => c.listSource === listKey);
     const label = ownerCol ? ownerCol.label : listKey;
     return vals.map(v => [label, v]);
   });
