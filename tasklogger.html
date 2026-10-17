@@ -1193,6 +1193,12 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
   justify-content: flex-start;
   text-align: left;
 }
+.master-nav .master-nav-group {
+  font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--text-tertiary); padding: 12px 10px 4px; margin-top: 4px;
+  border-top: 1px solid var(--border);
+}
+.master-nav .master-nav-group:first-child { border-top: 0; margin-top: 0; }
 .master-content-workspace {
   flex: 1;
   min-width: 0;
@@ -2319,6 +2325,7 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
     <div class="master-body" id="master-body">
       <nav class="master-nav" id="master-nav" aria-label="Master sections">
         <button class="tab-btn" onclick="switchTab('user')"><i class="ti ti-user" style="font-size:13px"></i> User</button>
+        <div class="master-nav-group" data-nav-group="1" role="presentation">Task Logger Masters</div>
         <button class="tab-btn" onclick="switchTab('pending')"><i class="ti ti-clock-exclamation" style="font-size:13px"></i> Pending &amp; Search</button>
         <button class="tab-btn active" onclick="switchTab('lists')"><i class="ti ti-list" style="font-size:13px"></i> Lists</button>
         <button class="tab-btn" onclick="switchTab('columns')"><i class="ti ti-table" style="font-size:13px"></i> Columns</button>
@@ -2329,6 +2336,9 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
         <button class="tab-btn" onclick="switchTab('wallpaper')"><i class="ti ti-photo" style="font-size:13px"></i> Wallpaper</button>
         <button class="tab-btn" onclick="switchTab('data')"><i class="ti ti-database" style="font-size:13px"></i> Data</button>
         <button class="tab-btn" onclick="switchTab('sync')"><i class="ti ti-cloud" style="font-size:13px"></i> Synchronization</button>
+        <div class="master-nav-group" data-nav-group="lambda" role="presentation">Lambda Logging Masters</div>
+        <button class="tab-btn" onclick="switchTab('lambdaFunctionColumns')"><i class="ti ti-function" style="font-size:13px"></i> Function Columns</button>
+        <button class="tab-btn" onclick="switchTab('lambdaChangeColumns')"><i class="ti ti-git-pull-request" style="font-size:13px"></i> Change Columns</button>
       </nav>
       <div class="master-nav-backdrop" id="master-nav-backdrop" onclick="closeMasterNav()"></div>
       <div class="master-content-workspace">
@@ -2666,6 +2676,8 @@ let masters = {
   statusConfig: { closed: [...DEFAULT_STATUS_CONFIG.closed], blocked: [...DEFAULT_STATUS_CONFIG.blocked], defaultOnComplete: DEFAULT_STATUS_CONFIG.defaultOnComplete, todoLabel: DEFAULT_STATUS_CONFIG.todoLabel }, // Masters > Lists > Status roles
   groupPrefs: { primary: [], secondary: [] }, // Masters > Pending & Search: column keys used to group the Pending Tasks popup and Search results (primary combo first; secondary combo when an item can't be grouped by the primary one)
   logColumns: DEFAULT_LOG_COLUMNS.map(c => ({ ...c })),
+  lambdaFunctionColumns: [], // Masters > Lambda Logging Masters > Function Columns (empty config, filled in by the user)
+  lambdaChangeColumns: [],   // Masters > Lambda Logging Masters > Change Columns (empty config, filled in by the user)
   // Single consolidated store for every list-type column's options — Projects, Nature of
   // Task, Status, and any custom list the user creates all live here side by side and are
   // all managed from the one "Lists" tab in Masters.
@@ -3968,7 +3980,7 @@ function mergeNonTaskDomains(remoteParsed, opts) {
     // further is needed for either.
     if (changedSet.indexOf('masters') !== -1 && typeof activeMastersTab !== 'undefined' &&
         typeof renderMastersContent === 'function' &&
-        ['columns', 'lists', 'workhours', 'projects', 'natures'].indexOf(activeMastersTab) !== -1) {
+        ['columns', 'lists', 'workhours', 'projects', 'natures', 'lambdaFunctionColumns', 'lambdaChangeColumns'].indexOf(activeMastersTab) !== -1) {
       renderMastersContent();
     }
   }
@@ -11499,6 +11511,8 @@ function loadState() {
       if (masters.flags.showPending === undefined) masters.flags.showPending = true;
       // Review & select rows before Copy / Email: moved here from the email template. Keep the user's old choice.
       if (masters.flags.reviewBeforeCopy === undefined) masters.flags.reviewBeforeCopy = !!(masters.emailTemplate && masters.emailTemplate.reviewBeforeCopy);
+      if (!Array.isArray(masters.lambdaFunctionColumns)) masters.lambdaFunctionColumns = [];
+      if (!Array.isArray(masters.lambdaChangeColumns)) masters.lambdaChangeColumns = [];
       // Lambda logging (Masters → User): not set for this user → OFF.
       if (typeof masters.flags.lambdaLoggingEnabled !== 'boolean') masters.flags.lambdaLoggingEnabled = false;
       if (!masters.colorPrefs || typeof masters.colorPrefs !== 'object') masters.colorPrefs = { light: {}, dark: {} };
@@ -15158,6 +15172,7 @@ function openMasters() {
   _masterNavReturnFocusEl = document.activeElement;
   if (typeof applyMastersTabFilter === 'function') applyMastersTabFilter(false); // Masters button: hides User, Colors, Wallpaper + Synchronization
   if (typeof PROFILE_ONLY_TABS !== 'undefined' && PROFILE_ONLY_TABS.includes(activeMastersTab)) switchTab('lists');
+  if (!isLambdaLoggingEnabled() && (activeMastersTab === 'lambdaFunctionColumns' || activeMastersTab === 'lambdaChangeColumns')) switchTab('lists');
   document.getElementById('masters-modal').classList.remove('hidden');
   // Default to user tab so name is easy to set; switch to projects tab otherwise
   const addSec = document.getElementById('master-add-section');
@@ -15527,8 +15542,9 @@ function switchTab(tab) {
   activeMastersTab = tab;
   _grpDdOpen = null;
   const TAB_ORDER = ['user','pending','lists','columns','weekends','workhours','email','colors','wallpaper','data','sync'];
-  document.querySelectorAll('.master-nav .tab-btn').forEach((b,i) => {
-    b.classList.toggle('active', TAB_ORDER[i] === tab);
+  document.querySelectorAll('.master-nav .tab-btn').forEach(b => {
+    const mm = /switchTab\('([^']+)'\)/.exec(b.getAttribute('onclick') || '');
+    b.classList.toggle('active', !!mm && mm[1] === tab);
   });
   document.getElementById('master-add-input').value='';
   const addSec = document.getElementById('master-add-section');
@@ -15907,6 +15923,10 @@ function renderMastersContent() {
   }
   if (activeMastersTab === 'columns') {
     content.innerHTML = renderColumnsTabHTML();
+    return;
+  }
+  if (activeMastersTab === 'lambdaFunctionColumns' || activeMastersTab === 'lambdaChangeColumns') {
+    content.innerHTML = renderLambdaColumnsTabHTML(activeMastersTab);
     return;
   }
   if (activeMastersTab === 'lists') {
@@ -17413,6 +17433,7 @@ function toggleLambdaLoggingFlag() {
   if (!masters.flags) masters.flags = {};
   masters.flags.lambdaLoggingEnabled = document.getElementById('flag-lambda-logging').checked;
   saveState();
+  if (typeof applyMastersTabFilter === 'function') applyMastersTabFilter(_mastersProfileMode);
 }
 
 function toggleSleepFlag() {
@@ -17814,13 +17835,24 @@ function wpBindStage() {
 // Masters tabs visible when the popup is opened from the header photo (User, Colors,
 // Wallpaper and Synchronization). The Masters button shows every other tab.
 const PROFILE_ONLY_TABS = ['user', 'colors', 'wallpaper', 'sync'];
+const LAMBDA_ONLY_TABS = ['lambdaFunctionColumns', 'lambdaChangeColumns'];
+let _mastersProfileMode = false;
 function applyMastersTabFilter(profileOnly) {
+  _mastersProfileMode = !!profileOnly;
+  const lambdaOn = isLambdaLoggingEnabled();
+  document.querySelectorAll('#master-nav .master-nav-group').forEach(h => {
+    const isLambdaGroup = h.getAttribute('data-nav-group') === 'lambda';
+    h.style.display = (profileOnly || (isLambdaGroup && !lambdaOn)) ? 'none' : '';
+  });
   document.querySelectorAll('#master-nav .tab-btn').forEach(b => {
     const m = /switchTab\('([^']+)'\)/.exec(b.getAttribute('onclick') || '');
     const key = m ? m[1] : '';
     const isProfileTab = PROFILE_ONLY_TABS.includes(key);
     // Photo click: only User + Colors + Wallpaper + Synchronization. Masters button: everything except those.
-    b.style.display = (profileOnly ? !isProfileTab : isProfileTab) ? 'none' : '';
+    let hide = (profileOnly ? !isProfileTab : isProfileTab);
+    // Lambda logging masters only appear while Enable Lambda logging is on.
+    if (LAMBDA_ONLY_TABS.includes(key) && !lambdaOn) hide = true;
+    b.style.display = hide ? 'none' : '';
   });
 }
 function openUserProfileFromAvatar() {
@@ -18218,6 +18250,207 @@ function addCustomColumn() {
   } else {
     renderMastersContent();
   }
+}
+
+
+// ── Lambda Logging Masters: Function Columns + Change Columns ──────────────
+// Two empty column-config masters, modelled on the Columns master above (label, type, date
+// format, rows, list source, mandatory, drag-reorder, delete). They hold no columns yet —
+// add them here; later Lambda-logging changes read masters.lambdaFunctionColumns /
+// masters.lambdaChangeColumns. They never touch masters.logColumns or the task/log screens.
+const LAMBDA_COLUMN_STORES = {
+  lambdaFunctionColumns: { title: 'Function Columns', noun: 'function' },
+  lambdaChangeColumns:   { title: 'Change Columns',   noun: 'change' }
+};
+function getLambdaColumns(storeKey) {
+  if (!LAMBDA_COLUMN_STORES[storeKey]) return [];
+  if (!Array.isArray(masters[storeKey])) masters[storeKey] = [];
+  return masters[storeKey];
+}
+function getLambdaColumnByKey(storeKey, key) {
+  return getLambdaColumns(storeKey).find(c => c.key === key);
+}
+function renderLambdaColumnsTabHTML(storeKey) {
+  const meta = LAMBDA_COLUMN_STORES[storeKey];
+  const cols = getLambdaColumns(storeKey);
+  const TYPE_LABELS = { text: 'Text', textarea: 'Text Area', list: 'Dropdown list', multilist: 'Dropdown list (multi-select)', searchlist: 'Searchable select', date: 'Date' };
+  const DATE_FORMAT_PRESETS = ['DD-MM-YYYY','YYYY-MM-DD','MM-DD-YYYY','DD/MM/YYYY','MM/DD/YYYY','DD MMM YYYY','ddd, DD MMM YYYY','MMMM D, YYYY'];
+  const listOptions = Object.keys(masters.customLists || {});
+  const k = "'" + storeKey + "'";
+  const rows = cols.map((c, idx) => {
+    const isCustomFormat = c.type === 'date' && c.dateFormat && !DATE_FORMAT_PRESETS.includes(c.dateFormat);
+    const isList = c.type === 'list' || c.type === 'multilist' || c.type === 'searchlist';
+    return `<div class="master-item" draggable="true" data-idx="${idx}"
+        ondragstart="lcDragStart(event,${idx})" ondragover="lcDragOver(event,${idx})"
+        ondragleave="lcDragLeave(event)" ondrop="lcDrop(event,${k},${idx})" ondragend="lcDragEnd(event)"
+        style="flex-wrap:wrap;align-items:flex-start;gap:8px;padding:10px 8px">
+      <span class="master-drag-handle" title="Drag to reorder" style="margin-top:6px"><i class="ti ti-grip-vertical"></i></span>
+      <div style="flex:1;min-width:160px;display:flex;flex-direction:column;gap:6px">
+        <input class="master-add-input" style="padding:6px 8px;font-size:13px" value="${esc(c.label)}"
+          onchange="lcRename(${k},'${c.key}', this.value)" placeholder="Column label" />
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+          <select class="meta-select" style="font-size:12px;padding:4px 6px;width:auto" onchange="lcChangeType(${k},'${c.key}', this.value)">
+            ${Object.entries(TYPE_LABELS).map(([t,l]) => `<option value="${t}" ${c.type===t?'selected':''}>${l}</option>`).join('')}
+          </select>
+          ${c.type === 'date' ? `<select class="meta-select" style="font-size:12px;padding:4px 6px;width:auto" onchange="lcChangeDateFormat(${k},'${c.key}', this.value)">
+            ${DATE_FORMAT_PRESETS.map(f => `<option value="${f}" ${c.dateFormat===f?'selected':''}>${f}</option>`).join('')}
+            <option value="__custom__" ${isCustomFormat?'selected':''}>Custom…</option>
+          </select>
+          ${isCustomFormat ? `<input class="master-add-input" style="padding:4px 8px;font-size:12px;width:120px" value="${esc(c.dateFormat)}"
+            onchange="lcChangeDateFormat(${k},'${c.key}', this.value)" placeholder="e.g. ddd, D MMM YYYY" title="Any moment.js format. Wrap literal text in [brackets]." />` : ''}` : ''}
+          ${c.type === 'textarea' ? `<label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text-secondary)" title="How many rows tall this field starts at">
+            Rows
+            <input type="number" min="1" max="30" step="1" class="master-add-input" style="padding:4px 6px;font-size:12px;width:52px"
+              value="${(c.rows > 0) ? c.rows : DEFAULT_TEXTAREA_ROWS}" onchange="lcChangeRows(${k},'${c.key}', this.value)" />
+          </label>` : ''}
+          ${isList ? `<select class="meta-select" style="font-size:12px;padding:4px 6px;width:auto" onchange="lcChangeListSource(${k},'${c.key}', this.value)">
+            <option value="">${c.type === 'searchlist' ? '— none —' : '— choose list —'}</option>
+            ${listOptions.map(lk => `<option value="${esc(lk)}" ${c.listSource===lk?'selected':''}>${esc(listLabel(lk))}</option>`).join('')}
+          </select>
+          ${c.listSource ? `<button class="btn" style="font-size:11px;padding:4px 8px" onclick="goToListInListsTab('${esc(c.listSource)}')"><i class="ti ti-list"></i> Manage list</button>` : ''}` : ''}
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;margin-top:4px;flex-wrap:wrap">
+        <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-secondary);cursor:pointer" title="Mark this field as mandatory">
+          <input type="checkbox" ${c.required===true?'checked':''} onchange="lcToggleRequired(${k},'${c.key}')" />
+          Mandatory
+        </label>
+        <button class="btn-icon btn-delete" onclick="lcConfirmDelete(${k},'${c.key}')" title="Delete column"><i class="ti ti-trash"></i></button>
+      </div>
+    </div>`;
+  }).join('');
+
+  return `
+    <div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">
+      Lambda logging master: <strong>${meta.title}</strong>. Configure its columns the same way as the
+      Columns master — drag rows to reorder, rename the label, choose the input type, and mark a field mandatory.
+      This master is separate from the Task Logger Columns and is used for later Lambda logging changes.
+    </div>
+    ${cols.length === 0 ? '<div style="color:var(--text-tertiary);font-size:13px;padding:8px 0">No columns yet. Add the first one below.</div>' : ''}
+    <div class="master-list" id="lambda-columns-list-container">${rows}</div>
+    <div style="display:flex;gap:8px;margin-top:14px;border-top:1px solid var(--border);padding-top:14px;flex-wrap:wrap">
+      <input class="master-add-input" id="lambda-new-column-label" placeholder="New column name…" style="flex:1;min-width:140px" onkeydown="if(event.key==='Enter') lcAddColumn(${k})" />
+      <select class="meta-select" id="lambda-new-column-type" style="width:auto">
+        <option value="text">Text</option>
+        <option value="textarea">Text Area</option>
+        <option value="list">Dropdown list</option>
+        <option value="multilist">Dropdown list (multi-select)</option>
+        <option value="searchlist">Searchable select</option>
+        <option value="date">Date</option>
+      </select>
+      <button class="btn btn-primary" onclick="lcAddColumn(${k})"><i class="ti ti-plus"></i> Add Column</button>
+    </div>
+  `;
+}
+function lcRename(storeKey, key, newLabel) {
+  const col = getLambdaColumnByKey(storeKey, key);
+  const t = (newLabel || '').trim();
+  if (!col || !t) return;
+  col.label = t;
+  saveState();
+}
+function lcChangeType(storeKey, key, newType) {
+  const col = getLambdaColumnByKey(storeKey, key);
+  if (!col) return;
+  col.type = newType;
+  if (newType === 'date' && !col.dateFormat) col.dateFormat = 'YYYY-MM-DD';
+  if (newType === 'textarea' && !(col.rows > 0)) col.rows = DEFAULT_TEXTAREA_ROWS;
+  if (newType !== 'list' && newType !== 'multilist' && newType !== 'searchlist') col.listSource = undefined;
+  saveState();
+  renderMastersContent();
+}
+function lcChangeDateFormat(storeKey, key, format) {
+  const col = getLambdaColumnByKey(storeKey, key);
+  if (!col) return;
+  const needsRerender = format === '__custom__' || col.dateFormat === '__custom__';
+  format = (format || '').trim();
+  col.dateFormat = (format === '__custom__') ? 'DD.MM.YYYY' : (format || 'YYYY-MM-DD');
+  saveState();
+  if (needsRerender) renderMastersContent();
+}
+function lcChangeRows(storeKey, key, rows) {
+  const col = getLambdaColumnByKey(storeKey, key);
+  if (!col) return;
+  const n = parseInt(rows, 10);
+  col.rows = (Number.isFinite(n) && n >= 1) ? n : DEFAULT_TEXTAREA_ROWS;
+  saveState();
+}
+function lcChangeListSource(storeKey, key, listSource) {
+  const col = getLambdaColumnByKey(storeKey, key);
+  if (!col) return;
+  col.listSource = listSource || undefined;
+  saveState();
+  renderMastersContent();
+}
+function lcToggleRequired(storeKey, key) {
+  const col = getLambdaColumnByKey(storeKey, key);
+  if (!col) return;
+  col.required = !col.required;
+  saveState();
+}
+function lcConfirmDelete(storeKey, key) {
+  const col = getLambdaColumnByKey(storeKey, key);
+  if (!col) return;
+  showConfirm('Delete column "' + col.label + '"?',
+    'This removes the column from the ' + LAMBDA_COLUMN_STORES[storeKey].title + ' master.',
+    () => {
+      const cols = getLambdaColumns(storeKey);
+      const idx = cols.findIndex(c => c.key === key);
+      if (idx >= 0) cols.splice(idx, 1);
+      saveState();
+      renderMastersContent();
+    }, 'Delete');
+}
+function lcAddColumn(storeKey) {
+  const inp = document.getElementById('lambda-new-column-label');
+  const typeSel = document.getElementById('lambda-new-column-type');
+  if (!inp) return;
+  const label = inp.value.trim();
+  if (!label) { inp.classList.add('invalid'); return; }
+  inp.classList.remove('invalid');
+  const type = typeSel ? typeSel.value : 'text';
+  const prefix = storeKey === 'lambdaFunctionColumns' ? 'fn_' : 'chg_';
+  let baseKey = prefix + label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  if (baseKey === prefix) baseKey = prefix + 'field';
+  let key = baseKey, n = 1;
+  const existing = getLambdaColumns(storeKey).map(c => c.key);
+  while (existing.includes(key)) { key = baseKey + '_' + (++n); }
+  const col = { key, label, type, required: false };
+  if (type === 'date') col.dateFormat = 'DD-MM-YYYY';
+  if (type === 'textarea') col.rows = DEFAULT_TEXTAREA_ROWS;
+  getLambdaColumns(storeKey).push(col);
+  saveState();
+  renderMastersContent();
+}
+let lcDragSrcIdx = null;
+function lcDragStart(e, idx) {
+  lcDragSrcIdx = idx;
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', String(idx));
+  e.currentTarget.classList.add('dragging');
+}
+function lcDragOver(e, idx) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  if (idx !== lcDragSrcIdx) e.currentTarget.classList.add('drag-over');
+}
+function lcDragLeave(e) { e.currentTarget.classList.remove('drag-over'); }
+function lcDrop(e, storeKey, targetIdx) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('drag-over');
+  if (lcDragSrcIdx === null || lcDragSrcIdx === targetIdx) return;
+  const cols = getLambdaColumns(storeKey);
+  if (!cols[lcDragSrcIdx]) { lcDragSrcIdx = null; return; }
+  const [moved] = cols.splice(lcDragSrcIdx, 1);
+  cols.splice(targetIdx, 0, moved);
+  lcDragSrcIdx = null;
+  saveState();
+  renderMastersContent();
+}
+function lcDragEnd(e) {
+  e.currentTarget.classList.remove('dragging');
+  document.querySelectorAll('#lambda-columns-list-container .master-item.drag-over').forEach(el => el.classList.remove('drag-over'));
+  lcDragSrcIdx = null;
 }
 
 // Re-render anything on screen that depends on column config (task cards, log table, popup)
