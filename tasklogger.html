@@ -2421,6 +2421,12 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
       <button class="btn-icon" onclick="document.getElementById('csv-modal').classList.add('hidden')"><i class="ti ti-x"></i></button>
     </div>
     <div class="modal-body">
+      <!-- Column schema (only shown when Lambda logging is enabled and there are several column masters) -->
+      <div class="csv-field" id="csv-schema-row" style="display:none;margin-bottom:14px">
+        <label class="csv-label" for="csv-schema-select">Column schema</label>
+        <select class="csv-input" id="csv-schema-select" onchange="onCsvSchemaChange()"></select>
+        <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px" id="csv-schema-hint"></div>
+      </div>
       <!-- Export -->
       <div class="csv-section-title"><i class="ti ti-download" style="font-size:12px;margin-right:4px"></i>Export Log</div>
       <div class="csv-modal-row">
@@ -12231,6 +12237,9 @@ function startTask(id) {
   if (!task) return;
   if (isFutureTask(task)) return; // future-dated tasks have no actions until their date
   if (isPastTask(task)) return; // past-dated tasks are read-only except for marking complete
+  // Only an idle task can be started. Pressing Enter again in the task-name box (or any
+  // repeated Start) on a running/paused task must not reset the timer or add another log row.
+  if (task.status !== 'idle') return;
 
   // Validate heading
   if (!task.heading.trim()) {
@@ -14366,7 +14375,7 @@ function renderRow(id) {
       <input id="inp-${id}" class="task-input" type="text" placeholder="Task / feature name (required)…"
         value="${esc(task.heading)}" ${dis}
         oninput="updateTaskField(${id},'heading',this.value)"
-        onkeydown="if(event.key==='Enter' && !${isFuture}) startTask(${id})" />
+        onkeydown="if(event.key==='Enter' && !${isFuture}) { event.preventDefault(); startTask(${id}); }" />
       ${isFuture ? '' : `<span id="timer-${id}" class="timer-display${isRunning?' running':isPaused?' paused':''}">${fmt(liveElapsedSecs(task))}</span>`}
       <span class="status-badge badge-${isFuture?'planned':status}">${isFuture?'planned':status}</span>
       ${task.carriedOver ? `<span class="status-badge" style="background:var(--amber-bg);color:var(--amber-dark);font-size:10px" title="Carried over from previous day's In Progress task"><i class="ti ti-arrow-forward-up" style="font-size:11px;vertical-align:-1px"></i> Carried</span>` : ''}
@@ -20102,6 +20111,54 @@ function escHtml(str) {
 
 
 // ── CSV / Excel Export / Import ────────────────────────────────────────────────
+// ── Column schema for Import / Export ─────────────────────────────────────────
+// Primary 'logColumns' = the Task Logger columns (log entries). The two Lambda masters are
+// only offered while Lambda logging is enabled; their data goes to / comes from their own
+// storage keys and never touches the task log.
+const CSV_SCHEMAS = {
+  logColumns:            { label: 'Columns (Task Logger)', storageKey: null },
+  lambdaFunctionColumns: { label: 'Function Columns',      storageKey: 'ttl_lambda_functions' },
+  lambdaChangeColumns:   { label: 'Change Columns',        storageKey: 'ttl_lambda_functions_changes' }
+};
+function getCsvSchemaKey() {
+  if (!isLambdaLoggingEnabled()) return 'logColumns'; // only one column master → no choice
+  const sel = document.getElementById('csv-schema-select');
+  return (sel && CSV_SCHEMAS[sel.value]) ? sel.value : 'logColumns';
+}
+function readLambdaStore(storeKey) {
+  try {
+    const raw = localStorage.getItem(CSV_SCHEMAS[storeKey].storageKey);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) { return []; }
+}
+function writeLambdaStore(storeKey, arr) {
+  localStorage.setItem(CSV_SCHEMAS[storeKey].storageKey, JSON.stringify(arr));
+}
+function refreshCsvSchemaRow() {
+  const row = document.getElementById('csv-schema-row');
+  const sel = document.getElementById('csv-schema-select');
+  if (!row || !sel) return;
+  if (!isLambdaLoggingEnabled()) { row.style.display = 'none'; sel.innerHTML = ''; onCsvSchemaChange(); return; }
+  const prevVal = sel.value;
+  sel.innerHTML = Object.keys(CSV_SCHEMAS).map(k => `<option value="${k}">${escHtml(CSV_SCHEMAS[k].label)}</option>`).join('');
+  sel.value = CSV_SCHEMAS[prevVal] ? prevVal : 'logColumns';
+  row.style.display = '';
+  onCsvSchemaChange();
+}
+function onCsvSchemaChange() {
+  const key = getCsvSchemaKey();
+  const isLambda = key !== 'logColumns';
+  ['csv-from','csv-to','csv-import-from','csv-import-to'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.disabled = isLambda;
+  });
+  const hint = document.getElementById('csv-schema-hint');
+  if (hint) hint.textContent = isLambda
+    ? 'Imports are saved to ' + CSV_SCHEMAS[key].storageKey + ' (no screen for this data yet). Date range does not apply.'
+    : '';
+  const prev = document.getElementById('csv-import-preview'); if (prev) prev.textContent = '';
+}
+
 function openCSVModal() {
   const today = todayStr();
   // Default from: first day of current month
@@ -20112,7 +20169,17 @@ function openCSVModal() {
   document.getElementById('csv-import-from').value = firstOfMonth;
   document.getElementById('csv-import-to').value = today;
   document.getElementById('csv-import-preview').textContent = '';
+  refreshCsvSchemaRow();
   document.getElementById('csv-modal').classList.remove('hidden');
+}
+
+// Export of a Lambda master's stored records (same headers = the master's current labels).
+function lambdaExportMatrix(storeKey) {
+  const cols = getLambdaColumns(storeKey);
+  const recs = readLambdaStore(storeKey);
+  if (!cols.length) { alert('No columns are configured in ' + CSV_SCHEMAS[storeKey].label + ' yet.'); return null; }
+  if (!recs.length) { alert('No ' + CSV_SCHEMAS[storeKey].label + ' data has been imported yet.'); return null; }
+  return { headers: cols.map(c => c.label), rows: recs.map(r => cols.map(c => (r.values && r.values[c.key] != null) ? r.values[c.key] : '')) };
 }
 
 function csvEscape(val) {
@@ -20141,6 +20208,18 @@ function entryInDateRange(entry, from, to) {
 }
 
 function exportCSV() {
+  const schema = getCsvSchemaKey();
+  if (schema !== 'logColumns') {
+    const m = lambdaExportMatrix(schema); if (!m) return;
+    const text = [m.headers, ...m.rows].map(r => r.map(csvEscape).join(',')).join('\n');
+    const blob = new Blob([text], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = CSV_SCHEMAS[schema].storageKey.replace('ttl_','') + '.csv';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    return;
+  }
   const from = document.getElementById('csv-from').value;
   const to   = document.getElementById('csv-to').value;
   const rows = logEntries.filter(e => entryInDateRange(e, from, to));
@@ -20171,6 +20250,16 @@ function exportCSV() {
 // Same date-range filtering + column set as exportCSV(), but written as a single-
 // sheet .xlsx workbook via SheetJS instead of a CSV blob.
 function exportLogExcel() {
+  const schema = getCsvSchemaKey();
+  if (schema !== 'logColumns') {
+    const m = lambdaExportMatrix(schema); if (!m) return;
+    const wbL = XLSX.utils.book_new();
+    const wsL = XLSX.utils.aoa_to_sheet([m.headers, ...m.rows]);
+    wsL['!cols'] = m.headers.map((h, i) => ({ wch: Math.min(40, Math.max(h.length, ...m.rows.map(r => String(r[i] || '').length))) + 2 }));
+    XLSX.utils.book_append_sheet(wbL, wsL, CSV_SCHEMAS[schema].label.slice(0, 31));
+    XLSX.writeFile(wbL, CSV_SCHEMAS[schema].storageKey.replace('ttl_','') + '.xlsx');
+    return;
+  }
   const from = document.getElementById('csv-from').value;
   const to   = document.getElementById('csv-to').value;
   const rows = logEntries.filter(e => entryInDateRange(e, from, to));
@@ -20369,7 +20458,47 @@ function processCSVFile(file) {
 // converts each data row into a log entry, and skips out-of-range/duplicate rows.
 // `allRows` is an array of rows, each row an array of field strings — the same
 // shape whether it came from CSV text parsing or an Excel sheet.
+// Import into a Lambda master's storage (ttl_lambda_functions / ttl_lambda_functions_changes).
+// Headers are matched to the selected master's column labels; nothing is added to the task log.
+function importLambdaRows(allRows, storeKey) {
+  const prev = document.getElementById('csv-import-preview');
+  try {
+    if (allRows.length === 0) throw new Error('Empty file');
+    const cols = getLambdaColumns(storeKey);
+    if (!cols.length) { prev.innerHTML = `<span style="color:var(--red-mid)">✗ ${escHtml(CSV_SCHEMAS[storeKey].label)} has no columns yet — add them in Masters first.</span>`; return; }
+    const norm = (s) => String(s == null ? '' : s).toLowerCase().replace(/[\s_-]+/g, '');
+    const header = allRows[0].map(h => norm(String(h).trim().replace(/^"|"$/g, '')));
+    const idx = {};
+    cols.forEach(c => { idx[c.key] = header.indexOf(norm(c.label)); });
+    if (cols.every(c => idx[c.key] === -1)) { prev.innerHTML = `<span style="color:var(--red-mid)">✗ No header in the file matches a ${escHtml(CSV_SCHEMAS[storeKey].label)} column name.</span>`; return; }
+    const missingReq = cols.filter(c => c.required && idx[c.key] === -1).map(c => c.label);
+    if (missingReq.length) { prev.innerHTML = `<span style="color:var(--red-mid)">✗ Missing required column${missingReq.length>1?'s':''}: ${missingReq.map(escHtml).join(', ')}</span>`; return; }
+    const store = readLambdaStore(storeKey);
+    const seen = new Set(store.map(r => JSON.stringify(cols.map(c => (r.values && r.values[c.key]) || ''))));
+    let imported = 0, skipped = 0, failed = 0;
+    allRows.slice(1).forEach(vals => {
+      const values = {};
+      cols.forEach(c => { values[c.key] = idx[c.key] >= 0 ? String(vals[idx[c.key]] == null ? '' : vals[idx[c.key]]).trim() : ''; });
+      if (cols.some(c => c.required && !values[c.key])) { failed++; return; }
+      const sig = JSON.stringify(cols.map(c => values[c.key]));
+      if (seen.has(sig)) { skipped++; return; }
+      seen.add(sig);
+      store.push({ id: 'lm_' + Date.now().toString(36) + '_' + store.length, importedAt: Date.now(), values });
+      imported++;
+    });
+    writeLambdaStore(storeKey, store);
+    const parts = [`<span style="color:var(--green-dark)">✓ Imported ${imported} record${imported===1?'':'s'} to ${escHtml(CSV_SCHEMAS[storeKey].storageKey)}</span>`];
+    if (skipped) parts.push(`<span style="color:var(--text-tertiary)">${skipped} skipped — duplicate</span>`);
+    if (failed)  parts.push(`<span style="color:var(--red-mid)">${failed} row${failed>1?'s':''} missing a required value</span>`);
+    prev.innerHTML = parts.join(' &middot; ');
+  } catch (err) {
+    prev.innerHTML = `<span style="color:var(--red-mid)">✗ Error parsing file: ${escHtml(err.message)}</span>`;
+  }
+}
+
 function importParsedRows(allRows) {
+    const schemaKey = getCsvSchemaKey();
+    if (schemaKey !== 'logColumns') { importLambdaRows(allRows, schemaKey); return; }
     const from = document.getElementById('csv-import-from').value;
     const to   = document.getElementById('csv-import-to').value;
     const prev = document.getElementById('csv-import-preview');
