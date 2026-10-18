@@ -484,6 +484,10 @@ html.is-touch .pending-card-actions { opacity: 1; }
 .lm-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; padding: 6px 16px 8px; }
 .lm-body { flex: 1; min-height: 0; display: flex; flex-direction: column; border-top: 1px solid var(--border); }
 .lm-table-wrap { flex: 1; min-height: 0; overflow: auto; }
+.lm-sel-th, .lm-sel-cell { width: 40px; text-align: center; }
+.lm-sel-th input, .lm-sel-cell input { cursor: pointer; width: 15px; height: 15px; }
+#lm-table tr.lm-row-selected td { background: var(--blue-bg); }
+#lm-del-btn:disabled { opacity: .45; cursor: not-allowed; }
 .lm-empty { padding: 24px 16px; text-align: center; font-size: 13px; color: var(--text-tertiary); }
 .lm-empty button { margin-top: 10px; }
 .todo-card-planned-chip { background: color-mix(in srgb, var(--blue-mid) 18%, transparent); color: var(--blue-mid); font-weight: 600; }
@@ -2122,8 +2126,9 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
   <div class="lm-bar">
     <div class="log-count" id="lm-count"></div>
     <div class="log-header-actions">
-      <button class="btn" onclick="lmCopy(this)"><i class="ti ti-clipboard-copy"></i> Copy</button>
-      <button class="btn btn-primary" onclick="lmDownloadXlsx()"><i class="ti ti-file-spreadsheet"></i> Download XLSX</button>
+      <button class="btn btn-danger" id="lm-del-btn" onclick="lmDeleteSelected()" disabled title="Delete the ticked rows"><i class="ti ti-trash"></i> Delete</button>
+      <button class="btn" id="lm-copy-btn" onclick="lmCopy(this)" title="Copies the ticked rows, or every row shown if none are ticked"><i class="ti ti-clipboard-copy"></i> Copy</button>
+      <button class="btn btn-primary" id="lm-xlsx-btn" onclick="lmDownloadXlsx()" title="Downloads the ticked rows, or every row shown if none are ticked"><i class="ti ti-file-spreadsheet"></i> Download XLSX</button>
     </div>
   </div>
   <div class="lm-body" id="lm-body"></div>
@@ -18810,6 +18815,9 @@ let lmActiveTab = LM_TABS[0];
 const lmTabState = {};   // per tab: { by, q, from, to, fromTouched, toTouched, sortCol, sortDir }
 const lmWidths = {};     // per tab: column widths (persisted)
 const lmPinned = {};     // per tab: pinned columns (persisted)
+const lmSelected = {};   // per tab: Set of ticked record ids (not persisted)
+function lmSel(k) { return lmSelected[k] || (lmSelected[k] = new Set()); }
+let lmVisibleIds = [];
 
 function lmGetState(k) {
   if (!lmTabState[k]) lmTabState[k] = { by: '', q: '', from: '', to: '', fromTouched: false, toTouched: false, sortCol: null, sortDir: 'asc' };
@@ -18831,6 +18839,7 @@ function openLambdaOverlay(tab) {
   lmRenderAll();
 }
 function closeLambdaOverlay() {
+  Object.keys(lmSelected).forEach(k => lmSelected[k].clear());
   const el = document.getElementById('lambda-overlay');
   if (el) el.classList.add('hidden');
   document.body.style.overflow = '';
@@ -18854,6 +18863,14 @@ function lmParseDate(val, col) {
   if (!m.isValid()) m = moment(v, ['YYYY-MM-DD', 'DD-MM-YYYY', 'DD/MM/YYYY', 'MM/DD/YYYY', 'DD MMM YYYY'], true);
   return m.isValid() ? m.format('YYYY-MM-DD') : '';
 }
+// What the table / copy / export show for a cell: date columns are rendered in the master
+// column's own dateFormat (values that can't be read as a date are shown exactly as stored).
+function lmDisplayValue(col, raw) {
+  const v = raw == null ? '' : String(raw);
+  if (!col || col.type !== 'date' || !v.trim()) return v;
+  const iso = lmParseDate(v, col);
+  return iso ? formatCustomDate(iso, col.dateFormat || 'DD-MM-YYYY') : v;
+}
 function lmRecordDate(rec, cols) {
   const vals = rec.values || {};
   for (const c of cols) {
@@ -18868,7 +18885,11 @@ function lmRecordDate(rec, cols) {
   return '';
 }
 function lmLoadRecords(k, cols) {
-  return readLambdaStore(k).map(r => Object.assign({}, r, { _date: lmRecordDate(r, cols) }));
+  const store = readLambdaStore(k);
+  let fixed = false;
+  store.forEach((r, i) => { if (!r.id) { r.id = 'lm_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7) + '_' + i; fixed = true; } });
+  if (fixed) writeLambdaStore(k, store);   // older records get a stable id so they can be ticked / deleted
+  return store.map(r => Object.assign({}, r, { _date: lmRecordDate(r, cols) }));
 }
 
 function lmRenderAll() {
@@ -18935,8 +18956,10 @@ function lmFilteredRows() {
     if (s.from && r._date && r._date < s.from) return false;
     if (s.to && r._date && r._date > s.to) return false;
     if (q && s.by) {
-      const v = String((r.values && r.values[s.by]) == null ? '' : r.values[s.by]).toLowerCase();
-      if (v.indexOf(q) === -1) return false;
+      const byCol = cols.find(c => c.key === s.by);
+      const raw = String((r.values && r.values[s.by]) == null ? '' : r.values[s.by]).toLowerCase();
+      const shown = lmDisplayValue(byCol, raw).toLowerCase();
+      if (raw.indexOf(q) === -1 && shown.indexOf(q) === -1) return false;
     }
     return true;
   });
@@ -18974,16 +18997,20 @@ function lmRenderTable() {
   ['lm-from', 'lm-to'].forEach(id => { const el = document.getElementById(id); if (el) el.classList.toggle('invalid', bad); });
   if (countEl) countEl.textContent = (bad ? 'From date is after To date · ' : '') + rows.length + ' of ' + total + ' record' + (total === 1 ? '' : 's');
 
+  const sel = lmSel(k);
+  lmVisibleIds = rows.map(r => r.id);
+  Array.from(sel).forEach(id => { if (lmVisibleIds.indexOf(id) === -1) sel.delete(id); });   // only ticked rows that are on screen count
+  if (countEl) countEl.dataset.base = countEl.textContent;
   const widths = lmWidths[k];
-  const colgroup = cols.map(c => `<col data-col="${esc(c.key)}" style="width:${widths[c.key] || defaultLogColumnWidth(c)}px">`).join('');
-  const thead = cols.map(c => {
+  const colgroup = '<col data-col="__sel" style="width:40px">' + cols.map(c => `<col data-col="${esc(c.key)}" style="width:${widths[c.key] || defaultLogColumnWidth(c)}px">`).join('');
+  const thead = '<th data-col="__sel" class="lm-sel-th"><input type="checkbox" id="lm-all-cb" title="Select all" aria-label="Select all rows"></th>' + cols.map(c => {
     const arrow = s.sortCol === c.key ? (s.sortDir === 'asc' ? '▲' : '▼') : '';
     return `<th class="log-th-sortable" data-col="${esc(c.key)}">${esc(c.label)}<span class="col-sort-arrow">${arrow}</span>` +
       `<button type="button" class="col-pin-icon" data-col="${esc(c.key)}" title="Pin column">${LOG_TABLE_PIN_ICON_SVG}</button>` +
       `<span class="col-resize-handle"></span></th>`;
   }).join('');
-  const tbody = rows.map(r => '<tr>' + cols.map(c => {
-    const v = (r.values && r.values[c.key]) == null ? '' : String(r.values[c.key]);
+  const tbody = rows.map(r => `<tr data-id="${esc(r.id)}"><td data-col="__sel" class="lm-sel-cell"><input type="checkbox" class="lm-row-cb" data-id="${esc(r.id)}" aria-label="Select row"></td>` + cols.map(c => {
+    const v = lmDisplayValue(c, r.values && r.values[c.key]);
     return `<td data-col="${esc(c.key)}" title="${esc(v)}">${esc(v)}</td>`;
   }).join('') + '</tr>').join('');
   const msg = rows.length ? '' : `<div class="lm-empty">${total === 0
@@ -18995,6 +19022,44 @@ function lmRenderTable() {
   if (wrap) { wrap.scrollTop = prevTop; wrap.scrollLeft = prevLeft; }
   lmWireColumns();
   lmApplyPins();
+  const tbl = document.getElementById('lm-table');
+  if (tbl) tbl.addEventListener('change', (e) => {
+    const t = e.target;
+    if (t.id === 'lm-all-cb') { if (t.checked) lmVisibleIds.forEach(id => sel.add(id)); else sel.clear(); }
+    else if (t.classList && t.classList.contains('lm-row-cb')) { if (t.checked) sel.add(t.dataset.id); else sel.delete(t.dataset.id); }
+    else return;
+    lmUpdateSelectionUI();
+  });
+  lmUpdateSelectionUI();
+}
+// Syncs checkboxes, row highlight, count text and the Copy / Download / Delete buttons with the ticked rows.
+function lmUpdateSelectionUI() {
+  const k = lmActiveTab, sel = lmSel(k), n = sel.size, total = lmVisibleIds.length;
+  document.querySelectorAll('#lm-table .lm-row-cb').forEach(cb => {
+    const on = sel.has(cb.dataset.id);
+    cb.checked = on;
+    const tr = cb.closest('tr'); if (tr) tr.classList.toggle('lm-row-selected', on);
+  });
+  const all = document.getElementById('lm-all-cb');
+  if (all) { all.checked = total > 0 && n === total; all.indeterminate = n > 0 && n < total; all.disabled = total === 0; }
+  const countEl = document.getElementById('lm-count');
+  if (countEl && countEl.dataset.base !== undefined) countEl.textContent = countEl.dataset.base + (n ? ' · ' + n + ' selected' : '');
+  const copyBtn = document.getElementById('lm-copy-btn');
+  if (copyBtn) copyBtn.innerHTML = '<i class="ti ti-clipboard-copy"></i> Copy' + (n ? ' (' + n + ')' : '');
+  const xBtn = document.getElementById('lm-xlsx-btn');
+  if (xBtn) xBtn.innerHTML = '<i class="ti ti-file-spreadsheet"></i> Download XLSX' + (n ? ' (' + n + ')' : '');
+  const dBtn = document.getElementById('lm-del-btn');
+  if (dBtn) { dBtn.disabled = n === 0; dBtn.innerHTML = '<i class="ti ti-trash"></i> Delete' + (n ? ' (' + n + ')' : ''); }
+}
+function lmDeleteSelected() {
+  const k = lmActiveTab, sel = lmSel(k), n = sel.size;
+  if (!n) return;
+  showConfirm('Delete selected records?', n + ' record' + (n === 1 ? '' : 's') + ' will be permanently deleted from ' + LAMBDA_COLUMN_STORES[k].title + '. This cannot be undone.', () => {
+    const ids = new Set(sel);
+    writeLambdaStore(k, readLambdaStore(k).filter(r => !ids.has(r.id)));
+    sel.clear();
+    lmRenderTable();
+  }, 'Delete');
 }
 
 // Sort / pin / resize — same behaviour as the Effort Log table, scoped to #lm-table.
@@ -19094,9 +19159,11 @@ function lmWireColumns() {
 function lmExportMatrix() {
   const k = lmActiveTab, cols = getLambdaColumns(k);
   if (!cols.length) { alert('No columns are configured in ' + LAMBDA_COLUMN_STORES[k].title + ' yet.'); return null; }
-  const rows = lmFilteredRows();
+  const all = lmFilteredRows();
+  const sel = lmSel(k);
+  const rows = sel.size ? all.filter(r => sel.has(r.id)) : all;   // ticked rows only, when any are ticked
   if (!rows.length) { alert('No records to export for the current search and date range.'); return null; }
-  return { headers: cols.map(c => c.label), data: rows.map(r => cols.map(c => (r.values && r.values[c.key]) == null ? '' : r.values[c.key])) };
+  return { headers: cols.map(c => c.label), data: rows.map(r => cols.map(c => lmDisplayValue(c, r.values && r.values[c.key]))) };
 }
 function lmCopy(btn) {
   const m = lmExportMatrix(); if (!m) return;
@@ -19105,7 +19172,7 @@ function lmCopy(btn) {
     if (!btn) return;
     const old = btn.innerHTML;
     btn.innerHTML = '<i class="ti ti-check"></i> Copied';
-    setTimeout(() => { btn.innerHTML = old; }, 1500);
+    setTimeout(() => { lmUpdateSelectionUI(); }, 1500);
   };
   const fallback = () => {
     const ta = document.createElement('textarea');
@@ -20969,6 +21036,90 @@ function processCSVFile(file) {
 // shape whether it came from CSV text parsing or an Excel sheet.
 // Import into a Lambda master's storage (ttl_lambda_functions / ttl_lambda_functions_changes).
 // Headers are matched to the selected master's column labels; nothing is added to the task log.
+// Inbound date formats offered when importing into a Lambda master. Single-letter D / M tokens
+// match both padded and unpadded values (05-03-2024 and 5-3-2024) in moment's strict mode.
+const LM_INBOUND_DATE_FORMATS = ['D-M-YYYY','D/M/YYYY','M/D/YYYY','M-D-YYYY','YYYY-M-D','YYYY/M/D','D-MMM-YYYY','D MMM YYYY','MMMM D, YYYY','D-M-YY','D/M/YY','M/D/YY'];
+function lmStrictParse(v, fmt) {
+  if (!v || !fmt || typeof moment !== 'function') return null;
+  const m = moment(String(v).trim(), fmt, true);
+  return m.isValid() ? m : null;
+}
+function lmDetectInboundFormat(samples, masterFmt) {
+  const cands = LM_INBOUND_DATE_FORMATS.slice();
+  if (masterFmt && masterFmt !== '__custom__' && cands.indexOf(masterFmt) === -1) cands.unshift(masterFmt);
+  let best = '', bestScore = 0;
+  cands.forEach(f => {
+    const score = samples.filter(v => lmStrictParse(v, f)).length;
+    if (score > bestScore) { best = f; bestScore = score; }
+  });
+  return best;
+}
+// Asks, for every date column present in the file, which format the incoming values are in.
+// onOk(map) gets { columnKey: momentFormat | '' } ('' = keep the text exactly as it is).
+function askLambdaDateFormats(dateCols, allRows, idx, onOk, onCancel) {
+  const old = document.getElementById('lm-datefmt-overlay');
+  if (old) old.remove();
+  const sample = (c) => allRows.slice(1).map(r => String(r[idx[c.key]] == null ? '' : r[idx[c.key]]).trim()).filter(Boolean).slice(0, 60);
+  const ex = (f) => { try { return moment('2024-03-25', 'YYYY-MM-DD').format(f); } catch (e) { return ''; } };
+  const blocks = dateCols.map((c, i) => {
+    const smp = sample(c);
+    const detected = lmDetectInboundFormat(smp, c.dateFormat) || '';
+    const presets = LM_INBOUND_DATE_FORMATS.slice();
+    if (c.dateFormat && c.dateFormat !== '__custom__' && presets.indexOf(c.dateFormat) === -1) presets.unshift(c.dateFormat);
+    const opts = presets.map(f => `<option value="${esc(f)}" ${f === detected ? 'selected' : ''}>${esc(f)}  (e.g. ${esc(ex(f))})</option>`).join('')
+      + `<option value="__custom__">Custom format…</option><option value="" ${detected === '' ? 'selected' : ''}>Don’t convert — keep text as it is</option>`;
+    return `<div style="margin-bottom:14px" data-i="${i}">
+      <div style="font-size:12px;font-weight:600;margin-bottom:4px">${esc(c.label)}</div>
+      <select class="csv-input lm-fmt-sel" style="width:100%">${opts}</select>
+      <input class="csv-input lm-fmt-custom" style="width:100%;margin-top:6px;display:none" placeholder="Moment format, e.g. DD.MM.YYYY" />
+      <div class="lm-fmt-preview" style="font-size:11px;color:var(--text-tertiary);margin-top:4px"></div>
+    </div>`;
+  }).join('');
+  const ov = document.createElement('div');
+  ov.id = 'lm-datefmt-overlay';
+  ov.className = 'confirm-overlay';
+  ov.style.zIndex = '10200';
+  ov.innerHTML = `<div class="confirm-box" style="max-width:460px;max-height:90vh;overflow:auto">
+    <div class="confirm-title">What format are the dates in?</div>
+    <div class="confirm-msg" style="margin-bottom:12px">Pick the format used in the file for each date column. Dates are converted and then shown using each column’s format in Masters.</div>
+    ${blocks}
+    <div class="confirm-actions">
+      <button class="btn" id="lm-datefmt-cancel">Cancel</button>
+      <button class="btn btn-primary" id="lm-datefmt-ok">Import</button>
+    </div>
+  </div>`;
+  document.body.appendChild(ov);
+  const fmtOf = (blk) => {
+    const sel = blk.querySelector('.lm-fmt-sel').value;
+    return sel === '__custom__' ? blk.querySelector('.lm-fmt-custom').value.trim() : sel;
+  };
+  const refresh = (blk) => {
+    const c = dateCols[parseInt(blk.dataset.i, 10)];
+    const custom = blk.querySelector('.lm-fmt-sel').value === '__custom__';
+    blk.querySelector('.lm-fmt-custom').style.display = custom ? '' : 'none';
+    const fmt = fmtOf(blk), smp = sample(c);
+    const pv = blk.querySelector('.lm-fmt-preview');
+    if (!fmt) { pv.textContent = smp.length ? 'Values stay exactly as in the file (first: “' + smp[0] + '”).' : 'No values in this column.'; return; }
+    const ok = smp.filter(v => lmStrictParse(v, fmt)).length;
+    const first = smp[0] ? lmStrictParse(smp[0], fmt) : null;
+    pv.textContent = smp.length
+      ? ok + ' of ' + smp.length + ' sampled values match' + (first ? ' · “' + smp[0] + '” → ' + formatCustomDate(first.format('YYYY-MM-DD'), c.dateFormat || 'DD-MM-YYYY') : '') + (ok < smp.length ? ' · the rest are kept as text' : '')
+      : 'No values in this column.';
+  };
+  ov.querySelectorAll('[data-i]').forEach(blk => {
+    refresh(blk);
+    blk.querySelector('.lm-fmt-sel').addEventListener('change', () => refresh(blk));
+    blk.querySelector('.lm-fmt-custom').addEventListener('input', () => refresh(blk));
+  });
+  document.getElementById('lm-datefmt-cancel').onclick = () => { ov.remove(); if (onCancel) onCancel(); };
+  document.getElementById('lm-datefmt-ok').onclick = () => {
+    const map = {};
+    ov.querySelectorAll('[data-i]').forEach(blk => { map[dateCols[parseInt(blk.dataset.i, 10)].key] = fmtOf(blk); });
+    ov.remove();
+    onOk(map);
+  };
+}
+
 function importLambdaRows(allRows, storeKey) {
   const prev = document.getElementById('csv-import-preview');
   try {
@@ -20981,26 +21132,48 @@ function importLambdaRows(allRows, storeKey) {
     cols.forEach(c => { idx[c.key] = header.indexOf(norm(c.label)); });
     if (cols.every(c => idx[c.key] === -1)) { prev.innerHTML = `<span style="color:var(--red-mid)">✗ No header in the file matches a ${escHtml(CSV_SCHEMAS[storeKey].label)} column name.</span>`; return; }
     const missingReq = cols.filter(c => c.required && idx[c.key] === -1).map(c => c.label); // imported blank, reported below
+    const dateCols = cols.filter(c => c.type === 'date' && idx[c.key] >= 0);
+    if (!dateCols.length) { finishLambdaImport(allRows, storeKey, cols, idx, missingReq, {}); return; }
+    askLambdaDateFormats(dateCols, allRows, idx,
+      (fmtMap) => finishLambdaImport(allRows, storeKey, cols, idx, missingReq, fmtMap),
+      () => { prev.innerHTML = '<span style="color:var(--text-tertiary)">Import cancelled.</span>'; });
+  } catch (err) {
+    prev.innerHTML = `<span style="color:var(--red-mid)">✗ Error parsing file: ${escHtml(err.message)}</span>`;
+  }
+}
+function finishLambdaImport(allRows, storeKey, cols, idx, missingReq, fmtMap) {
+  const prev = document.getElementById('csv-import-preview');
+  try {
     const store = readLambdaStore(storeKey);
     const seen = new Set(store.map(r => JSON.stringify(cols.map(c => (r.values && r.values[c.key]) || ''))));
-    let imported = 0, skipped = 0, failed = 0;
+    let imported = 0, skipped = 0, dateKept = 0;
     allRows.slice(1).forEach(vals => {
       const values = {};
-      cols.forEach(c => { values[c.key] = idx[c.key] >= 0 ? String(vals[idx[c.key]] == null ? '' : vals[idx[c.key]]).trim() : ''; });
+      cols.forEach(c => {
+        let v = idx[c.key] >= 0 ? String(vals[idx[c.key]] == null ? '' : vals[idx[c.key]]).trim() : '';
+        // Date columns are stored as ISO (YYYY-MM-DD) so the table can show them in the master's
+        // format. A value that doesn't match the chosen format is kept as the original text.
+        if (v && c.type === 'date' && fmtMap[c.key]) {
+          const m = lmStrictParse(v, fmtMap[c.key]);
+          if (m) v = m.format('YYYY-MM-DD'); else dateKept++;
+        }
+        values[c.key] = v;
+      });
       const sig = JSON.stringify(cols.map(c => values[c.key]));
       if (seen.has(sig)) { skipped++; return; }
       seen.add(sig);
-      store.push({ id: 'lm_' + Date.now().toString(36) + '_' + store.length, importedAt: Date.now(), values });
+      store.push({ id: 'lm_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7) + '_' + store.length, importedAt: Date.now(), values });
       imported++;
     });
     writeLambdaStore(storeKey, store);
     if (typeof lmRefreshIfOpen === 'function') lmRefreshIfOpen();
     const parts = [`<span style="color:var(--green-dark)">✓ Imported ${imported} record${imported===1?'':'s'} to ${escHtml(CSV_SCHEMAS[storeKey].storageKey)}</span>`];
     if (skipped) parts.push(`<span style="color:var(--text-tertiary)">${skipped} skipped — duplicate</span>`);
+    if (dateKept) parts.push(`<span style="color:var(--text-tertiary)">${dateKept} date value${dateKept>1?'s':''} didn’t match the chosen format — kept as text</span>`);
     if (missingReq.length) parts.push(`<span style="color:var(--text-tertiary)">Not in file (imported blank): ${missingReq.map(escHtml).join(', ')}</span>`);
     prev.innerHTML = parts.join(' &middot; ');
   } catch (err) {
-    prev.innerHTML = `<span style="color:var(--red-mid)">✗ Error parsing file: ${escHtml(err.message)}</span>`;
+    prev.innerHTML = `<span style="color:var(--red-mid)">✗ Error importing file: ${escHtml(err.message)}</span>`;
   }
 }
 
