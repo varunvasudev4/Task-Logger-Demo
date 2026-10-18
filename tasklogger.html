@@ -510,7 +510,7 @@ html.is-touch .pending-card-actions { opacity: 1; }
 .lm-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; padding: 6px 16px 8px; }
 .lm-body { flex: 1; min-height: 0; display: flex; flex-direction: column; border-top: 1px solid var(--border); }
 .lm-table-wrap { flex: 1; min-height: 0; overflow: auto; }
-.lm-sel-th, .lm-sel-cell { width: 40px; text-align: center; }
+.lm-sel-th, .lm-sel-cell { width: 68px; text-align: center; white-space: nowrap; }
 .lm-sel-th input, .lm-sel-cell input { cursor: pointer; width: 15px; height: 15px; }
 #lm-table tr.lm-row-selected td { background: var(--blue-bg); }
 #lm-del-btn:disabled { opacity: .45; cursor: not-allowed; }
@@ -528,8 +528,11 @@ html.is-touch .pending-card-actions { opacity: 1; }
      From + To side by side, Reset full width. Scrolls inside itself so the table always keeps room. */
   .lm-toolbar { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 8px 10px; align-items: end; max-height: 44vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
   .lm-toolbar > .lm-field { min-width: 0; }
-  .lm-toolbar > .lm-field:first-child, .lm-toolbar > .lm-field-grow, .lm-toolbar > .lm-hint, .lm-toolbar > .btn { grid-column: 1 / -1; }
-  .lm-toolbar > .lm-field-from { grid-column: 1; }
+  .lm-toolbar > .lm-field:first-child, .lm-toolbar > .lm-field-grow, .lm-toolbar > .lm-hint, .lm-toolbar > .btn, .lm-toolbar > .lm-daterange { grid-column: 1 / -1; }
+  /* From + To always sit side by side, equal width, same height, and never overflow the screen */
+  .lm-daterange { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+  .lm-daterange .lm-field { min-width: 0; }
+  .lm-daterange input.lm-input { -webkit-appearance: none; appearance: none; display: block; width: 100%; max-width: 100%; min-width: 0; height: 38px; line-height: 1.2; padding: 6px 8px; text-align: left; box-sizing: border-box; }
   .lm-toolbar > .btn { width: 100%; justify-content: center; }
   .lm-field > label { font-size: 9.5px; letter-spacing: 0.06em; }
   .lm-toolbar select.lm-input, .lm-toolbar input.lm-input { width: 100%; box-sizing: border-box; min-height: 36px; font-size: 16px; }   /* 16px stops iOS zooming on focus */
@@ -543,6 +546,7 @@ html.is-touch .pending-card-actions { opacity: 1; }
   #lm-table th, #lm-table td { padding: 6px 8px; font-size: 12px; }
   .lm-empty { padding: 18px 12px; font-size: 12.5px; }
 }
+@media (max-width: 360px) { .lm-daterange { grid-template-columns: minmax(0, 1fr); } }
 
 /* ── Highlight for tasks / entries that include Lambda (log table, Pending, Search) ── */
 #log-tbody tr.lambda-row > td { background: color-mix(in srgb, var(--purple-mid) 14%, var(--bg)) !important; }
@@ -581,13 +585,30 @@ html.is-touch .pending-card-actions { opacity: 1; }
 .llm-choice-btn b { display: block; font-size: 14px; }
 .llm-choice-btn span { display: block; font-size: 12px; color: var(--text-tertiary); margin-top: 2px; }
 #lambda-log-modal .modal { max-width: 560px; }
-#lambda-log-modal .meta-input, #lambda-log-modal .meta-select { width: 100%; box-sizing: border-box; }
+#lambda-log-modal .meta-input, #lambda-log-modal .meta-select, #lm-edit-modal .meta-input, #lm-edit-modal .meta-select { width: 100%; box-sizing: border-box; }
+#lm-edit-modal .modal { max-width: 560px; }
 @media (max-width: 480px) {
   #lambda-log-modal { padding: 0.5rem; }
   #lambda-log-modal .modal-body { padding: 12px 14px; }
   #lambda-log-modal .modal-footer { padding: 10px 14px; }
-  #lambda-log-modal .modal-footer .btn { flex: 1; justify-content: center; }
+  #lambda-log-modal .modal-footer .btn, #lm-edit-modal .modal-footer .btn { flex: 1; justify-content: center; }
+  #lm-edit-modal { padding: 0.5rem; }
+  #lm-edit-modal .modal-body { padding: 12px 14px; }
 }
+
+/* ── "Includes Lambda" tick in the Complete / Edit popup footer (left aligned) ── */
+#complete-modal .modal-footer { flex-wrap: wrap; align-items: center; }
+.cm-lambda-group { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-right: auto; min-width: 0; }
+.cm-lambda-group.hidden { display: none; }
+.cm-lambda-edit { padding: 4px 10px; font-size: 12px; }
+.cm-lambda-edit.hidden { display: none; }
+@media (max-width: 600px) { .cm-lambda-group { flex: 1 1 100%; margin-right: 0; } }
+
+/* ── Lambda tables: row edit button + date range ── */
+.lm-sel-wrap { display: inline-flex; align-items: center; gap: 4px; }
+.lm-row-edit { background: none; border: none; padding: 3px 4px; cursor: pointer; color: var(--text-tertiary); border-radius: var(--radius-md); line-height: 1; font-size: 15px; }
+.lm-row-edit:hover { color: var(--blue-mid); background: var(--bg-secondary); }
+.lm-daterange { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; min-width: 0; }
 
 .todo-card-planned-chip { background: color-mix(in srgb, var(--blue-mid) 18%, transparent); color: var(--blue-mid); font-weight: 600; }
 
@@ -2139,6 +2160,10 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
       <div id="cm-custom-fields"></div>
     </div>
     <div class="modal-footer">
+      <div class="cm-lambda-group hidden" id="cm-lambda-group">
+        <label class="task-lambda-chk" id="cm-lambda-chk" title="Tick if this task involves Lambda functions. You will be asked to log them when you save."><input type="checkbox" id="cm-lambda-cb" onchange="cmLambdaToggle(this.checked)" /><i class="ti ti-function"></i> Includes Lambda</label>
+        <button type="button" class="btn cm-lambda-edit hidden" id="cm-lambda-edit" onclick="cmLambdaEditLinked()" title="Edit the Lambda functions / changes linked to this task"><i class="ti ti-pencil"></i> Edit linked functions<span id="cm-lambda-count"></span></button>
+      </div>
       <button class="btn" onclick="closeCompleteModal()">Cancel</button>
       <button class="btn btn-primary" id="cm-submit-btn" onclick="submitComplete()"><i class="ti ti-check"></i> Mark Complete</button>
     </div>
@@ -2223,6 +2248,21 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
     </div>
     <div class="modal-body" id="llm-body"></div>
     <div class="modal-footer" id="llm-footer"></div>
+  </div>
+</div>
+
+<!-- Edit one record of a Lambda master table (pencil on each row of Dashboard ▾ → Lambda Functions) -->
+<div class="modal-overlay hidden" id="lm-edit-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title"><i class="ti ti-pencil" style="vertical-align:-2px;margin-right:6px;color:var(--purple-mid)"></i><span id="lme-title">Edit record</span></div>
+      <button class="btn-icon" onclick="lmEditClose()" title="Close" aria-label="Close"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="modal-body" id="lme-body"></div>
+    <div class="modal-footer">
+      <button type="button" class="btn" onclick="lmEditClose()">Cancel</button>
+      <button type="button" class="btn btn-primary" onclick="lmEditSave()"><i class="ti ti-device-floppy"></i> Save changes</button>
+    </div>
   </div>
 </div>
 
@@ -12626,11 +12666,13 @@ function openCompleteModal(id) {
     if (t) document.getElementById('cm-timer').textContent = fmtEffortMins(liveElapsedSecs(t));
   }, 500);
 
+  cmLambdaInit(id, null);
   document.getElementById('complete-modal').classList.remove('hidden');
   setTimeout(() => focusFieldInput('cm-description'), 80);
 }
 
 function closeCompleteModal() {
+  _cmLambda = null;
   if (cmTimerInterval) { clearInterval(cmTimerInterval); cmTimerInterval = null; }
   if (pendingEditIdx !== null) {
     pendingEditIdx = null;
@@ -12755,6 +12797,7 @@ function editLogEntry(globalIdx) {
   if (ctFieldsEdit) ctFieldsEdit.style.display = 'none';
   document.getElementById('cm-timer-label').textContent = 'Effort in minutes';
 
+  cmLambdaInit(null, globalIdx);
   document.getElementById('complete-modal').classList.remove('hidden');
   setTimeout(() => focusFieldInput('cm-description'), 80);
 }
@@ -12964,6 +13007,13 @@ function submitComplete() {
     return;
   }
 
+  // Edit mode + Includes Lambda ticked + nothing linked yet → same Lambda log step as Complete.
+  if (pendingEditIdx !== null && !_lambdaGateDone && isLambdaLoggingEnabled() && _cmLambda && _cmLambda.on && lambdaLinkedCount(_cmLambda.linkId) === 0) {
+    llmOpen(_cmLambda.linkId, () => { _lambdaGateDone = true; try { submitComplete(); } finally { _lambdaGateDone = false; } },
+      { mode: 'complete', ctx: llmCaptureCtx(), confirmLabel: 'Save & Continue' });
+    return;
+  }
+
   // Edit mode — just update entry fields, no task changes
   if (pendingEditIdx !== null) {
     const editEntry = logEntries[pendingEditIdx];
@@ -12999,6 +13049,10 @@ function submitComplete() {
         rt.customFields.description = desc;
         rt.customFields.remark = remark;
       }
+      if (isLambdaLoggingEnabled() && _cmLambda) {   // popup tick → this log row (+ its task card)
+        if (_cmLambda.on) editEntry.includesLambda = true; else delete editEntry.includesLambda;
+        if (rt) rt.includesLambda = !!_cmLambda.on;
+      }
       // Phase 19C: editing an existing log entry (heading/description/duration/
       // timestamps/custom fields) is a real synchronized mutation — mark it via the
       // generalized 'logEntries' domain tracker, same as create/delete elsewhere.
@@ -13017,10 +13071,15 @@ function submitComplete() {
   // Lambda logging: a task ticked "Includes Lambda" must log the lambdas it used before it can
   // complete. The Lambda log popup opens over this one; its "Save & Complete" re-runs this function.
   // Nothing has been changed yet at this point, so cancelling the popup leaves the task untouched.
-  if (!_lambdaGateDone && isLambdaLoggingEnabled() && task && task.includesLambda === true) {
-    llmOpen(id, () => { _lambdaGateDone = true; try { submitComplete(); } finally { _lambdaGateDone = false; } });
+  // The tick in the popup footer is the source of truth (it starts from the task card's tick). When
+  // Lambda data is already linked to the task the log step is skipped — use "Edit linked functions".
+  const lamOn = isLambdaLoggingEnabled() && (_cmLambda ? _cmLambda.on : !!(task && task.includesLambda === true));
+  if (!_lambdaGateDone && lamOn && task && lambdaLinkedCount(id) === 0) {
+    llmOpen(id, () => { _lambdaGateDone = true; try { submitComplete(); } finally { _lambdaGateDone = false; } },
+      { mode: 'complete', ctx: llmCaptureCtx(), confirmLabel: 'Save & Complete' });
     return;
   }
+  if (isLambdaLoggingEnabled() && _cmLambda && task) task.includesLambda = !!_cmLambda.on;   // popup tick → task card tick
 
   // Bank final segment (timer was ticking while popup was open)
   if (task.segmentStart !== null) { task.accumulatedMs += Date.now()-task.segmentStart; task.segmentStart=null; }
@@ -13799,14 +13858,24 @@ const LAMBDA_CHIP_HTML = '<span class="lambda-chip" title="This task includes La
 function toggleTaskLambda(id, on) {
   const task = tasks.find(t => t.id === id);
   if (!task) return;
-  task.includesLambda = !!on;
-  const oe = [...logEntries].reverse().find(e => e.taskId === id && e.endTs === null);   // keep the running log row in step
-  if (oe) { if (on) oe.includesLambda = true; else delete oe.includesLambda; }
-  touchSyncMetadata(task);
-  saveState();
-  const lbl = document.querySelector('#row-' + id + ' .task-lambda-chk');
-  if (lbl) lbl.classList.toggle('on', !!on);
-  if (typeof updateLogTable === 'function') updateLogTable();
+  const lblEl = () => document.querySelector('#row-' + id + ' .task-lambda-chk');
+  const apply = (val) => {
+    task.includesLambda = !!val;
+    const oe = [...logEntries].reverse().find(e => e.taskId === id && e.endTs === null);   // keep the running log row in step
+    if (oe) { if (val) oe.includesLambda = true; else delete oe.includesLambda; }
+    if (!val) lambdaClearEntryFlags(id, null);
+    touchSyncMetadata(task);
+    saveState();
+    const lbl = lblEl();
+    if (lbl) { lbl.classList.toggle('on', !!val); const inp = lbl.querySelector('input'); if (inp) inp.checked = !!val; }
+    if (typeof updateLogTable === 'function') updateLogTable();
+  };
+  if (!on && lambdaLinkedCount(id) > 0) {   // Lambda data already linked: unticking deletes it, so ask first
+    const lbl = lblEl(); const inp = lbl && lbl.querySelector('input'); if (inp) inp.checked = true;
+    lambdaUnlinkWithConfirm(id, () => apply(false));
+    return;
+  }
+  apply(!!on);
 }
 
 function updateTaskField(id, field, val) {
@@ -18987,20 +19056,188 @@ function lcDragEnd(e) {
   lcDragSrcIdx = null;
 }
 
-// ── Lambda log step in Complete Task ───────────────────────────────────────
-// When a task has "Includes Lambda" ticked (and Lambda logging is on), pressing Complete in the
-// popup opens this second popup. The user adds any number of entries: each is either a NEW function
-// (Function Columns form) or a CHANGE (Change Columns form). Entries are only staged in memory
-// until "Save & Complete": then they are written to the same stores the Lambda Functions screen
-// reads (ttl_lambda_functions / ttl_lambda_functions_changes) and the task completes.
+// ── Lambda log step (Complete Task / Edit Log Entry / Edit linked functions) ─────────────
+// A task that "Includes Lambda" logs the Lambda functions it used. Each entry is either a NEW
+// function (Function Columns form) or a CHANGE (Change Columns form). Entries are staged in memory
+// and only written when the popup is saved; records are linked to their task through record.taskId
+// (entries without a task use 'e<startTs>'), which is how they are found again later to edit or
+// delete. The form pre-fills any column whose name matches a Task Logger column (see llmPrefill).
 let _lambdaGateDone = false;
-let _llm = null;   // { taskId, onDone, entries:[{type,values}], view:'list'|'choose'|'form', formType, editIdx }
+let _llm = null;   // { taskId(linkId), onDone, mode:'complete'|'link', ctx, confirmLabel, entries:[{type,values,rid?}], dirty, view, formType, editIdx }
 const LLM_TYPES = {
   new:    { store: 'lambdaFunctionColumns', label: 'New function', icon: 'ti-plus' },
   change: { store: 'lambdaChangeColumns',   label: 'Change',       icon: 'ti-git-pull-request' }
 };
-function llmOpen(taskId, onDone) {
-  _llm = { taskId, onDone, entries: [], view: 'list', formType: null, editIdx: null };
+function lamLinkIdForEntry(e) { return e ? (e.taskId != null ? e.taskId : 'e' + e.startTs) : null; }
+function lambdaLinked(linkId) {
+  const out = { new: [], change: [] };
+  if (linkId == null) return out;
+  Object.keys(LLM_TYPES).forEach(t => {
+    const sk = LLM_TYPES[t].store;
+    const store = readLambdaStore(sk);
+    let fixed = false;
+    store.forEach((r, i) => { if (r && !r.id) { r.id = 'lm_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7) + '_' + i; fixed = true; } });
+    if (fixed) writeLambdaStore(sk, store);
+    out[t] = store.filter(r => r && r.taskId != null && String(r.taskId) === String(linkId));
+  });
+  return out;
+}
+function lambdaLinkedCount(linkId) { const l = lambdaLinked(linkId); return l.new.length + l.change.length; }
+function lambdaDeleteLinked(linkId) {
+  Object.keys(LLM_TYPES).forEach(t => {
+    const sk = LLM_TYPES[t].store, store = readLambdaStore(sk);
+    const kept = store.filter(r => !(r && r.taskId != null && String(r.taskId) === String(linkId)));
+    if (kept.length !== store.length) { writeLambdaStore(sk, kept); lmSel(sk).clear(); }
+  });
+  if (typeof lmRefreshIfOpen === 'function') lmRefreshIfOpen();
+}
+// Asks before unlinking: when Lambda data is already linked, removing the flag deletes it.
+function lambdaUnlinkWithConfirm(linkId, applyOff) {
+  const n = lambdaLinkedCount(linkId);
+  if (!n) { applyOff(); return; }
+  showConfirm('Delete linked Lambda data?',
+    n + ' linked Lambda ' + (n === 1 ? 'entry' : 'entries') + ' (function / change records) will be unlinked and permanently deleted. This cannot be undone.',
+    () => {
+      try { lambdaDeleteLinked(linkId); } catch (err) { alert('Could not delete the linked Lambda data (' + err.message + ').'); return; }
+      applyOff();
+    }, 'Delete');
+}
+// Clears the Lambda highlight from the task's log rows (after its linked data was deleted).
+function lambdaClearEntryFlags(taskId, onlyEntry) {
+  logEntries.forEach(e => {
+    if (!e.includesLambda) return;
+    if (onlyEntry ? e === onlyEntry : (taskId != null && e.taskId === taskId)) delete e.includesLambda;
+  });
+}
+
+// ── Include Lambda tick inside the Complete / Edit popup ────────────────────
+let _cmLambda = null;   // { linkId, taskId, entryIdx, on } while the popup is open and Lambda logging is on
+function cmLambdaInit(taskId, entryIdx) {
+  const grp = document.getElementById('cm-lambda-group');
+  if (!grp) return;
+  _cmLambda = null;
+  if (!isLambdaLoggingEnabled()) { grp.classList.add('hidden'); return; }
+  let linkId, on, tId;
+  if (entryIdx != null) {
+    const e = logEntries[entryIdx];
+    if (!e) { grp.classList.add('hidden'); return; }
+    const tk = e.taskId != null ? tasks.find(t => t.id === e.taskId) : null;
+    linkId = lamLinkIdForEntry(e); tId = e.taskId != null ? e.taskId : null;
+    on = e.includesLambda === true || !!(tk && tk.includesLambda === true);
+  } else {
+    const tk = tasks.find(t => t.id === taskId);
+    linkId = taskId; tId = taskId; on = !!(tk && tk.includesLambda === true);   // same flag as the task card
+  }
+  _cmLambda = { linkId, taskId: tId, entryIdx: entryIdx != null ? entryIdx : null, on };
+  grp.classList.remove('hidden');
+  cmLambdaRefresh();
+}
+function cmLambdaRefresh() {
+  if (!_cmLambda) return;
+  const cb = document.getElementById('cm-lambda-cb'), lbl = document.getElementById('cm-lambda-chk');
+  const btn = document.getElementById('cm-lambda-edit'), cnt = document.getElementById('cm-lambda-count');
+  if (cb) cb.checked = !!_cmLambda.on;
+  if (lbl) lbl.classList.toggle('on', !!_cmLambda.on);
+  const n = lambdaLinkedCount(_cmLambda.linkId);
+  if (btn) btn.classList.toggle('hidden', n === 0);
+  if (cnt) cnt.textContent = n ? ' (' + n + ')' : '';
+}
+function cmLambdaToggle(on) {
+  if (!_cmLambda) return;
+  const L = _cmLambda;
+  if (on) { L.on = true; cmLambdaRefresh(); return; }   // ticked: behaves like Complete — the Lambda log opens when you save
+  cmLambdaRefresh();   // snap the tick back until the delete is confirmed (or there is nothing to delete)
+  lambdaUnlinkWithConfirm(L.linkId, () => {
+    L.on = false;
+    const tk = L.taskId != null ? tasks.find(t => t.id === L.taskId) : null;
+    if (tk) { tk.includesLambda = false; touchSyncMetadata(tk); }
+    lambdaClearEntryFlags(L.taskId, L.taskId == null && L.entryIdx != null ? logEntries[L.entryIdx] : null);
+    saveState();
+    if (tk) {
+      const lbl = document.querySelector('#row-' + tk.id + ' .task-lambda-chk');
+      if (lbl) { lbl.classList.remove('on'); const i = lbl.querySelector('input'); if (i) i.checked = false; }
+    }
+    if (typeof updateLogTable === 'function') updateLogTable();
+    cmLambdaRefresh();
+  });
+}
+function cmLambdaEditLinked() {
+  if (!_cmLambda) return;
+  llmOpen(_cmLambda.linkId, () => cmLambdaRefresh(), { mode: 'link', ctx: llmCaptureCtx(), confirmLabel: 'Save' });
+}
+// Current values of the Task Logger fields (read live from the open popup), keyed by Task Logger column key.
+function llmCaptureCtx() {
+  const ctx = {};
+  const g = id => { const el = document.getElementById(id); return el ? String(el.value == null ? '' : el.value).trim() : ''; };
+  ['heading', 'project', 'nature', 'module', 'ticket', 'status', 'description', 'remark'].forEach(k => { ctx[k] = g('cm-' + k); });
+  getCompletePopupColumns().filter(isDynamicPopupColumn).forEach(c => { ctx[c.key] = g('cm-custom-' + c.key); });
+  const L = _cmLambda;
+  const src = L ? (L.entryIdx != null ? logEntries[L.entryIdx] : tasks.find(t => t.id === L.taskId)) : null;
+  if (src && src.customFields) Object.keys(src.customFields).forEach(k => { if (!ctx[k]) ctx[k] = String(src.customFields[k] == null ? '' : src.customFields[k]); });
+  ctx.employee = (typeof userName === 'string') ? userName : '';
+  let iso = '';
+  if (L && L.entryIdx != null) {
+    const e = logEntries[L.entryIdx];
+    if (e && e.startTs) { const d = new Date(e.startTs); iso = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+  } else if (src) iso = taskDateStr(src);
+  ctx.date = iso || todayStr();
+  return ctx;
+}
+// A Lambda column that has the same name (or key) as a Task Logger column gets that column's value.
+function llmPrefill(storeKey) {
+  const ctx = (_llm && _llm.ctx) || {}, logCols = getLogColumns(), out = {};
+  const norm = s => String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]+/g, '');
+  getLambdaColumns(storeKey).forEach(c => {
+    const nl = norm(c.label);
+    let lc = logCols.find(l => l.key === c.key) || logCols.find(l => norm(l.label) === nl);
+    if (!lc && nl.length >= 4) {   // looser: "Ticket #" ↔ "Ticket # if support ticket" (one name starts with the other, only if unambiguous)
+      const loose = logCols.filter(l => { const nk = norm(l.label); return nk.length >= 4 && (nk.indexOf(nl) === 0 || nl.indexOf(nk) === 0); });
+      if (loose.length === 1) lc = loose[0];
+    }
+    let v = '';
+    if (lc && ctx[lc.key] != null) v = String(ctx[lc.key]).trim();
+    else if (ctx.heading && ['taskname', 'task', 'heading', 'taskheading'].indexOf(nl) !== -1) v = ctx.heading;
+    if (!v) return;
+    const opts = (c.listSource && masters.customLists && masters.customLists[c.listSource]) || [];
+    if (c.type === 'list') { if (opts.indexOf(v) === -1) return; }
+    else if (c.type === 'multilist') { v = v.split(/\s*[\/,]\s*/).filter(x => opts.indexOf(x) !== -1).join(' / '); if (!v) return; }
+    else if (c.type === 'date') { v = lmParseDate(v, lc) || ''; if (!v) return; }
+    else if (lc && lc.type === 'date' && /^\d{4}-\d{2}-\d{2}$/.test(v)) v = formatCustomDate(v, c.dateFormat || lc.dateFormat || 'DD-MM-YYYY');
+    out[c.key] = v;
+  });
+  return out;
+}
+
+// Shared form used by the Lambda log popup and the row-edit popup of the Lambda tables.
+function lamFormHTML(storeKey, prefix, cur) {
+  return getLambdaColumns(storeKey).map((c, i) => {
+    let v = cur[c.key] != null ? cur[c.key] : (c.type === 'date' ? todayStr() : '');
+    if (c.type === 'date' && v) v = lmParseDate(v, c) || v;   // <input type=date> needs YYYY-MM-DD
+    return `<div class="complete-field"><label class="complete-label">${esc(c.label)}${c.required ? ' <span class="req">*</span>' : ''}</label>${buildDynamicFieldInput(c, prefix + i, v, '', '', '')}</div>`;
+  }).join('');
+}
+function lamFormCollect(storeKey, prefix) {
+  const cols = getLambdaColumns(storeKey), values = {};
+  let bad = null;
+  cols.forEach((c, i) => {
+    const el = document.getElementById(prefix + i);
+    let v = el ? String(el.value == null ? '' : el.value) : '';
+    if (c.type === 'searchlist') { const tr = document.getElementById(prefix + i + '-trigger'); if (tr) v = tr.value; }   // typed text counts even if not yet committed
+    v = v.trim();
+    values[c.key] = v;
+    const mark = document.getElementById(prefix + i + '-trigger') || el;
+    if (c.required && !v) { if (mark) mark.classList.add('invalid'); if (!bad) bad = mark; }
+    else if (mark) mark.classList.remove('invalid');
+  });
+  return { values, bad };
+}
+
+function llmOpen(linkId, onDone, opts) {
+  opts = opts || {};
+  const ex = lambdaLinked(linkId), entries = [];
+  ['new', 'change'].forEach(t => ex[t].forEach(r => entries.push({ type: t, rid: r.id, values: Object.assign({}, r.values || {}) })));
+  _llm = { taskId: linkId, onDone, mode: opts.mode || 'complete', ctx: opts.ctx || {}, confirmLabel: opts.confirmLabel || 'Save & Complete',
+           entries, dirty: false, view: 'list', formType: null, editIdx: null };
   document.getElementById('lambda-log-modal').classList.remove('hidden');
   llmRender();
 }
@@ -19012,8 +19249,8 @@ function llmClose() {
 function llmCancel() {
   if (!_llm) return;
   if (_llm.view !== 'list') { _llm.view = 'list'; _llm.editIdx = null; llmRender(); return; }   // X inside a step = back
-  if (_llm.entries.length) {
-    showConfirm('Discard Lambda entries?', 'The entries you added will be lost and the task will not be completed yet.', llmClose, 'Discard');
+  if (_llm.dirty) {
+    showConfirm('Discard Lambda changes?', _llm.mode === 'link' ? 'The changes you made to the linked Lambda entries will be lost.' : 'The changes you made here will be lost and nothing will be saved yet.', llmClose, 'Discard');
   } else llmClose();
 }
 function llmShort(s, n) { s = String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
@@ -19037,64 +19274,75 @@ function llmRender() {
       opt('new', 'New function', 'Opens the Function Columns form.') + opt('change', 'Change to an existing function', 'Opens the Change Columns form.') + `</div>`;
     foot.innerHTML = `<button type="button" class="btn" onclick="llmBack()">Back</button>`;
   } else if (_llm.view === 'form') {
-    const type = _llm.formType, st = LLM_TYPES[type].store, cols = getLambdaColumns(st);
-    const cur = _llm.editIdx != null ? _llm.entries[_llm.editIdx].values : {};
-    title.textContent = (_llm.editIdx != null ? 'Edit ' : '') + (type === 'new' ? 'New function' : 'Change');
-    body.innerHTML = `<div class="llm-hint">${type === 'new' ? 'Function Columns' : 'Change Columns'} form. Fields marked * are required.</div>` +
-      `<div class="llm-form">` + cols.map((c, i) => {
-        const v = cur[c.key] != null ? cur[c.key] : (c.type === 'date' ? todayStr() : '');
-        return `<div class="complete-field"><label class="complete-label">${esc(c.label)}${c.required ? ' <span class="req">*</span>' : ''}</label>${buildDynamicFieldInput(c, 'llf-' + i, v, '', '', '')}</div>`;
-      }).join('') + `</div>`;
-    foot.innerHTML = `<button type="button" class="btn" onclick="llmBack()">Back</button><button type="button" class="btn btn-primary" onclick="llmSaveEntry()"><i class="ti ti-check"></i> ${_llm.editIdx != null ? 'Update entry' : 'Add entry'}</button>`;
+    const type = _llm.formType, st = LLM_TYPES[type].store;
+    const isNew = _llm.editIdx == null;
+    const cur = isNew ? llmPrefill(st) : _llm.entries[_llm.editIdx].values;
+    const filled = isNew ? Object.keys(cur).length : 0;
+    title.textContent = (isNew ? '' : 'Edit ') + (type === 'new' ? 'New function' : 'Change');
+    body.innerHTML = `<div class="llm-hint">${type === 'new' ? 'Function Columns' : 'Change Columns'} form. Fields marked * are required.${filled ? ' ' + filled + ' field' + (filled === 1 ? ' was' : 's were') + ' filled in from the task.' : ''}</div>` +
+      `<div class="llm-form">` + lamFormHTML(st, 'llf-', cur) + `</div>`;
+    foot.innerHTML = `<button type="button" class="btn" onclick="llmBack()">Back</button><button type="button" class="btn btn-primary" onclick="llmSaveEntry()"><i class="ti ti-check"></i> ${isNew ? 'Add entry' : 'Update entry'}</button>`;
   } else {
-    title.textContent = 'Lambda log';
+    const link = _llm.mode === 'link';
+    title.textContent = link ? 'Linked Lambda entries' : 'Lambda log';
     const list = _llm.entries.map((e, i) => `<div class="llm-item"><span class="llm-badge ${e.type}">${e.type === 'new' ? 'NEW' : 'CHANGE'}</span><div class="llm-item-body">${llmSummary(e)}</div><div class="llm-item-actions"><button type="button" class="btn-icon" title="Edit" onclick="llmEdit(${i})"><i class="ti ti-pencil"></i></button><button type="button" class="btn-icon btn-delete" title="Remove" onclick="llmRemove(${i})"><i class="ti ti-trash"></i></button></div></div>`).join('');
-    body.innerHTML = `<div class="llm-hint">This task includes Lambda. Add an entry for each Lambda function used. The task completes once you save.</div>` +
+    body.innerHTML = `<div class="llm-hint">${link ? 'These Lambda entries are linked to this task. Edit, remove or add entries, then press Save.' : 'This task includes Lambda. Add an entry for each Lambda function used. Nothing is saved until you confirm.'}</div>` +
       (_llm.entries.length ? `<div class="llm-list">${list}</div>` : `<div class="llm-empty">No entries yet. Tap “Add entry” to log a Lambda.</div>`) +
-      `<div class="llm-error hidden" id="llm-error">Add at least one entry (or untick “Includes Lambda” on the task card).</div>` +
+      `<div class="llm-error hidden" id="llm-error">Add at least one entry (or untick “Includes Lambda” in the popup).</div>` +
       `<button type="button" class="btn" onclick="llmAdd()"><i class="ti ti-plus"></i> Add entry</button>`;
-    foot.innerHTML = `<button type="button" class="btn" onclick="llmCancel()">Cancel</button><button type="button" class="btn btn-primary" onclick="llmSubmit()"><i class="ti ti-check"></i> Save &amp; Complete</button>`;
+    foot.innerHTML = `<button type="button" class="btn" onclick="llmCancel()">Cancel</button><button type="button" class="btn btn-primary" onclick="llmSubmit()"><i class="ti ti-check"></i> ${esc(_llm.confirmLabel)}</button>`;
   }
 }
 function llmAdd() { if (!_llm) return; _llm.view = 'choose'; llmRender(); }
 function llmBack() { if (!_llm) return; _llm.view = (_llm.view === 'form' && _llm.editIdx == null) ? 'choose' : 'list'; _llm.editIdx = null; llmRender(); }
 function llmPick(type) { if (!_llm || !LLM_TYPES[type]) return; _llm.formType = type; _llm.editIdx = null; _llm.view = 'form'; llmRender(); }
 function llmEdit(i) { if (!_llm || !_llm.entries[i]) return; _llm.formType = _llm.entries[i].type; _llm.editIdx = i; _llm.view = 'form'; llmRender(); }
-function llmRemove(i) { if (!_llm) return; _llm.entries.splice(i, 1); llmRender(); }
+function llmRemove(i) { if (!_llm) return; _llm.entries.splice(i, 1); _llm.dirty = true; llmRender(); }
 function llmSaveEntry() {
   if (!_llm) return;
-  const cols = getLambdaColumns(LLM_TYPES[_llm.formType].store);
-  const values = {};
-  let bad = null;
-  cols.forEach((c, i) => {
-    const el = document.getElementById('llf-' + i);
-    let v = el ? String(el.value == null ? '' : el.value) : '';
-    if (c.type === 'searchlist') { const tr = document.getElementById('llf-' + i + '-trigger'); if (tr) v = tr.value; }   // typed text counts even if not yet committed
-    v = v.trim();
-    values[c.key] = v;
-    const mark = document.getElementById('llf-' + i + '-trigger') || el;
-    if (c.required && !v) { if (mark) mark.classList.add('invalid'); if (!bad) bad = mark; }
-    else if (mark) mark.classList.remove('invalid');
-  });
-  if (bad) { if (bad.scrollIntoView) bad.scrollIntoView({ block: 'center', behavior: 'smooth' }); return; }
-  const entry = { type: _llm.formType, values };
-  if (_llm.editIdx != null) _llm.entries[_llm.editIdx] = entry; else _llm.entries.push(entry);
-  _llm.view = 'list'; _llm.editIdx = null;
+  const r = lamFormCollect(LLM_TYPES[_llm.formType].store, 'llf-');
+  if (r.bad) { if (r.bad.scrollIntoView) r.bad.scrollIntoView({ block: 'center', behavior: 'smooth' }); return; }
+  if (_llm.editIdx != null) { const old = _llm.entries[_llm.editIdx]; _llm.entries[_llm.editIdx] = { type: _llm.formType, rid: old.rid, values: r.values }; }
+  else _llm.entries.push({ type: _llm.formType, values: r.values });
+  _llm.dirty = true; _llm.view = 'list'; _llm.editIdx = null;
   llmRender();
+}
+// Resets a Lambda tab's search / entity filters / date range so freshly saved records are visible.
+function lmRevealTab(k) {
+  const s = lmGetState(k);
+  s.q = ''; s.ent = {}; s.fromTouched = false; s.toTouched = false;
+}
+// Writes the staged entries: updates edited records, adds new ones, deletes removed ones (all by taskId link).
+function lambdaCommitLinked(linkId, entries) {
+  const now = Date.now(), added = [];
+  Object.keys(LLM_TYPES).forEach(t => {
+    const sk = LLM_TYPES[t].store;
+    const staged = entries.filter(e => e.type === t);
+    const keep = new Set(staged.filter(e => e.rid).map(e => e.rid));
+    let store = readLambdaStore(sk);
+    const before = store.length;
+    store = store.filter(r => !(r && r.taskId != null && String(r.taskId) === String(linkId) && !keep.has(r.id)));
+    const removed = before - store.length;
+    staged.forEach(e => {
+      const rec = e.rid ? store.find(r => r && r.id === e.rid) : null;
+      if (rec) { rec.values = Object.assign({}, e.values); rec.updatedAt = now; }
+      else {
+        const id = 'lm_' + now.toString(36) + '_' + Math.random().toString(36).slice(2, 7) + '_' + store.length;
+        store.push({ id, importedAt: now, taskId: linkId, values: Object.assign({}, e.values) });
+        added.push([sk, id]);
+      }
+    });
+    if (staged.length || removed) { writeLambdaStore(sk, store); lmRevealTab(sk); }
+  });
+  added.forEach(a => { if (!readLambdaStore(a[0]).some(r => r && r.id === a[1])) throw new Error('the browser did not keep the data (storage may be full or blocked)'); });
 }
 function llmSubmit() {
   if (!_llm) return;
-  if (!_llm.entries.length) { const er = document.getElementById('llm-error'); if (er) er.classList.remove('hidden'); return; }
+  if (!_llm.entries.length && _llm.mode !== 'link') { const er = document.getElementById('llm-error'); if (er) er.classList.remove('hidden'); return; }
   try {
-    const now = Date.now();
-    _llm.entries.forEach(e => {
-      const sk = LLM_TYPES[e.type].store;
-      const store = readLambdaStore(sk);
-      store.push({ id: 'lm_' + now.toString(36) + '_' + Math.random().toString(36).slice(2, 7) + '_' + store.length, importedAt: now, taskId: _llm.taskId, values: Object.assign({}, e.values) });
-      writeLambdaStore(sk, store);
-    });
+    lambdaCommitLinked(_llm.taskId, _llm.entries);
   } catch (err) {
-    alert('Could not save the Lambda entries (' + err.message + '). The task was not completed.');
+    alert('Could not save the Lambda entries (' + err.message + ').' + (_llm.mode === 'link' ? '' : ' Nothing was completed or saved.'));
     return;
   }
   const cb = _llm.onDone;
@@ -19282,7 +19530,7 @@ function lmRenderToolbar() {
   const dates = lmLoadRecords(k, cols).map(r => r._date).filter(Boolean).sort();
   const today = todayStr();
   if (!s.fromTouched) s.from = dates.length ? dates[0] : today;   // oldest record date
-  if (!s.toTouched) s.to = today;                                  // current date
+  if (!s.toTouched) s.to = (dates.length && dates[dates.length - 1] > today) ? dates[dates.length - 1] : today;   // today, or a later record date so future-dated records are not hidden
   const none = searchable.length === 0;
   const entFields = lmEntityCols(k).map(c => {
     const on = Array.isArray(s.ent[c.key]);
@@ -19297,10 +19545,12 @@ function lmRenderToolbar() {
      <div class="lm-field lm-field-grow"><label for="lm-q">Search</label>
        <input id="lm-q" class="lm-input" type="search" autocomplete="off" placeholder="${none ? 'Mark a column Searchable first' : 'Type to search…'}" value="${esc(s.q)}" oninput="lmOnQuery(this.value)" ${none ? 'disabled' : ''} /></div>
      ${entFields}
-     <div class="lm-field lm-field-from"><label for="lm-from">From</label>
-       <input id="lm-from" class="lm-input" type="date" value="${esc(s.from)}" onchange="lmOnDate('from', this.value)" /></div>
-     <div class="lm-field"><label for="lm-to">To</label>
-       <input id="lm-to" class="lm-input" type="date" value="${esc(s.to)}" onchange="lmOnDate('to', this.value)" /></div>
+     <div class="lm-daterange">
+       <div class="lm-field"><label for="lm-from">From</label>
+         <input id="lm-from" class="lm-input" type="date" value="${esc(s.from)}" onchange="lmOnDate('from', this.value)" /></div>
+       <div class="lm-field"><label for="lm-to">To</label>
+         <input id="lm-to" class="lm-input" type="date" value="${esc(s.to)}" onchange="lmOnDate('to', this.value)" /></div>
+     </div>
      <button type="button" class="btn" onclick="lmResetFilters()" title="Clear the search and entity filters and reset the date range"><i class="ti ti-filter-off"></i> Reset</button>
      ${none ? `<div class="lm-hint">No column in ${esc(LAMBDA_COLUMN_STORES[k].title)} has the Searchable flag on yet. <button type="button" onclick="lmOpenMasters()">Open the master</button> and tick Searchable.</div>` : ''}`;
 }
@@ -19594,14 +19844,14 @@ function lmRenderTable() {
   Array.from(sel).forEach(id => { if (lmVisibleIds.indexOf(id) === -1) sel.delete(id); });   // only ticked rows that are on screen count
   if (countEl) countEl.dataset.base = countEl.textContent;
   const widths = lmWidths[k];
-  const colgroup = '<col data-col="__sel" style="width:40px">' + cols.map(c => `<col data-col="${esc(c.key)}" style="width:${widths[c.key] || defaultLogColumnWidth(c)}px">`).join('');
+  const colgroup = '<col data-col="__sel" style="width:68px">' + cols.map(c => `<col data-col="${esc(c.key)}" style="width:${widths[c.key] || defaultLogColumnWidth(c)}px">`).join('');
   const thead = '<th data-col="__sel" class="lm-sel-th"><input type="checkbox" id="lm-all-cb" title="Select all" aria-label="Select all rows"></th>' + cols.map(c => {
     const arrow = s.sortCol === c.key ? (s.sortDir === 'asc' ? '▲' : '▼') : '';
     return `<th class="log-th-sortable" data-col="${esc(c.key)}">${esc(c.label)}<span class="col-sort-arrow">${arrow}</span>` +
       `<button type="button" class="col-pin-icon" data-col="${esc(c.key)}" title="Pin column">${LOG_TABLE_PIN_ICON_SVG}</button>` +
       `<span class="col-resize-handle"></span></th>`;
   }).join('');
-  const tbody = rows.map(r => `<tr data-id="${esc(r.id)}"><td data-col="__sel" class="lm-sel-cell"><input type="checkbox" class="lm-row-cb" data-id="${esc(r.id)}" aria-label="Select row"></td>` + cols.map(c => {
+  const tbody = rows.map(r => `<tr data-id="${esc(r.id)}"><td data-col="__sel" class="lm-sel-cell"><span class="lm-sel-wrap"><input type="checkbox" class="lm-row-cb" data-id="${esc(r.id)}" aria-label="Select row"><button type="button" class="lm-row-edit" data-id="${esc(r.id)}" title="Edit this record" aria-label="Edit record"><i class="ti ti-pencil"></i></button></span></td>` + cols.map(c => {
     const v = lmDisplayValue(c, r.values && r.values[c.key]);
     return `<td data-col="${esc(c.key)}" title="${esc(v)}">${esc(v)}</td>`;
   }).join('') + '</tr>').join('');
@@ -19615,6 +19865,10 @@ function lmRenderTable() {
   lmWireColumns();
   lmApplyPins();
   const tbl = document.getElementById('lm-table');
+  if (tbl) tbl.addEventListener('click', (e) => {
+    const b = e.target.closest && e.target.closest('.lm-row-edit');
+    if (b) { e.stopPropagation(); lmEditOpen(b.dataset.id); }
+  });
   if (tbl) tbl.addEventListener('change', (e) => {
     const t = e.target;
     if (t.id === 'lm-all-cb') { if (t.checked) lmVisibleIds.forEach(id => sel.add(id)); else sel.clear(); }
@@ -19625,6 +19879,40 @@ function lmRenderTable() {
   lmUpdateSelectionUI();
   lmApplyFilterCollapse();
 }
+// ── Edit one record (pencil on each row): same form as the Lambda log popup ──
+let _lme = null;   // { k, id }
+function lmEditOpen(id) {
+  const k = lmActiveTab, rec = readLambdaStore(k).find(r => r && r.id === id);
+  if (!rec || !getLambdaColumns(k).length) return;
+  _lme = { k, id };
+  document.getElementById('lme-title').textContent = 'Edit ' + LAMBDA_COLUMN_STORES[k].noun;
+  document.getElementById('lme-body').innerHTML = `<div class="llm-hint">${esc(LAMBDA_COLUMN_STORES[k].title)} form. Fields marked * are required.</div><div class="llm-form">` + lamFormHTML(k, 'lme-', rec.values || {}) + `</div>`;
+  document.getElementById('lm-edit-modal').classList.remove('hidden');
+}
+function lmEditClose() {
+  const m = document.getElementById('lm-edit-modal');
+  if (m) m.classList.add('hidden');
+  _lme = null;
+}
+function lmEditSave() {
+  if (!_lme) return;
+  const k = _lme.k, id = _lme.id;
+  const r = lamFormCollect(k, 'lme-');
+  if (r.bad) { if (r.bad.scrollIntoView) r.bad.scrollIntoView({ block: 'center', behavior: 'smooth' }); return; }
+  try {
+    const store = readLambdaStore(k), rec = store.find(x => x && x.id === id);
+    if (!rec) { alert('This record no longer exists.'); lmEditClose(); lmRenderAll(); return; }
+    rec.values = Object.assign({}, rec.values || {}, r.values);
+    rec.updatedAt = Date.now();
+    writeLambdaStore(k, store);
+  } catch (err) { alert('Could not save the changes (' + err.message + ').'); return; }
+  lmEditClose();
+  lmRenderAll();
+}
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && _lme && document.getElementById('confirm-overlay').classList.contains('hidden')) lmEditClose();
+});
+
 // Syncs checkboxes, row highlight, count text and the Copy / Download / Delete buttons with the ticked rows.
 function lmUpdateSelectionUI() {
   const k = lmActiveTab, sel = lmSel(k), n = sel.size, total = lmVisibleIds.length;
