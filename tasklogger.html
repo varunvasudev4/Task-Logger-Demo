@@ -3511,7 +3511,7 @@ const DOMAIN_WHOLE_KEY = '__domain__';
 // still records a domain outside this list (forward-compatible with a state
 // category not yet anticipated), but every call site added in this session uses one
 // of these.
-const SYNC_DOMAINS = ['logEntries', 'recurringPlans', 'masters', 'breakData', 'theme', 'weekendOverrides', 'counters', 'userName', 'todoItems', 'dashboardConfig'];
+const SYNC_DOMAINS = ['logEntries', 'recurringPlans', 'masters', 'breakData', 'theme', 'weekendOverrides', 'counters', 'userName', 'todoItems', 'dashboardConfig', 'lambdaRecords'];
 
 // In-memory domain change state, shaped as:
 //   { schemaVersion, domains: { [domain]: { dirty, version, lastChangeAt, entities: { [entityId]: { operation, version, timestamp, deviceId } } } } }
@@ -3726,7 +3726,7 @@ function buildDomainMeta() {
   // either was still "upload-only" (SYNC_AUDIT.md §1). No new tracking added;
   // both already write into domainSyncState via recordSyncChange() at every
   // real mutation site (Phase 19C/19D), same as the other five domains below.
-  ['masters', 'theme', 'breakData', 'counters', 'userName', 'logEntries', 'recurringPlans', 'todoItems', 'dashboardConfig'].forEach(d => {
+  ['masters', 'theme', 'breakData', 'counters', 'userName', 'logEntries', 'recurringPlans', 'todoItems', 'dashboardConfig', 'lambdaRecords'].forEach(d => {
     const rec = domainSyncState.domains[d];
     if (rec && rec.lastChangeAt) {
       meta[d] = { version: rec.version || 0, modifiedAt: rec.lastChangeAt, deviceId: getDeviceId() };
@@ -3848,6 +3848,241 @@ function applyRemoteDashboardConfigIfNewer(remoteParsed) {
   adoptRemoteDomainMeta('dashboardConfig', remoteMeta);
   return true;
 }
+
+// ── Lambda logging data: Synchronization + Backup ─────────────────────────────────
+// WHAT WAS ALREADY COVERED: the Lambda logging MASTERS (masters.lambdaFunctionColumns,
+// masters.lambdaChangeColumns, masters.flags.lambdaLoggingEnabled / lambdaCopyHeader) live inside
+// `masters`, so they already travelled with the masters domain and with both backup scopes.
+// WHAT WAS NOT: the RECORDS of the two Lambda tables (Dashboard ▾ → Lambda Functions) live in their
+// own localStorage keys, and neither Synchronization nor Backup / Restore carried them. They do now:
+//   • Backup  : a full backup carries `lambdaRecords` {functions, changes} + `lambdaTombstones`.
+//               (A configuration-only backup carries the masters, never the records.)
+//   • Sync    : state.json carries the same two fields — only when there is something to carry, so a
+//               user who never uses Lambda logging gets a byte-identical file. Merged per record id:
+//               union of both sides; the same id on both sides → newer stamp wins (updatedAt, else
+//               importedAt); a delete travels as a tombstone and beats any record not edited after it.
+//   • Links   : record.taskId is a device-local task id, so records also carry `taskSyncId` (the
+//               task's stable _sync.syncId). On the wire taskId is dropped; a receiving device
+//               re-points taskId at its own copy of that task (lambdaRelinkToTasks()).
+// Tombstones: { [recordId]: deletedAtMs }, kept 180 days (same horizon as To Do tombstones).
+// Remote-originated writes go straight to localStorage (never through writeLambdaStore), so they are
+// not re-recorded as local edits — same rule as applyDashboardConfig().
+const LAMBDA_DATA_STORES = [
+  { field: 'functions', schema: 'lambdaFunctionColumns', key: 'ttl_lambda_functions' },
+  { field: 'changes',   schema: 'lambdaChangeColumns',   key: 'ttl_lambda_functions_changes' }
+];   // keys must match CSV_SCHEMAS[*].storageKey
+const LAMBDA_TOMBSTONES_KEY = 'ttl_lambda_tombstones';
+const LAMBDA_TOMBSTONE_TTL_MS = 180 * 86400000;
+
+function lamReadRaw(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) { return []; }
+}
+function lamReadTombs() {
+  try {
+    const raw = localStorage.getItem(LAMBDA_TOMBSTONES_KEY);
+    const o = raw ? JSON.parse(raw) : {};
+    return (o && typeof o === 'object' && !Array.isArray(o)) ? o : {};
+  } catch (e) { return {}; }
+}
+function lamWriteTombs(o) {
+  const cutoff = Date.now() - LAMBDA_TOMBSTONE_TTL_MS, out = {};
+  Object.keys(o || {}).forEach(id => { const t = Number(o[id]); if (isFinite(t) && t >= cutoff) out[id] = t; });
+  if (Object.keys(out).length) localStorage.setItem(LAMBDA_TOMBSTONES_KEY, JSON.stringify(out));
+  else localStorage.removeItem(LAMBDA_TOMBSTONES_KEY);
+}
+const lamStamp = r => (r && (Number(r.updatedAt) || Number(r.importedAt))) || 0;
+// Content form used to decide "same record?": the link fields are device-derived, so they are ignored.
+function lamCanon(r) {
+  const c = JSON.parse(JSON.stringify(r));
+  delete c.taskId; delete c.taskSyncId;
+  return stableStringify(c);
+}
+function lamOwnerSyncId(r) {
+  if (!r || r.taskId == null || typeof tasks === 'undefined' || !Array.isArray(tasks)) return null;
+  const t = tasks.find(x => x && String(x.id) === String(r.taskId));
+  return (t && t._sync && t._sync.syncId) || null;
+}
+function lamFindTaskBySyncId(sid) {
+  if (!sid || typeof tasks === 'undefined' || !Array.isArray(tasks)) return null;
+  return tasks.find(t => t && t._sync && t._sync.syncId === sid && !isTaskDeleted(t)) || null;
+}
+// Entries without a task are linked by 'e<startTs>' — stable across devices, so it may travel as is.
+const lamStableLink = id => /^e/.test(String(id));
+// Record as it is written to state.json: taskSyncId added, device-local taskId dropped.
+function lamForWire(r) {
+  const c = JSON.parse(JSON.stringify(r));
+  if (!c.taskSyncId) { const sid = lamOwnerSyncId(r); if (sid) c.taskSyncId = sid; }
+  if (c.taskId != null && (c.taskSyncId || !lamStableLink(c.taskId))) delete c.taskId;
+  return c;
+}
+// Record as it is adopted from state.json: map taskSyncId onto this device's task id.
+function lamAdoptRemote(r) {
+  const c = JSON.parse(JSON.stringify(r));
+  if (c.taskSyncId) {
+    const owner = lamFindTaskBySyncId(c.taskSyncId);
+    if (owner) c.taskId = owner.id; else delete c.taskId;   // owner not here (yet): unlinked until relinked
+  } else if (c.taskId != null && !lamStableLink(c.taskId)) delete c.taskId;   // a bare numeric id means nothing here
+  return c;
+}
+// Records created before ids existed get one (silent local repair; never recorded as an edit).
+function lamEnsureIds() {
+  LAMBDA_DATA_STORES.forEach(st => {
+    const arr = lamReadRaw(st.key); let fixed = false;
+    arr.forEach((r, i) => {
+      if (r && typeof r === 'object' && !r.id) { r.id = 'lm_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7) + '_' + i; fixed = true; }
+    });
+    if (fixed) { try { localStorage.setItem(st.key, JSON.stringify(arr)); } catch (e) {} }
+  });
+}
+// What state.json carries, or null when there is nothing (keeps the file unchanged for non-users).
+function lambdaSyncPayload() {
+  try {
+    lamEnsureIds();
+    const records = {}; let any = false;
+    LAMBDA_DATA_STORES.forEach(st => {
+      records[st.field] = lamReadRaw(st.key).filter(r => r && typeof r === 'object' && r.id).map(lamForWire);
+      if (records[st.field].length) any = true;
+    });
+    const tombstones = lamReadTombs();
+    if (Object.keys(tombstones).length) any = true;
+    return any ? { records: records, tombstones: tombstones } : null;
+  } catch (e) { return null; }
+}
+// Digest shape used by SyncMerge.digestOf(): missing fields count as empty, so an old remote file
+// (no Lambda fields) and a device with no Lambda data compare equal.
+function lambdaDigestShape(p) {
+  const rr = (p && p.lambdaRecords && typeof p.lambdaRecords === 'object') ? p.lambdaRecords : {};
+  const o = {};
+  LAMBDA_DATA_STORES.forEach(st => {
+    const m = {};
+    (Array.isArray(rr[st.field]) ? rr[st.field] : []).forEach(r => { if (r && r.id) m[r.id] = simpleHash(stableStringify(r)); });
+    o[st.field] = m;
+  });
+  o.tomb = Object.keys((p && p.lambdaTombstones && typeof p.lambdaTombstones === 'object') ? p.lambdaTombstones : {}).sort();
+  return o;
+}
+function lamSameList(a, b) {
+  if (a.length !== b.length) return false;
+  const m = new Map(); a.forEach(r => { if (r && r.id) m.set(r.id, lamCanon(r)); });
+  return b.every(r => r && r.id && m.has(r.id) && m.get(r.id) === lamCanon(r));
+}
+// Pure merge of ONE table. `tomb` is the already-merged tombstone map. Returns { records, revived }.
+// revived = ids whose tombstone lost to a later edit (the caller drops those tombstones).
+function lambdaMergeTable(local, remote, tomb, adopt) {
+  adopt = adopt || (r => r);
+  const byId = new Map(), order = [];
+  local.forEach(r => { if (r && r.id && !byId.has(r.id)) { byId.set(r.id, { rec: r, remote: false }); order.push(r.id); } });
+  remote.forEach(r => {
+    if (!r || !r.id) return;
+    const cur = byId.get(r.id);
+    if (!cur) { byId.set(r.id, { rec: r, remote: true }); order.push(r.id); return; }
+    const lc = lamCanon(cur.rec), rc = lamCanon(r);
+    if (lc === rc) return;
+    const ls = lamStamp(cur.rec), rs = lamStamp(r);
+    if (rs > ls || (rs === ls && rc > lc)) byId.set(r.id, { rec: r, remote: true });   // equal stamps: larger content wins, so both devices converge
+  });
+  const records = [], revived = [];
+  order.forEach(id => {
+    const e = byId.get(id), t = Number(tomb[id]) || 0;
+    if (t) {
+      if (lamStamp(e.rec) <= t) return;      // deleted, and not edited since
+      revived.push(id);                      // edited after the delete → the record wins
+    }
+    records.push(e.remote ? adopt(e.rec) : e.rec);
+  });
+  return { records: records, revived: revived };
+}
+// Re-points record.taskId at this device's copy of the task named by record.taskSyncId.
+function lambdaRelinkToTasks() {
+  let n = 0;
+  LAMBDA_DATA_STORES.forEach(st => {
+    const arr = lamReadRaw(st.key); let dirty = false;
+    arr.forEach(r => {
+      if (!r || !r.taskSyncId) return;
+      const owner = lamFindTaskBySyncId(r.taskSyncId);
+      if (owner && String(r.taskId) !== String(owner.id)) { r.taskId = owner.id; dirty = true; n++; }
+    });
+    if (dirty) { try { localStorage.setItem(st.key, JSON.stringify(arr)); } catch (e) {} }
+  });
+  return n;
+}
+let lamSyncDiag = null;   // what the last sync sent / received for Lambda records (shown on the Sync tab)
+// Download half of Lambda sync. Returns true when this device's Lambda data changed.
+function applyRemoteLambdaRecords(remoteParsed) {
+  if (!remoteParsed || typeof remoteParsed !== 'object') return false;
+  const rr = (remoteParsed.lambdaRecords && typeof remoteParsed.lambdaRecords === 'object' && !Array.isArray(remoteParsed.lambdaRecords)) ? remoteParsed.lambdaRecords : null;
+  const rtomb = (remoteParsed.lambdaTombstones && typeof remoteParsed.lambdaTombstones === 'object' && !Array.isArray(remoteParsed.lambdaTombstones)) ? remoteParsed.lambdaTombstones : {};
+  let changed = false;
+  const rcnt = f => (rr && Array.isArray(rr[f])) ? rr[f].length : 0;
+  lamSyncDiag = Object.assign(lamSyncDiag || {}, { at: Date.now(), remoteHasField: !!rr, remoteFunctions: rcnt('functions'), remoteChanges: rcnt('changes'), error: null, adopted: false });
+  try {
+    if (rr || Object.keys(rtomb).length) {
+      lamEnsureIds();
+      const ltomb = lamReadTombs(), tomb = Object.assign({}, ltomb);
+      Object.keys(rtomb).forEach(id => { const t = Number(rtomb[id]); if (isFinite(t) && t > 0 && !(Number(tomb[id]) >= t)) tomb[id] = t; });
+      const revived = new Set(), results = [];
+      LAMBDA_DATA_STORES.forEach(st => {
+        const remote = (rr && Array.isArray(rr[st.field])) ? rr[st.field].filter(r => r && typeof r === 'object' && typeof r.id === 'string' && r.id) : [];
+        const local = lamReadRaw(st.key);
+        const m = lambdaMergeTable(local, remote, tomb, lamAdoptRemote);
+        m.revived.forEach(id => revived.add(id));
+        results.push({ st: st, local: local, m: m });
+      });
+      revived.forEach(id => { delete tomb[id]; });
+      results.forEach(x => {
+        if (!lamSameList(x.local, x.m.records)) { localStorage.setItem(x.st.key, JSON.stringify(x.m.records)); changed = true; }
+      });
+      if (stableStringify(tomb) !== stableStringify(ltomb)) lamWriteTombs(tomb);
+    }
+    if (lambdaRelinkToTasks() > 0) changed = true;
+  } catch (e) { console.warn('[LAMBDA-SYNC] merge failed', e); lamSyncDiag.error = (e && e.message) || String(e); return false; }
+  lamSyncDiag.adopted = changed;
+  return changed;
+}
+// ── Backup half ──
+function lambdaBackupSection() {
+  lamEnsureIds();
+  const out = {};
+  LAMBDA_DATA_STORES.forEach(st => {
+    out[st.field] = lamReadRaw(st.key).map(r => {
+      const c = JSON.parse(JSON.stringify(r));
+      if (c && typeof c === 'object' && !c.taskSyncId) { const sid = lamOwnerSyncId(r); if (sid) c.taskSyncId = sid; }
+      return c;
+    });
+  });
+  return out;
+}
+function lambdaSnapshotRaw() {
+  const o = {};
+  try { LAMBDA_DATA_STORES.forEach(st => { o[st.key] = localStorage.getItem(st.key); }); o[LAMBDA_TOMBSTONES_KEY] = localStorage.getItem(LAMBDA_TOMBSTONES_KEY); } catch (e) {}
+  return o;
+}
+function lambdaRestoreRaw(snap) {
+  try { Object.keys(snap || {}).forEach(k => { if (snap[k] === null) localStorage.removeItem(k); else localStorage.setItem(k, snap[k]); }); } catch (e) {}
+}
+// Full restore REPLACES the two tables with the file's. Nothing is tombstoned for what was replaced:
+// like tasks and logs, a restore merges with the cloud copy on the next sync instead of deleting from it.
+function lambdaRestoreFromBackup(b) {
+  LAMBDA_DATA_STORES.forEach(st => {
+    const src = Array.isArray(b.lambdaRecords[st.field]) ? b.lambdaRecords[st.field] : [];
+    const seen = new Set(), out = [];
+    src.forEach(r => {
+      if (!r || typeof r !== 'object') return;
+      if (r.id) { if (seen.has(r.id)) return; seen.add(r.id); }
+      out.push(JSON.parse(JSON.stringify(r)));
+    });
+    localStorage.setItem(st.key, JSON.stringify(out));
+  });
+  const tb = (b.lambdaTombstones && typeof b.lambdaTombstones === 'object' && !Array.isArray(b.lambdaTombstones)) ? b.lambdaTombstones : {};
+  lamWriteTombs(tb);
+  lamEnsureIds();
+  lambdaRelinkToTasks();
+}
+// ── End Lambda logging data: Synchronization + Backup ─────────────────────────────
 
 function applyRemoteMastersIfNewer(remoteParsed) {
   if (!remoteParsed || !remoteParsed.masters || typeof remoteParsed.masters !== 'object') return false;
@@ -4133,21 +4368,24 @@ function mergeNonTaskDomains(remoteParsed, opts) {
   const skip = !!(opts && opts.skipReconciled);
   if (!remoteParsed || typeof remoteParsed !== 'object') return { changed: [] };
   const changed = [];
+  const run = (name, fn) => { try { if (fn()) changed.push(name); } catch (e) { console.warn('[SYNC] ' + name + ' merge failed', e); } };
   try {
-    if (!skip && applyRemoteMastersIfNewer(remoteParsed)) changed.push('masters');
-    if (!skip && applyRemoteThemeIfNewer(remoteParsed)) changed.push('theme');
-    if (applyRemoteBreakDataIfNewer(remoteParsed)) changed.push('breakData');
-    if (!skip && applyRemoteUserNameIfNewer(remoteParsed)) changed.push('userName');
-    if (applyRemoteCountersIfHigher(remoteParsed)) changed.push('counters');
-    if (applyRemoteWeekendOverrides(remoteParsed)) changed.push('weekendOverrides');
+    run('masters', () => !skip && applyRemoteMastersIfNewer(remoteParsed));
+    run('theme', () => !skip && applyRemoteThemeIfNewer(remoteParsed));
+    run('breakData', () => applyRemoteBreakDataIfNewer(remoteParsed));
+    run('userName', () => !skip && applyRemoteUserNameIfNewer(remoteParsed));
+    run('counters', () => applyRemoteCountersIfHigher(remoteParsed));
+    run('weekendOverrides', () => applyRemoteWeekendOverrides(remoteParsed));
     // Phase 21: the two remaining upload-only riders now get their download/
     // merge half, via the exact same call/push-to-`changed` pattern as the
     // six domains above — no change to this function's own shape.
-    if (!skip && applyRemoteLogEntriesIfNewer(remoteParsed)) changed.push('logEntries');
-    if (!skip && applyRemoteRecurringPlansIfNewer(remoteParsed)) changed.push('recurringPlans');
-    if (!skip && applyRemoteTodoItems(remoteParsed)) changed.push('todoItems');
+    run('logEntries', () => !skip && applyRemoteLogEntriesIfNewer(remoteParsed));
+    run('recurringPlans', () => !skip && applyRemoteRecurringPlansIfNewer(remoteParsed));
+    run('todoItems', () => !skip && applyRemoteTodoItems(remoteParsed));
     // Dashboard settings are not part of SyncMerge's three-way document, so they are applied on both passes.
-    if (applyRemoteDashboardConfigIfNewer(remoteParsed)) changed.push('dashboardConfig');
+    run('dashboardConfig', () => applyRemoteDashboardConfigIfNewer(remoteParsed));
+    // Lambda function / change records: per-record union merge (see the Lambda data module above). Applied on both passes.
+    run('lambdaRecords', () => applyRemoteLambdaRecords(remoteParsed));
   } catch (e) {}
   if (changed.length > 0) {
     saveState();
@@ -4194,6 +4432,9 @@ function mergeNonTaskDomains(remoteParsed, opts) {
       // sites) — this is that same "only re-render what's actually
       // affected" convention, applied to a remote-originated change.
       if (typeof updateLogPanel === 'function') updateLogPanel();
+    }
+    if (changedSet.indexOf('lambdaRecords') !== -1) {
+      if (typeof lmRefreshIfOpen === 'function') lmRefreshIfOpen();   // the Lambda Functions tables, if open
     }
     // recurringPlans has no dedicated live panel comparable to the log panel
     // or masters tab (confirmed against existing render call sites) — no
@@ -8887,7 +9128,7 @@ const ConflictResolver = (function () {
 // Device-local: masters.flags.syncConflictPolicy and masters.flags.backgroundSyncEnabled
 // (see mastersForSync()). Never synced: auth tokens, device id, queues, UI state.
 const SYNC_POLICIES = ['ask', 'local', 'remote', 'newest'];
-const SYNC_DEVICE_LOCAL_FLAGS = ['syncConflictPolicy', 'backgroundSyncEnabled'];
+const SYNC_DEVICE_LOCAL_FLAGS = ['syncConflictPolicy', 'backgroundSyncEnabled', 'remoteMirrorPending'];
 
 function mastersForSync(m) {
   const c = JSON.parse(JSON.stringify(m || {}));
@@ -8901,6 +9142,15 @@ function getSyncConflictPolicy() {
 function setSyncConflictPolicy(p) {
   if (SYNC_POLICIES.indexOf(p) === -1) return;
   if (!masters.flags) masters.flags = {};
+  if (p === 'remote' && masters.flags.syncConflictPolicy !== 'remote') {
+    // Keep Remote also acts as a ONE-TIME "start this device from the cloud copy": the next Sync replaces
+    // everything local with Google Drive's copy. Ask first, because unsynced local work is discarded.
+    const ok = confirm('Keep Remote\n\nOn the NEXT Sync, everything on this device (tasks, effort logs, To Dos, masters, Lambda records, settings) will be REPLACED with the copy in Google Drive.\n\nLocal changes that have not been synced will be lost. Use this to set up a new device; after that Sync, switch back to "Ask Me".\n\nContinue?');
+    if (!ok) { if (typeof activeMastersTab !== 'undefined' && activeMastersTab === 'sync' && typeof renderMastersContent === 'function') renderMastersContent(); return; }
+    masters.flags.remoteMirrorPending = true;
+  } else if (p !== 'remote') {
+    masters.flags.remoteMirrorPending = false;
+  }
   masters.flags.syncConflictPolicy = p;
   saveState();
   if (typeof activeMastersTab !== 'undefined' && activeMastersTab === 'sync' && typeof renderMastersContent === 'function') renderMastersContent();
@@ -8917,7 +9167,118 @@ function buildLocalBusinessState() {
     weekendOverrides: collectWeekendOverrides(),
     dashboardConfig: collectDashboardConfig()
   };
+  // Lambda function / change records (+ delete tombstones). Left out entirely while there is nothing to carry.
+  const lam = lambdaSyncPayload();
+  if (lam) { business.lambdaRecords = lam.records; business.lambdaTombstones = lam.tombstones; }
+  lamSyncDiag = Object.assign(lamSyncDiag || {}, { sentAt: Date.now(), sentFunctions: lam ? lam.records.functions.length : 0, sentChanges: lam ? lam.records.changes.length : 0 });
   return (typeof SyncMerge !== 'undefined') ? SyncMerge.applyPendingOverrides(business) : business;
+}
+
+
+// ── Keep Remote → one-time "start this device from the cloud copy" ───────────────────
+// Replaces EVERY synced domain on this device with state.json from Google Drive (the same shape a full
+// backup restore replaces), preserving only device-local flags. Runs once per time the user selects
+// Keep Remote (masters.flags.remoteMirrorPending); afterwards sync merges normally again.
+function mirrorRemoteToLocal(remote) {
+  const prev = { tasks, logEntries, masters, taskIdCounter, importIdCounter, recurringPlans,
+    recurringPlanIdCounter, userName, todoItems, todoTombstones, todoIdCounter };
+  const lamSnap = lambdaSnapshotRaw();
+  const wkSnap = {};
+  try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.indexOf('ttl_weekend_') === 0) wkSnap[k] = localStorage.getItem(k); } } catch (e) {}
+  try {
+    if (!remote || typeof remote !== 'object') throw new Error('No remote data to copy.');
+    const seen = new Set();
+    tasks = (Array.isArray(remote.tasks) ? remote.tasks : []).filter(t => {
+      if (!t || typeof t !== 'object') return false;
+      if (t.id === undefined || t.id === null) return true;
+      if (seen.has(t.id)) return false; seen.add(t.id); return true;
+    });
+    tasks.forEach(ensureSyncMetadata);
+    logEntries = Array.isArray(remote.logEntries) ? remote.logEntries.filter(e => e && typeof e === 'object') : [];
+    if (remote.masters && typeof remote.masters === 'object') {
+      const flags = Object.assign({}, remote.masters.flags || {});
+      const lfl = (prev.masters && prev.masters.flags) || {};
+      SYNC_DEVICE_LOCAL_FLAGS.forEach(k => { if (lfl[k] !== undefined) flags[k] = lfl[k]; });
+      masters = Object.assign({}, remote.masters, { flags: flags });
+    }
+    if (!masters.flags) masters.flags = {};
+    masters.flags.remoteMirrorPending = false;
+    let maxId = 0; tasks.forEach(t => { if (typeof t.id === 'number' && t.id > maxId) maxId = t.id; });
+    taskIdCounter = Math.max(parseInt(remote.taskIdCounter) || 0, maxId, taskIdCounter || 0);
+    importIdCounter = Math.max(parseInt(remote.importIdCounter) || 0, importIdCounter || 0);
+    recurringPlans = (Array.isArray(remote.recurringPlans) ? remote.recurringPlans : []).filter(p => p && typeof p === 'object');
+    recurringPlans.forEach(p => { if (!p.syncUid) p.syncUid = generateSyncId(); });
+    recurringPlanIdCounter = Math.max(parseInt(remote.recurringPlanIdCounter) || 0, recurringPlanIdCounter || 0, recurringPlans.reduce((m, p) => Math.max(m, typeof p.id === 'number' ? p.id : 0), 0));
+    if (typeof remote.userName === 'string' && remote.userName) userName = remote.userName;
+    const seenU = new Set(); let maxTodoId = 0;
+    todoItems = (Array.isArray(remote.todoItems) ? remote.todoItems : []).filter(t => t && typeof t === 'object');
+    todoItems.forEach(t => {
+      if (!t.uid) t.uid = generateSyncId();
+      if (!t.updatedAt) t.updatedAt = t.createdAt || Date.now();
+      if (typeof t.id === 'number' && t.id > maxTodoId) maxTodoId = t.id;
+    });
+    todoItems = todoItems.filter(t => { if (seenU.has(t.uid)) return false; seenU.add(t.uid); return true; });
+    todoTombstones = (remote.todoTombstones && typeof remote.todoTombstones === 'object') ? remote.todoTombstones : {};
+    todoIdCounter = Math.max(parseInt(remote.todoIdCounter) || 0, maxTodoId, todoIdCounter || 0);
+    if (remote.weekendOverrides && typeof remote.weekendOverrides === 'object') {
+      Object.keys(wkSnap).forEach(k => { try { localStorage.removeItem(k); } catch (e) {} });
+      Object.keys(remote.weekendOverrides).forEach(d => { try { localStorage.setItem('ttl_weekend_' + d, remote.weekendOverrides[d]); } catch (e) {} });
+    }
+    // Lambda function / change records: REPLACE both tables (empty when the cloud copy has none).
+    const rl = (remote.lambdaRecords && typeof remote.lambdaRecords === 'object' && !Array.isArray(remote.lambdaRecords)) ? remote.lambdaRecords : { functions: [], changes: [] };
+    lambdaRestoreFromBackup({ lambdaRecords: rl, lambdaTombstones: remote.lambdaTombstones || {} });
+    if (remote.dashboardConfig && typeof remote.dashboardConfig === 'object') applyDashboardConfig(remote.dashboardConfig);
+    saveState();
+    try { loadState(); saveState(); } catch (e) {}
+    if (remote.breakData) { try { saveBreakData(remote.breakData); } catch (e) {} }
+    if (typeof remote.theme === 'string' && remote.theme) {
+      try { localStorage.setItem('ttl_theme', remote.theme); } catch (e) {}
+      try { applyTheme(remote.theme); } catch (e) {}
+    }
+    // Everything now equals the cloud copy: nothing is pending, nothing is in conflict.
+    tasks.forEach(t => { if (t && t._sync) { t._sync.dirty = false; t._sync.syncStatus = 'synced'; t._sync.lastSync = Date.now(); } });
+    ['upload', 'download', 'delete', 'retry', 'conflict'].forEach(q => { syncQueues[q] = []; });
+    saveQueues();
+    const dm = (remote._syncMeta && remote._syncMeta.domainMeta) || {};
+    Object.keys(dm).forEach(d => { try { adoptRemoteDomainMeta(d, dm[d]); } catch (e) {} });
+    getDirtyDomains().forEach(clearDomainDirty);
+    saveState();
+    return { ok: true, counts: { tasks: tasks.length, logEntries: logEntries.length, todoItems: todoItems.length,
+      lambdaFunctions: lamReadRaw('ttl_lambda_functions').length, lambdaChanges: lamReadRaw('ttl_lambda_functions_changes').length } };
+  } catch (err) {
+    ({ tasks, logEntries, masters, taskIdCounter, importIdCounter, recurringPlans,
+       recurringPlanIdCounter, userName, todoItems, todoTombstones, todoIdCounter } = prev);
+    try { lambdaRestoreRaw(lamSnap); } catch (e) {}
+    try {
+      for (let i = localStorage.length - 1; i >= 0; i--) { const k = localStorage.key(i); if (k && k.indexOf('ttl_weekend_') === 0) localStorage.removeItem(k); }
+      Object.keys(wkSnap).forEach(k => localStorage.setItem(k, wkSnap[k]));
+    } catch (e) {}
+    console.warn('[SYNC-MIRROR] failed', err);
+    return { ok: false, error: (err && err.message) || String(err) };
+  }
+}
+function refreshAfterMirror(counts) {
+  try { renderAll(); } catch (e) {}
+  try { renderHeaderAvatar(); applyWallpaper(); } catch (e) {}
+  try { if (typeof renderTodoList === 'function') renderTodoList(); } catch (e) {}
+  try { if (typeof updatePendingMenuCounts === 'function') updatePendingMenuCounts(); } catch (e) {}
+  try { if (typeof updatePendingTasksBadge === 'function') updatePendingTasksBadge(); } catch (e) {}
+  try { if (typeof lmRefreshIfOpen === 'function') lmRefreshIfOpen(); } catch (e) {}
+  try { if (typeof activeMastersTab !== 'undefined' && activeMastersTab === 'sync' && typeof renderMastersContent === 'function') renderMastersContent(); } catch (e) {}
+  if (counts) setTimeout(() => alert('This device now matches Google Drive: ' + counts.tasks + ' tasks, ' + counts.logEntries + ' log entries, ' + counts.todoItems + ' To Dos, ' + counts.lambdaFunctions + ' Lambda function and ' + counts.lambdaChanges + ' change records.\n\nSwitch Sync Merge Conflict Handling back to "Ask Me" before you start working.'), 50);
+}
+// One line on the Sync tab saying what Lambda data this device holds / sent / received on the last sync.
+function renderLambdaSyncDiag() {
+  try {
+    if (!isLambdaLoggingEnabled()) return '';
+    const d = lamSyncDiag || {};
+    const lf = lamReadRaw('ttl_lambda_functions').length, lc = lamReadRaw('ttl_lambda_functions_changes').length;
+    let line = 'Lambda records on this device: ' + lf + ' function / ' + lc + ' change.';
+    if (d.sentAt) line += ' Last upload carried ' + d.sentFunctions + ' / ' + d.sentChanges + '.';
+    if (d.at) line += ' Last download: ' + (d.remoteHasField ? ('Drive file had ' + d.remoteFunctions + ' / ' + d.remoteChanges) : 'Drive file had NO Lambda records') + (d.error ? ' — merge FAILED: ' + d.error : (d.adopted ? ' — applied here.' : ' — nothing new to apply.'));
+    else line += ' No sync has run since the app was opened.';
+    return '<div style="font-size:11px;color:' + (d.error ? 'var(--red-mid)' : 'var(--text-tertiary)') + ';margin:-6px 0 14px 2px">' + esc(line) + '</div>';
+  } catch (e) { return ''; }
 }
 
 const SyncMerge = (function () {
@@ -9466,7 +9827,7 @@ const SyncMerge = (function () {
     const lg = {}; (p.logEntries || []).forEach(r => { const k = logKey(r); if (k) lg[k] = h(KINDS.log.fields(r)); });
     const pl = {}; (p.recurringPlans || []).forEach(r => { if (r && r.syncUid) pl[r.syncUid] = h(KINDS.plan.fields(r)); });
     const doc = flatten(buildDoc(p));
-    return simpleHash(stableStringify({ t: t, td: td, tomb: Object.keys(p.todoTombstones || {}).sort(), lg: lg, pl: pl, doc: h(doc), br: h(p.breakData || {}), wk: h(p.weekendOverrides || {}), dc: h(p.dashboardConfig || {}) }));
+    return simpleHash(stableStringify({ t: t, td: td, tomb: Object.keys(p.todoTombstones || {}).sort(), lg: lg, pl: pl, doc: h(doc), br: h(p.breakData || {}), wk: h(p.weekendOverrides || {}), dc: h(p.dashboardConfig || {}), lm: h(lambdaDigestShape(p)) }));
   }
 
   function reconcile(remote) {
@@ -9693,7 +10054,7 @@ const SYNC_KIND_LABELS = { task: 'Task', todo: 'To-Do', log: 'Effort log', plan:
 const SYNC_POLICY_LABELS = {
   ask: ['Ask Me', 'Show each conflict and let me choose Keep Local, Keep Remote or Merge.'],
   local: ['Keep Local', 'This device wins. The discarded remote values are recorded in Conflict History.'],
-  remote: ['Keep Remote', 'The other device wins. The discarded local values are recorded in Conflict History.'],
+  remote: ['Keep Remote', 'The other device wins on conflicts. Selecting it ALSO replaces everything on this device with the Google Drive copy on the next Sync (one time) — use it to start a new device, then switch back to Ask Me.'],
   newest: ['Newest Change Wins', 'The most recently modified side wins when both timestamps are trustworthy; otherwise TTL asks you.']
 };
 function renderSyncPolicyCard() {
@@ -9704,9 +10065,10 @@ function renderSyncPolicyCard() {
   return `<div style="border:1px solid var(--border-md);border-radius:var(--radius-md);padding:14px;margin-bottom:14px">
     <div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:4px"><i class="ti ti-git-merge" style="vertical-align:-2px;margin-right:5px;color:var(--blue-mid)"></i>Sync Merge Conflict Handling</div>
     <div style="font-size:11px;color:var(--text-tertiary)">Applies only when the same record or setting was changed differently on two devices. Changes to different records or different fields are merged automatically. This choice is kept per device.</div>
-    ${rows}</div>`;
+    ${rows}${(masters.flags && masters.flags.remoteMirrorPending === true) ? '<div style="margin-top:10px;font-size:12px;color:var(--amber-dark,var(--amber-mid))"><i class="ti ti-alert-triangle" style="vertical-align:-2px"></i> Next Sync will replace this device\'s data with the Google Drive copy.</div>' : ''}</div>`;
 }
-function renderSyncConflictSummaryCard() {
+function renderSyncConflictSummaryCard() { return renderSyncConflictSummaryCardBase() + renderLambdaSyncDiag(); }
+function renderSyncConflictSummaryCardBase() {
   const n = SyncMerge.pendingCount();
   return `<div style="border:1px solid ${n ? 'var(--amber-mid)' : 'var(--border-md)'};border-radius:var(--radius-md);padding:14px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
     <div style="font-size:13px;color:var(--text-primary)"><b>Sync conflicts</b><div style="font-size:11px;color:var(--text-tertiary);margin-top:2px">${n ? n + ' waiting for your decision — sync is not fully resolved.' : 'No conflicts are waiting.'}</div></div>
@@ -10115,6 +10477,17 @@ const BackgroundScheduler = (function () {
     };
     if (changedAccount()) { _running = false; _status = 'idle'; _lastResult = { ok: false, reason: 'account-changed', trigger }; return _lastResult; }
     const remote = planResult.remoteState;
+    if (getSyncConflictPolicy() === 'remote' && masters && masters.flags && masters.flags.remoteMirrorPending === true) {
+      const mr = mirrorRemoteToLocal(remote);
+      if (!mr.ok) return fail({ reason: 'mirror-failed', error: mr.error });
+      SyncMerge.commitBase();
+      refreshAfterMirror(mr.counts);
+      _running = false; _lastSyncAt = new Date().toISOString(); _status = 'completed';
+      _lastResult = { ok: true, trigger: trigger, plan: planResult, uploaded: null, noop: true, merged: { ok: true, results: [] },
+        domainsMerged: ['mirror'], conflicts: 0, autoResolved: 0, mergeSummary: {}, mirrored: mr.counts };
+      finalizeRetryState(_lastResult);
+      return _lastResult;
+    }
     const rec = SyncMerge.reconcile(remote);
     if (!rec.ok) return fail({ reason: rec.reason, error: rec.error });
     const dom = mergeNonTaskDomains(remote, { skipReconciled: true });
@@ -10188,6 +10561,7 @@ const BackgroundScheduler = (function () {
         // still reported exactly as before — CASE C/D (a corrupt or
         // conflicting existing state.json) are never treated as "missing."
         if (planResult && planResult.reason === 'no-remote-file' && typeof GoogleDriveWorkspace !== 'undefined') {
+          if (masters && masters.flags && masters.flags.remoteMirrorPending) { masters.flags.remoteMirrorPending = false; try { saveState(); } catch (e) {} }   // nothing in the cloud to copy: this first Sync uploads instead
           return bootstrapFirstSyncState(trigger, syncAccountIdentity);
         }
         // Planning itself failed — every reason (not-authenticated /
@@ -16532,11 +16906,11 @@ function renderMastersContent() {
         <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px">
           <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;font-size:12px;color:var(--text-secondary)">
             <input type="radio" name="backup-scope" value="full" checked style="margin-top:2px" onchange="toggleBackupProfileOpt()">
-            <span><strong style="color:var(--text-primary)">Configuration and data</strong><br>Tasks, effort logs, To Do items, recurring plans, break and weekend records, plus all settings below.</span>
+            <span><strong style="color:var(--text-primary)">Configuration and data</strong><br>Tasks, effort logs, To Do items, recurring plans, Lambda function and change records, break and weekend records, plus all settings below.</span>
           </label>
           <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;font-size:12px;color:var(--text-secondary)">
             <input type="radio" name="backup-scope" value="config" style="margin-top:2px" onchange="toggleBackupProfileOpt()">
-            <span><strong style="color:var(--text-primary)">Configuration only</strong><br>Masters (lists), columns, work hours, weekends, email template, theme and layout settings. No tasks or logs.</span>
+            <span><strong style="color:var(--text-primary)">Configuration only</strong><br>Masters (lists), columns, Lambda logging masters, work hours, weekends, email template, theme and layout settings. No tasks, logs or Lambda records.</span>
           </label>
           <label id="backup-profile-opt" style="display:none;gap:8px;align-items:flex-start;cursor:pointer;font-size:12px;color:var(--text-secondary);margin-left:24px;padding:8px 10px;border:1px dashed var(--border-md);border-radius:var(--radius-md)">
             <input type="checkbox" id="backup-include-profile" checked style="margin-top:2px">
@@ -20650,6 +21024,10 @@ async function confirmReviewSelection() {
 //                userName, breakData, theme, log-table prefs, weekendOverrides, To Do.
 //   dashboardConfig (added within v3, optional) — the Dashboard page's layout / UI / saved
 //                filters. Absent in older files; a restore then leaves the Dashboard untouched.
+//   lambdaRecords / lambdaTombstones (added within v3, optional, FULL backups only) — the rows of the
+//                two Lambda tables ({functions, changes}) and their delete tombstones. Absent in older
+//                files; a restore then leaves the Lambda tables untouched. The Lambda logging MASTERS
+//                (column masters + flags) need no field of their own: they are part of `masters`.
 //   _version 3 — the SAME flat fields (so the file stays readable by older builds and
 //                still mirrors buildStatePayload()), plus:
 //                  application / backupVersion / exportedAt  — self-describing header
@@ -20740,6 +21118,8 @@ function buildBackupObject(scope, opts) {
 
   let syncSummary = {};
   try { syncSummary = { domainMeta: buildDomainMeta() }; } catch (e) { syncSummary = {}; }
+  // Lambda function / change records are DATA: full backups only (a config backup carries the Lambda masters via `masters`).
+  const lamBackup = scope === 'full' ? lambdaBackupSection() : null;
 
   const backup = scope === 'config' ? {
     _version: TTL_BACKUP_VERSION,
@@ -20784,13 +21164,18 @@ function buildBackupObject(scope, opts) {
     todoItems,
     todoTombstones,
     todoIdCounter,
+    // Lambda logging tables (Dashboard ▾ → Lambda Functions) + their delete tombstones.
+    lambdaRecords: lamBackup,
+    lambdaTombstones: lamReadTombs(),
     settings: collectBackupSettings(),
     sync: syncSummary,
     contents: {
       tasks: tasks.length,
       logEntries: logEntries.length,
       todoItems: todoItems.length,
-      recurringPlans: recurringPlans.length
+      recurringPlans: recurringPlans.length,
+      lambdaFunctions: lamBackup.functions.length,
+      lambdaChanges: lamBackup.changes.length
     }
   };
   return backup;
@@ -20835,6 +21220,14 @@ function validateBackup(b) {
   if (b.todoItems !== undefined && b.todoItems !== null && !Array.isArray(b.todoItems)) throw new Error('Backup is corrupted: To Do items are malformed.');
   if (b.todoTombstones !== undefined && b.todoTombstones !== null && !isObj(b.todoTombstones)) throw new Error('Backup is corrupted: To Do tombstones are malformed.');
   if (b.breakData !== undefined && b.breakData !== null && !isObj(b.breakData)) throw new Error('Backup is corrupted: break data is malformed.');
+  if (b.lambdaRecords !== undefined && b.lambdaRecords !== null) {
+    if (!isObj(b.lambdaRecords)) throw new Error('Backup is corrupted: Lambda records are malformed.');
+    ['functions', 'changes'].forEach(f => {
+      const v = b.lambdaRecords[f];
+      if (v !== undefined && (!Array.isArray(v) || !v.every(isObj))) throw new Error('Backup is corrupted: Lambda ' + f + ' records are malformed.');
+    });
+  }
+  if (b.lambdaTombstones !== undefined && b.lambdaTombstones !== null && !isObj(b.lambdaTombstones)) throw new Error('Backup is corrupted: Lambda tombstones are malformed.');
   if (b.weekendOverrides !== undefined && b.weekendOverrides !== null && !isObj(b.weekendOverrides)) throw new Error('Backup is corrupted: weekend overrides are malformed.');
   if (b.settings !== undefined && b.settings !== null && !isObj(b.settings)) throw new Error('Backup is corrupted: settings section is malformed.');
   if (b.dashboardConfig !== undefined && b.dashboardConfig !== null) {
@@ -20851,6 +21244,10 @@ function validateBackup(b) {
     if (typeof b.contents.tasks === 'number' && b.contents.tasks !== b.tasks.length) throw new Error('Backup is incomplete: task count does not match.');
     if (typeof b.contents.logEntries === 'number' && b.contents.logEntries !== b.logEntries.length) throw new Error('Backup is incomplete: log entry count does not match.');
     if (typeof b.contents.todoItems === 'number' && Array.isArray(b.todoItems) && b.contents.todoItems !== b.todoItems.length) throw new Error('Backup is incomplete: To Do count does not match.');
+    if (isObj(b.lambdaRecords)) {
+      if (typeof b.contents.lambdaFunctions === 'number' && Array.isArray(b.lambdaRecords.functions) && b.contents.lambdaFunctions !== b.lambdaRecords.functions.length) throw new Error('Backup is incomplete: Lambda function count does not match.');
+      if (typeof b.contents.lambdaChanges === 'number' && Array.isArray(b.lambdaRecords.changes) && b.contents.lambdaChanges !== b.lambdaRecords.changes.length) throw new Error('Backup is incomplete: Lambda change count does not match.');
+    }
   }
 }
 
@@ -20876,6 +21273,7 @@ function importBackup(event, scope) {
     const prev = { tasks, logEntries, masters, taskIdCounter, importIdCounter, recurringPlans,
       recurringPlanIdCounter, userName, logTableColWidths, logTableColPinned, logActionsCollapsed,
       todoItems, todoTombstones, todoIdCounter };
+    const lamSnap = lambdaSnapshotRaw();   // the Lambda tables live in localStorage, not in `prev`
     try {
       const b = JSON.parse(e.target.result);
       validateBackup(b);   // throws before ANY state is modified
@@ -20973,6 +21371,10 @@ function importBackup(event, scope) {
           try { localStorage.setItem('ttl_weekend_' + dateStr, b.weekendOverrides[dateStr]); } catch (err) {}
         });
       }
+      // Lambda logging tables. A backup from before they were included has no lambdaRecords — leave the
+      // current Lambda tables alone rather than wiping them (same rule as To Do items above).
+      let lambdaRestored = false;
+      if (b.lambdaRecords && typeof b.lambdaRecords === 'object') { lambdaRestoreFromBackup(b); lambdaRestored = true; }
       // Persist; saveState() also records masters/counters/userName changes for sync
       // (it diffs against the baseline that is still the pre-restore state at this point).
       saveState();
@@ -20988,6 +21390,7 @@ function importBackup(event, scope) {
       restoreDashboardFromBackup(b);
       try { recordSyncChange('logEntries', null, 'update'); } catch (err) {}
       try { recordSyncChange('recurringPlans', null, 'update'); } catch (err) {}
+      if (lambdaRestored) { try { recordSyncChange('lambdaRecords', null, 'update'); } catch (err) {} }
       if (todoRestored) { try { recordSyncChange('todoItems', null, 'update'); } catch (err) {} }
       // Re-render everything
       renderAll();
@@ -20997,13 +21400,14 @@ function importBackup(event, scope) {
         try { if (typeof updatePendingMenuCounts === 'function') updatePendingMenuCounts(); } catch (err) {}
         try { if (typeof updatePendingTasksBadge === 'function') updatePendingTasksBadge(); } catch (err) {}
       }
-      if (status) { status.style.color = 'var(--green-dark)'; status.textContent = `✓ Restored ${tasks.length} tasks, ${logEntries.length} log entries` + (todoRestored ? ` and ${todoItems.length} To Do items.` : '.'); }
+      if (status) { status.style.color = 'var(--green-dark)'; status.textContent = `✓ Restored ${tasks.length} tasks, ${logEntries.length} log entries` + (todoRestored ? ` and ${todoItems.length} To Do items.` : '.') + (lambdaRestored ? ` Lambda: ${readLambdaStore('lambdaFunctionColumns').length} function and ${readLambdaStore('lambdaChangeColumns').length} change records.` : ''); }
       setTimeout(() => switchTab('data'), 300);
     } catch(err) {
       // Roll the in-memory state back; nothing was persisted unless saveState() ran.
       ({ tasks, logEntries, masters, taskIdCounter, importIdCounter, recurringPlans,
          recurringPlanIdCounter, userName, logTableColWidths, logTableColPinned, logActionsCollapsed,
          todoItems, todoTombstones, todoIdCounter } = prev);
+      lambdaRestoreRaw(lamSnap);
       if (status) { status.style.color = 'var(--red-mid)'; status.textContent = '✗ ' + err.message; }
     }
   };
@@ -21548,8 +21952,31 @@ function readLambdaStore(storeKey) {
     return Array.isArray(arr) ? arr : [];
   } catch (e) { return []; }
 }
-function writeLambdaStore(storeKey, arr) {
-  localStorage.setItem(CSV_SCHEMAS[storeKey].storageKey, JSON.stringify(arr));
+// Every local write of a Lambda table goes through here, so this is where sync learns about it:
+//   • a record that disappeared gets a tombstone (so the delete reaches other devices),
+//   • a record whose content changed without a newer updatedAt gets one (so newer-wins can order it),
+//   • taskSyncId is stamped on linked records (the stable link across devices),
+//   • the 'lambdaRecords' sync domain is marked changed.
+// opts.silent = a remote-originated or repair write: none of the above (it is not a local edit).
+function writeLambdaStore(storeKey, arr, opts) {
+  const key = CSV_SCHEMAS[storeKey].storageKey;
+  const silent = !!(opts && opts.silent);
+  if (silent) { localStorage.setItem(key, JSON.stringify(arr)); return; }
+  const before = readLambdaStore(storeKey), now = Date.now();
+  const old = new Map(); before.forEach(r => { if (r && r.id) old.set(r.id, r); });
+  arr.forEach(r => {
+    if (!r || typeof r !== 'object') return;
+    const o = r.id ? old.get(r.id) : null;
+    if (o && lamCanon(o) !== lamCanon(r) && lamStamp(r) <= lamStamp(o)) r.updatedAt = now;
+    if (!r.taskSyncId) { const sid = lamOwnerSyncId(r); if (sid) r.taskSyncId = sid; }
+  });
+  const newIds = new Set(); arr.forEach(r => { if (r && r.id) newIds.add(r.id); });
+  const tombs = lamReadTombs(); let tchanged = false;
+  before.forEach(r => { if (r && r.id && !newIds.has(r.id)) { tombs[r.id] = now; tchanged = true; } });
+  newIds.forEach(id => { if (tombs[id] !== undefined) { delete tombs[id]; tchanged = true; } });
+  localStorage.setItem(key, JSON.stringify(arr));   // may throw (storage full): nothing else is touched then
+  if (tchanged) { try { lamWriteTombs(tombs); } catch (e) {} }
+  if (tchanged || JSON.stringify(before) !== JSON.stringify(arr)) { try { recordSyncChange('lambdaRecords', null, 'update'); } catch (e) {} }
 }
 function refreshCsvSchemaRow() {
   const row = document.getElementById('csv-schema-row');
@@ -24362,7 +24789,8 @@ function clearTodoPlanDate() {
 // Only this device's browser storage is touched — the Google Drive copy is never deleted.
 const RESET_DATA_KEYS = ['ttl_tasks','ttl_log','ttl_todo_items','ttl_todo_counter','ttl_todo_tombstones',
   'ttl_counter','ttl_import_counter','ttl_recurring_plans','ttl_recurring_counter','ttl_break',
-  'ttl_sync_queues','ttl_sync_domain_state','ttl_sync_base','ttl_sync_state_meta','ttl_conflict_history'];
+  'ttl_sync_queues','ttl_sync_domain_state','ttl_sync_base','ttl_sync_state_meta','ttl_conflict_history',
+  'ttl_lambda_functions','ttl_lambda_functions_changes','ttl_lambda_tombstones'];
 const RESET_PHRASE = 'reset ttl';
 function openResetModal() {
   const inp = document.getElementById('reset-confirm-input');
