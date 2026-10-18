@@ -453,6 +453,39 @@ html.is-touch .pending-card-actions { opacity: 1; }
 .pending-menu-item:hover { background: var(--bg-secondary); border-color: var(--text-tertiary); }
 .pending-menu-item i { margin-right: 5px; font-size: 15px; color: var(--text-tertiary); }
 .pending-menu-item .pending-tasks-badge { min-width: 15px; height: 15px; font-size: 9.5px; }
+
+/* Dashboard ▾ menu (Dashboard / Lambda Functions) — reuses the Pending menu look */
+.dash-menu-chevron { display: none; font-size: 11px; }
+.btn-highlight.has-menu .dash-menu-chevron { display: inline-block; }
+
+/* Lambda Functions full-page overlay (Dashboard ▾ → Lambda Functions) */
+.lm-overlay { position: fixed; inset: 0; z-index: 95; background: var(--bg); display: flex; flex-direction: column; }
+.lm-overlay.hidden { display: none; }
+.lm-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 12px 16px; padding-top: max(12px, env(safe-area-inset-top, 0px));
+  border-bottom: 1px solid var(--border); background: var(--bg-secondary);
+}
+.lm-title { font-family: var(--font-head); font-size: 15px; font-weight: 600; color: var(--text-primary); display: flex; align-items: center; gap: 8px; }
+.lm-tabs { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 16px 0; }
+.lm-toolbar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; padding: 10px 16px; }
+.lm-field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.lm-field-grow { flex: 1 1 200px; }
+.lm-field > label { font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-tertiary); }
+.lm-field .lm-req { color: var(--red-mid); }
+.lm-input {
+  padding: 6px 8px; font-size: 13px; min-height: 32px; font-family: inherit;
+  border: 1px solid var(--border-md); border-radius: var(--radius-md); background: var(--bg); color: var(--text-primary);
+}
+.lm-input:disabled { opacity: 0.55; cursor: not-allowed; }
+.lm-input.invalid { border-color: var(--red-mid); }
+.lm-hint { flex-basis: 100%; font-size: 12px; color: var(--text-tertiary); }
+.lm-hint button { background: none; border: none; padding: 0; font: inherit; color: var(--blue-mid); cursor: pointer; text-decoration: underline; }
+.lm-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; padding: 6px 16px 8px; }
+.lm-body { flex: 1; min-height: 0; display: flex; flex-direction: column; border-top: 1px solid var(--border); }
+.lm-table-wrap { flex: 1; min-height: 0; overflow: auto; }
+.lm-empty { padding: 24px 16px; text-align: center; font-size: 13px; color: var(--text-tertiary); }
+.lm-empty button { margin-top: 10px; }
 .todo-card-planned-chip { background: color-mix(in srgb, var(--blue-mid) 18%, transparent); color: var(--blue-mid); font-weight: 600; }
 
 .task-drag-handle {
@@ -1519,6 +1552,7 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
      each button's width is set by its grid track (not its content),
      hiding a label never narrows the button. */
   .header-row-1 .btn-highlight span,
+  .header-row-1 .btn-highlight .dash-menu-chevron,
   .header-row-1 .btn-primary span,
   .header-row-2 .header-masters-btn span,
   .header-row-2 .pending-tasks-btn > span:not(.pending-tasks-badge),
@@ -1745,10 +1779,10 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
            More, Date, Masters, Add task) unchanged. Only the ≤640px query
            turns each wrapper into its own CSS Grid row. -->
       <div class="header-row header-row-1">
-        <a class="btn btn-highlight" href="index.html" aria-label="Dashboard" title="Dashboard" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px;">
+        <button type="button" class="btn btn-highlight" id="dashboard-btn" onclick="onDashboardBtnClick(event)" aria-label="Dashboard" title="Dashboard" style="display:inline-flex;align-items:center;gap:6px;">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
-          <span>Dashboard</span>
-        </a>
+          <span>Dashboard</span><i class="ti ti-chevron-down dash-menu-chevron"></i>
+        </button>
         <div class="date-picker-wrap" onclick="try{document.getElementById('log-date-input').showPicker()}catch(e){document.getElementById('log-date-input').click()}">
           <i class="ti ti-calendar"></i>
           <input type="date" id="log-date-input" class="date-picker-input" onchange="onDateChange()" />
@@ -2072,6 +2106,27 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
       <button class="btn btn-primary" id="mr-confirm-btn" onclick="confirmMakeRecurring()"><i class="ti ti-check"></i> Make Recurring</button>
     </div>
   </div>
+</div>
+
+<!-- Dashboard ▾ menu (items are built by JS from DASHBOARD_MENU_ITEMS) -->
+<div class="pending-menu-dropdown hidden" id="dashboard-menu-dropdown" role="menu"></div>
+
+<!-- Lambda Functions full-page overlay (Dashboard ▾ → Lambda Functions; only reachable while the Lambda logging flag is on) -->
+<div class="lm-overlay hidden" id="lambda-overlay" role="dialog" aria-modal="true" aria-label="Lambda Functions">
+  <div class="lm-head">
+    <div class="lm-title"><i class="ti ti-function" style="font-size:18px;color:var(--blue-mid)"></i>Lambda Functions</div>
+    <button type="button" class="btn-icon" onclick="closeLambdaOverlay()" title="Close (Esc)" aria-label="Close Lambda Functions"><i class="ti ti-x"></i></button>
+  </div>
+  <div class="lm-tabs" id="lm-tabs"></div>
+  <div class="lm-toolbar" id="lm-toolbar"></div>
+  <div class="lm-bar">
+    <div class="log-count" id="lm-count"></div>
+    <div class="log-header-actions">
+      <button class="btn" onclick="lmCopy(this)"><i class="ti ti-clipboard-copy"></i> Copy</button>
+      <button class="btn btn-primary" onclick="lmDownloadXlsx()"><i class="ti ti-file-spreadsheet"></i> Download XLSX</button>
+    </div>
+  </div>
+  <div class="lm-body" id="lm-body"></div>
 </div>
 
 <!-- Pending Tasks modal -->
@@ -15203,6 +15258,7 @@ function closeMasters() {
   if (activeMastersTab.startsWith('customlist:')) activeMastersTab = 'columns';
   if (_masterNavReturnFocusEl && typeof _masterNavReturnFocusEl.focus === 'function') _masterNavReturnFocusEl.focus();
   _masterNavReturnFocusEl = null;
+  if (typeof lmRefreshIfOpen === 'function') lmRefreshIfOpen();
 }
 // Phase 24: master navigation drawer (phone only — desktop/tablet keep the
 // nav permanently visible via CSS, these are no-ops there since #master-body
@@ -17420,6 +17476,7 @@ function applyHeaderButtonVisibility() {
     const dd = document.getElementById('pending-menu-dropdown');
     if (dd) dd.classList.add('hidden');
   }
+  if (typeof applyDashboardMenuState === 'function') applyDashboardMenuState();
 }
 
 // ---- Masters > Pending & Search --------------------------------------------------------
@@ -18496,6 +18553,10 @@ function renderLambdaColumnsTabHTML(storeKey) {
           <input type="checkbox" ${c.required===true?'checked':''} onchange="lcToggleRequired(${k},'${c.key}')" />
           Mandatory
         </label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-secondary);cursor:pointer" title="Offer this column in the Search by list on the Lambda Functions screen">
+          <input type="checkbox" ${c.searchable===true?'checked':''} onchange="lcToggleSearchable(${k},'${c.key}')" />
+          Searchable
+        </label>
         <button class="btn-icon btn-delete" onclick="lcConfirmDelete(${k},'${c.key}')" title="Delete column"><i class="ti ti-trash"></i></button>
       </div>
     </div>`;
@@ -18504,8 +18565,8 @@ function renderLambdaColumnsTabHTML(storeKey) {
   return `
     <div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">
       Lambda logging master: <strong>${meta.title}</strong>. Configure its columns the same way as the
-      Columns master — drag rows to reorder, rename the label, choose the input type, and mark a field mandatory.
-      This master is separate from the Task Logger Columns and is used for later Lambda logging changes.
+      Columns master — drag rows to reorder, rename the label, choose the input type, mark a field mandatory, and tick Searchable to offer it in the
+      Search by list of the Lambda Functions screen. This master is separate from the Task Logger Columns and is used for later Lambda logging changes.
     </div>
     ${renderColumnConfigIOHTML(storeKey)}
     ${cols.length === 0 ? '<div style="color:var(--text-tertiary);font-size:13px;padding:8px 0">No columns yet. Add the first one below.</div>' : ''}
@@ -18590,6 +18651,13 @@ function lcToggleRequired(storeKey, key) {
   col.required = !col.required;
   saveState();
 }
+function lcToggleSearchable(storeKey, key) {
+  const col = getLambdaColumnByKey(storeKey, key);
+  if (!col) return;
+  col.searchable = !col.searchable;
+  saveState();
+  if (typeof lmRefreshIfOpen === 'function') lmRefreshIfOpen();
+}
 function lcConfirmDelete(storeKey, key) {
   const col = getLambdaColumnByKey(storeKey, key);
   if (!col) return;
@@ -18624,7 +18692,7 @@ function lcAddColumn(storeKey) {
   let key = baseKey, n = 1;
   const existing = getLambdaColumns(storeKey).map(c => c.key);
   while (existing.includes(key)) { key = baseKey + '_' + (++n); }
-  const col = { key, label, type, required: false };
+  const col = { key, label, type, required: false, searchable: false };
   if (type === 'date') col.dateFormat = 'DD-MM-YYYY';
   if (type === 'textarea') col.rows = DEFAULT_TEXTAREA_ROWS;
   if (type === 'list' || type === 'multilist') {
@@ -18669,6 +18737,393 @@ function lcDragEnd(e) {
   e.currentTarget.classList.remove('dragging');
   document.querySelectorAll('#lambda-columns-list-container .master-item.drag-over').forEach(el => el.classList.remove('drag-over'));
   lcDragSrcIdx = null;
+}
+
+// ── Dashboard ▾ menu + Lambda Functions overlay ─────────────────────────────
+// The header Dashboard button is a multi-choice button like Pending. Dashboard is always the
+// first (default) item; other items only exist while their condition holds. With a single
+// visible item the button behaves exactly like the old plain Dashboard link.
+const DASHBOARD_MENU_ITEMS = [
+  { id: 'dashboard',       label: 'Dashboard',        icon: 'ti-layout-dashboard', visible: () => true,                     run: () => { window.location.href = 'index.html'; } },
+  { id: 'lambdaFunctions', label: 'Lambda Functions', icon: 'ti-function',         visible: () => isLambdaLoggingEnabled(), run: () => openLambdaOverlay() }
+];
+function getDashboardMenuItems() {
+  return DASHBOARD_MENU_ITEMS.filter(i => { try { return i.visible(); } catch (e) { return false; } });
+}
+function onDashboardBtnClick(evt) {
+  if (evt) evt.stopPropagation();
+  const items = getDashboardMenuItems();
+  if (items.length <= 1) { DASHBOARD_MENU_ITEMS[0].run(); return; }
+  const dd = document.getElementById('dashboard-menu-dropdown');
+  const btn = document.getElementById('dashboard-btn');
+  if (!dd || !btn) return;
+  if (!dd.classList.contains('hidden')) { dd.classList.add('hidden'); return; }
+  dd.innerHTML = items.map(i =>
+    `<button type="button" class="pending-menu-item" role="menuitem" onclick="dashboardMenuRun('${i.id}')"><span><i class="ti ${i.icon}"></i>${escHtml(i.label)}</span></button>`
+  ).join('');
+  const r = btn.getBoundingClientRect();
+  dd.style.top = (r.bottom + 6) + 'px';
+  let left = r.left;
+  if (left + 190 > window.innerWidth - 8) left = window.innerWidth - 190 - 8;
+  if (left < 8) left = 8;
+  dd.style.left = left + 'px';
+  dd.classList.remove('hidden');
+}
+function closeDashboardMenu() {
+  const dd = document.getElementById('dashboard-menu-dropdown');
+  if (dd) dd.classList.add('hidden');
+}
+function dashboardMenuRun(id) {
+  closeDashboardMenu();
+  const item = DASHBOARD_MENU_ITEMS.find(i => i.id === id);
+  if (item) item.run();
+}
+document.addEventListener('click', (evt) => {
+  const dd = document.getElementById('dashboard-menu-dropdown');
+  const btn = document.getElementById('dashboard-btn');
+  if (!dd || dd.classList.contains('hidden')) return;
+  if (!dd.contains(evt.target) && (!btn || !btn.contains(evt.target))) closeDashboardMenu();
+});
+window.addEventListener('resize', closeDashboardMenu);
+// Called from applyHeaderButtonVisibility() (itself called from saveState()), so toggling the
+// Lambda logging flag, restoring a backup or a remote sync merge all keep the button in step.
+function applyDashboardMenuState() {
+  const btn = document.getElementById('dashboard-btn');
+  const multi = getDashboardMenuItems().length > 1;
+  if (btn) {
+    btn.classList.toggle('has-menu', multi);
+    if (multi) { btn.setAttribute('aria-haspopup', 'menu'); btn.title = 'Dashboard menu'; }
+    else { btn.removeAttribute('aria-haspopup'); btn.title = 'Dashboard'; }
+  }
+  if (!multi) closeDashboardMenu();
+  if (!isLambdaLoggingEnabled() && typeof lmIsOpen === 'function' && lmIsOpen()) closeLambdaOverlay();
+}
+
+// ── Lambda Functions overlay ────────────────────────────────────────────────
+// Full-page layer over TTL. One tab per Lambda column master (Function Columns, Change Columns).
+// Each tab shows the master's columns as the table schema and the records imported into that
+// master (localStorage via readLambdaStore). Adding records is deliberately not here yet.
+const LM_TABS = ['lambdaFunctionColumns', 'lambdaChangeColumns'];
+const LM_TAB_ICONS = { lambdaFunctionColumns: 'ti-function', lambdaChangeColumns: 'ti-git-pull-request' };
+let lmActiveTab = LM_TABS[0];
+const lmTabState = {};   // per tab: { by, q, from, to, fromTouched, toTouched, sortCol, sortDir }
+const lmWidths = {};     // per tab: column widths (persisted)
+const lmPinned = {};     // per tab: pinned columns (persisted)
+
+function lmGetState(k) {
+  if (!lmTabState[k]) lmTabState[k] = { by: '', q: '', from: '', to: '', fromTouched: false, toTouched: false, sortCol: null, sortDir: 'asc' };
+  return lmTabState[k];
+}
+function lmLoadPrefs(k) {
+  if (!lmWidths[k]) { lmWidths[k] = ltLoadObj('ttl_lmColWidths_' + k, {}); lmPinned[k] = ltLoadObj('ttl_lmPinned_' + k, {}); }
+}
+function lmIsOpen() {
+  const el = document.getElementById('lambda-overlay');
+  return !!(el && !el.classList.contains('hidden'));
+}
+function openLambdaOverlay(tab) {
+  if (!isLambdaLoggingEnabled()) return;
+  if (tab && LAMBDA_COLUMN_STORES[tab]) lmActiveTab = tab;
+  LM_TABS.forEach(k => { const s = lmGetState(k); s.fromTouched = false; s.toTouched = false; });
+  document.getElementById('lambda-overlay').classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+  lmRenderAll();
+}
+function closeLambdaOverlay() {
+  const el = document.getElementById('lambda-overlay');
+  if (el) el.classList.add('hidden');
+  document.body.style.overflow = '';
+}
+function lmRefreshIfOpen() { if (lmIsOpen()) lmRenderAll(); }
+function lmSwitchTab(k) {
+  if (!LAMBDA_COLUMN_STORES[k]) return;
+  lmActiveTab = k;
+  const s = lmGetState(k); s.fromTouched = false; s.toTouched = false;   // date range re-defaults on every tab visit
+  lmRenderAll();
+}
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && lmIsOpen() && !document.querySelector('.modal-overlay:not(.hidden)')) closeLambdaOverlay();
+});
+
+// A record's date = its first parsable Date-type column value, else the day it was imported.
+function lmParseDate(val, col) {
+  const v = String(val == null ? '' : val).trim();
+  if (!v || typeof moment === 'undefined') return '';
+  let m = moment(v, col && col.dateFormat ? col.dateFormat : 'YYYY-MM-DD', true);
+  if (!m.isValid()) m = moment(v, ['YYYY-MM-DD', 'DD-MM-YYYY', 'DD/MM/YYYY', 'MM/DD/YYYY', 'DD MMM YYYY'], true);
+  return m.isValid() ? m.format('YYYY-MM-DD') : '';
+}
+function lmRecordDate(rec, cols) {
+  const vals = rec.values || {};
+  for (const c of cols) {
+    if (c.type !== 'date') continue;
+    const d = lmParseDate(vals[c.key], c);
+    if (d) return d;
+  }
+  if (rec.importedAt) {
+    const d = new Date(rec.importedAt);
+    if (!isNaN(d)) return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+  return '';
+}
+function lmLoadRecords(k, cols) {
+  return readLambdaStore(k).map(r => Object.assign({}, r, { _date: lmRecordDate(r, cols) }));
+}
+
+function lmRenderAll() {
+  lmRenderTabs();
+  lmRenderToolbar();
+  lmRenderTable();
+}
+function lmRenderTabs() {
+  const el = document.getElementById('lm-tabs');
+  if (!el) return;
+  el.innerHTML = LM_TABS.map(k =>
+    `<button type="button" class="tab-btn ${k === lmActiveTab ? 'active' : ''}" onclick="lmSwitchTab('${k}')"><i class="ti ${LM_TAB_ICONS[k]}" style="font-size:13px"></i> ${esc(LAMBDA_COLUMN_STORES[k].title)}</button>`
+  ).join('');
+}
+function lmRenderToolbar() {
+  const el = document.getElementById('lm-toolbar');
+  if (!el) return;
+  const k = lmActiveTab, s = lmGetState(k), cols = getLambdaColumns(k);
+  const searchable = cols.filter(c => c.searchable === true);
+  if (!searchable.some(c => c.key === s.by)) s.by = searchable.length ? searchable[0].key : '';
+  const dates = lmLoadRecords(k, cols).map(r => r._date).filter(Boolean).sort();
+  const today = todayStr();
+  if (!s.fromTouched) s.from = dates.length ? dates[0] : today;   // oldest record date
+  if (!s.toTouched) s.to = today;                                  // current date
+  const none = searchable.length === 0;
+  el.innerHTML =
+    `<div class="lm-field"><label for="lm-by">Search by <span class="lm-req" title="Required">*</span></label>
+       <select id="lm-by" class="lm-input" onchange="lmOnBy(this.value)" ${none ? 'disabled' : ''}>
+         ${none ? '<option value="">No searchable columns</option>' : searchable.map(c => `<option value="${esc(c.key)}" ${c.key === s.by ? 'selected' : ''}>${esc(c.label)}</option>`).join('')}
+       </select></div>
+     <div class="lm-field lm-field-grow"><label for="lm-q">Search</label>
+       <input id="lm-q" class="lm-input" type="search" autocomplete="off" placeholder="${none ? 'Mark a column Searchable first' : 'Type to search…'}" value="${esc(s.q)}" oninput="lmOnQuery(this.value)" ${none ? 'disabled' : ''} /></div>
+     <div class="lm-field"><label for="lm-from">From</label>
+       <input id="lm-from" class="lm-input" type="date" value="${esc(s.from)}" onchange="lmOnDate('from', this.value)" /></div>
+     <div class="lm-field"><label for="lm-to">To</label>
+       <input id="lm-to" class="lm-input" type="date" value="${esc(s.to)}" onchange="lmOnDate('to', this.value)" /></div>
+     <button type="button" class="btn" onclick="lmResetFilters()" title="Clear the search and reset the date range"><i class="ti ti-filter-off"></i> Reset</button>
+     ${none ? `<div class="lm-hint">No column in ${esc(LAMBDA_COLUMN_STORES[k].title)} has the Searchable flag on yet. <button type="button" onclick="lmOpenMasters()">Open the master</button> and tick Searchable.</div>` : ''}`;
+}
+function lmOpenMasters() {
+  openMasters();
+  switchTab(lmActiveTab);
+}
+function lmOnBy(v) { lmGetState(lmActiveTab).by = v; lmRenderTable(); }
+function lmOnQuery(v) { lmGetState(lmActiveTab).q = v; lmRenderTable(); }
+function lmOnDate(which, v) {
+  const s = lmGetState(lmActiveTab);
+  if (which === 'from') { s.from = v; s.fromTouched = !!v; } else { s.to = v; s.toTouched = !!v; }
+  if (!v) lmRenderToolbar();   // cleared → fall back to the default date
+  lmRenderTable();
+}
+function lmResetFilters() {
+  const s = lmGetState(lmActiveTab);
+  s.q = ''; s.fromTouched = false; s.toTouched = false;
+  lmRenderToolbar();
+  lmRenderTable();
+}
+
+// Filter + sort the active tab's records.
+function lmFilteredRows() {
+  const k = lmActiveTab, s = lmGetState(k), cols = getLambdaColumns(k);
+  const q = String(s.q || '').trim().toLowerCase();
+  let rows = lmLoadRecords(k, cols).filter(r => {
+    if (s.from && r._date && r._date < s.from) return false;
+    if (s.to && r._date && r._date > s.to) return false;
+    if (q && s.by) {
+      const v = String((r.values && r.values[s.by]) == null ? '' : r.values[s.by]).toLowerCase();
+      if (v.indexOf(q) === -1) return false;
+    }
+    return true;
+  });
+  if (s.sortCol) {
+    const col = cols.find(c => c.key === s.sortCol);
+    if (col) {
+      const keyOf = (r) => {
+        const v = (r.values && r.values[col.key]) == null ? '' : String(r.values[col.key]);
+        return col.type === 'date' ? (lmParseDate(v, col) || v) : v.toLowerCase();
+      };
+      const dir = s.sortDir === 'asc' ? 1 : -1;
+      rows = rows.slice().sort((a, b) => dir * keyOf(a).localeCompare(keyOf(b), undefined, { numeric: true }));
+    }
+  }
+  return rows;
+}
+
+function lmRenderTable() {
+  const body = document.getElementById('lm-body');
+  const countEl = document.getElementById('lm-count');
+  if (!body) return;
+  const k = lmActiveTab, s = lmGetState(k), cols = getLambdaColumns(k);
+  lmLoadPrefs(k);
+  const prevWrap = body.querySelector('.lm-table-wrap');
+  const prevTop = prevWrap ? prevWrap.scrollTop : 0, prevLeft = prevWrap ? prevWrap.scrollLeft : 0;
+  if (!cols.length) {
+    if (countEl) countEl.textContent = 'No columns configured';
+    body.innerHTML = `<div class="lm-empty">No columns are configured in the ${esc(LAMBDA_COLUMN_STORES[k].title)} master yet.<br>
+      <button type="button" class="btn" onclick="lmOpenMasters()"><i class="ti ti-list-details"></i> Open Masters</button></div>`;
+    return;
+  }
+  const total = readLambdaStore(k).length;
+  const rows = lmFilteredRows();
+  const bad = !!(s.from && s.to && s.from > s.to);
+  ['lm-from', 'lm-to'].forEach(id => { const el = document.getElementById(id); if (el) el.classList.toggle('invalid', bad); });
+  if (countEl) countEl.textContent = (bad ? 'From date is after To date · ' : '') + rows.length + ' of ' + total + ' record' + (total === 1 ? '' : 's');
+
+  const widths = lmWidths[k];
+  const colgroup = cols.map(c => `<col data-col="${esc(c.key)}" style="width:${widths[c.key] || defaultLogColumnWidth(c)}px">`).join('');
+  const thead = cols.map(c => {
+    const arrow = s.sortCol === c.key ? (s.sortDir === 'asc' ? '▲' : '▼') : '';
+    return `<th class="log-th-sortable" data-col="${esc(c.key)}">${esc(c.label)}<span class="col-sort-arrow">${arrow}</span>` +
+      `<button type="button" class="col-pin-icon" data-col="${esc(c.key)}" title="Pin column">${LOG_TABLE_PIN_ICON_SVG}</button>` +
+      `<span class="col-resize-handle"></span></th>`;
+  }).join('');
+  const tbody = rows.map(r => '<tr>' + cols.map(c => {
+    const v = (r.values && r.values[c.key]) == null ? '' : String(r.values[c.key]);
+    return `<td data-col="${esc(c.key)}" title="${esc(v)}">${esc(v)}</td>`;
+  }).join('') + '</tr>').join('');
+  const msg = rows.length ? '' : `<div class="lm-empty">${total === 0
+    ? 'No records yet. Import data with More → Import / Export (choose ' + esc(LAMBDA_COLUMN_STORES[k].title) + ').'
+    : 'No records match the current search and date range.'}</div>`;
+  body.innerHTML = `<div class="lm-table-wrap"><table id="lm-table" class="log-table"><colgroup>${colgroup}</colgroup>` +
+    `<thead><tr id="lm-thead-row">${thead}</tr></thead><tbody>${tbody}</tbody></table>${msg}</div>`;
+  const wrap = body.querySelector('.lm-table-wrap');
+  if (wrap) { wrap.scrollTop = prevTop; wrap.scrollLeft = prevLeft; }
+  lmWireColumns();
+  lmApplyPins();
+}
+
+// Sort / pin / resize — same behaviour as the Effort Log table, scoped to #lm-table.
+function lmApplyPins() {
+  const k = lmActiveTab, pins = lmPinned[k] || {}, widths = lmWidths[k] || {};
+  const table = document.getElementById('lm-table'), theadRow = document.getElementById('lm-thead-row');
+  if (!table || !theadRow) return;
+  const order = Array.from(theadRow.querySelectorAll(':scope > th')).map(th => th.dataset.col).filter(Boolean);
+  const widthOf = (key) => {
+    if (widths[key]) return widths[key];
+    const th = theadRow.querySelector(':scope > th[data-col="' + key + '"]');
+    return th ? th.offsetWidth : 100;
+  };
+  let leftAcc = 0, rightAcc = 0;
+  const leftOffset = {}, rightOffset = {};
+  order.forEach(key => { if (pins[key] === 'left') { leftOffset[key] = leftAcc; leftAcc += widthOf(key); } });
+  for (let i = order.length - 1; i >= 0; i--) {
+    const key = order[i];
+    if (pins[key] === 'right') { rightOffset[key] = rightAcc; rightAcc += widthOf(key); }
+  }
+  order.forEach((key, idx) => {
+    const dir = pins[key];
+    const isLastLeft = dir === 'left' && order.slice(idx + 1).every(x => pins[x] !== 'left');
+    const isFirstRight = dir === 'right' && order.slice(0, idx).every(x => pins[x] !== 'right');
+    table.querySelectorAll('th[data-col="' + key + '"], td[data-col="' + key + '"]').forEach(cell => {
+      cell.style.left = ''; cell.style.right = '';
+      cell.classList.remove('pinned-col', 'pinned-col-edge-left', 'pinned-col-edge-right');
+      if (dir === 'left') { cell.style.left = leftOffset[key] + 'px'; cell.classList.add('pinned-col'); if (isLastLeft) cell.classList.add('pinned-col-edge-left'); }
+      else if (dir === 'right') { cell.style.right = rightOffset[key] + 'px'; cell.classList.add('pinned-col'); if (isFirstRight) cell.classList.add('pinned-col-edge-right'); }
+    });
+  });
+}
+function lmUpdatePinIcon(icon, key) {
+  const dir = (lmPinned[lmActiveTab] || {})[key];
+  icon.classList.remove('pin-left', 'pin-right');
+  if (dir === 'left') { icon.classList.add('pin-left'); icon.title = 'Pinned left — click to pin right instead'; }
+  else if (dir === 'right') { icon.classList.add('pin-right'); icon.title = 'Pinned right — click to unpin'; }
+  else icon.title = 'Click to pin this column to the left';
+}
+function lmCyclePin(key) {
+  const k = lmActiveTab, pins = lmPinned[k];
+  if (pins[key] === 'left') pins[key] = 'right';
+  else if (pins[key] === 'right') delete pins[key];
+  else pins[key] = 'left';
+  ltSaveObj('ttl_lmPinned_' + k, pins);
+  lmApplyPins();
+  const icon = document.querySelector('#lm-thead-row .col-pin-icon[data-col="' + key + '"]');
+  if (icon) lmUpdatePinIcon(icon, key);
+}
+function lmWireColumns() {
+  const k = lmActiveTab, s = lmGetState(k);
+  const table = document.getElementById('lm-table'), theadRow = document.getElementById('lm-thead-row');
+  if (!table || !theadRow) return;
+  const cols = getLambdaColumns(k);
+  theadRow.querySelectorAll(':scope > th.log-th-sortable').forEach(th => {
+    th.addEventListener('click', (e) => {
+      if (e.target.closest('.col-resize-handle') || e.target.closest('.col-pin-icon')) return;
+      const key = th.dataset.col;
+      if (s.sortCol === key) s.sortDir = s.sortDir === 'asc' ? 'desc' : 'asc';
+      else { s.sortCol = key; const c = cols.find(x => x.key === key); s.sortDir = (c && c.type === 'date') ? 'desc' : 'asc'; }
+      lmRenderTable();
+    });
+  });
+  theadRow.querySelectorAll(':scope > th .col-pin-icon').forEach(icon => {
+    const key = icon.dataset.col;
+    lmUpdatePinIcon(icon, key);
+    icon.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); lmCyclePin(key); });
+  });
+  theadRow.querySelectorAll(':scope > th .col-resize-handle').forEach(handle => {
+    handle.addEventListener('click', e => e.stopPropagation());
+    const begin = (startX, moveEvt, upEvt, getX, passive) => {
+      const th = handle.closest('th'), key = th.dataset.col;
+      const startWidth = lmWidths[k][key] || th.offsetWidth;
+      handle.classList.add('active');
+      const onMove = (ev) => {
+        const w = Math.max(50, startWidth + (getX(ev) - startX));
+        lmWidths[k][key] = w;
+        const colEl = table.querySelector(':scope > colgroup col[data-col="' + key + '"]');
+        if (colEl) colEl.style.width = w + 'px';
+        lmApplyPins();
+      };
+      const onUp = () => {
+        document.removeEventListener(moveEvt, onMove);
+        document.removeEventListener(upEvt, onUp);
+        handle.classList.remove('active');
+        ltSaveObj('ttl_lmColWidths_' + k, lmWidths[k]);
+      };
+      document.addEventListener(moveEvt, onMove, passive ? { passive: true } : false);
+      document.addEventListener(upEvt, onUp);
+    };
+    handle.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); begin(e.clientX, 'mousemove', 'mouseup', ev => ev.clientX, false); });
+    handle.addEventListener('touchstart', (e) => { e.stopPropagation(); begin(e.touches[0].clientX, 'touchmove', 'touchend', ev => ev.touches[0].clientX, true); }, { passive: true });
+  });
+}
+
+// Copy / Download act on the rows currently shown (search + date range + sort applied).
+function lmExportMatrix() {
+  const k = lmActiveTab, cols = getLambdaColumns(k);
+  if (!cols.length) { alert('No columns are configured in ' + LAMBDA_COLUMN_STORES[k].title + ' yet.'); return null; }
+  const rows = lmFilteredRows();
+  if (!rows.length) { alert('No records to export for the current search and date range.'); return null; }
+  return { headers: cols.map(c => c.label), data: rows.map(r => cols.map(c => (r.values && r.values[c.key]) == null ? '' : r.values[c.key])) };
+}
+function lmCopy(btn) {
+  const m = lmExportMatrix(); if (!m) return;
+  const text = [m.headers, ...m.data].map(r => r.map(tsvEscape).join('\t')).join('\n');
+  const done = () => {
+    if (!btn) return;
+    const old = btn.innerHTML;
+    btn.innerHTML = '<i class="ti ti-check"></i> Copied';
+    setTimeout(() => { btn.innerHTML = old; }, 1500);
+  };
+  const fallback = () => {
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); done(); } catch (e) {}
+    document.body.removeChild(ta);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, fallback);
+  else fallback();
+}
+function lmDownloadXlsx() {
+  const m = lmExportMatrix(); if (!m) return;
+  const k = lmActiveTab;
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet([m.headers, ...m.data]);
+  ws['!cols'] = m.headers.map((h, i) => ({ wch: Math.min(40, Math.max(h.length, ...m.data.map(r => String(r[i] || '').length))) + 2 }));
+  XLSX.utils.book_append_sheet(wb, ws, LAMBDA_COLUMN_STORES[k].title.slice(0, 31));
+  XLSX.writeFile(wb, CSV_SCHEMAS[k].storageKey.replace('ttl_', '') + '.xlsx');
 }
 
 // Re-render anything on screen that depends on column config (task cards, log table, popup)
@@ -20154,7 +20609,7 @@ function onCsvSchemaChange() {
   });
   const hint = document.getElementById('csv-schema-hint');
   if (hint) hint.textContent = isLambda
-    ? 'Imports are saved to ' + CSV_SCHEMAS[key].storageKey + ' (no screen for this data yet). Date range does not apply.'
+    ? 'Imports are saved to ' + CSV_SCHEMAS[key].storageKey + ' (view it under Dashboard ▾ → Lambda Functions). Date range does not apply.'
     : '';
   const prev = document.getElementById('csv-import-preview'); if (prev) prev.textContent = '';
 }
@@ -20487,6 +20942,7 @@ function importLambdaRows(allRows, storeKey) {
       imported++;
     });
     writeLambdaStore(storeKey, store);
+    if (typeof lmRefreshIfOpen === 'function') lmRefreshIfOpen();
     const parts = [`<span style="color:var(--green-dark)">✓ Imported ${imported} record${imported===1?'':'s'} to ${escHtml(CSV_SCHEMAS[storeKey].storageKey)}</span>`];
     if (skipped) parts.push(`<span style="color:var(--text-tertiary)">${skipped} skipped — duplicate</span>`);
     if (failed)  parts.push(`<span style="color:var(--red-mid)">${failed} row${failed>1?'s':''} missing a required value</span>`);
