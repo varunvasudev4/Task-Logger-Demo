@@ -18607,6 +18607,10 @@ function renderLambdaColumnsTabHTML(storeKey) {
       Columns master — drag rows to reorder, rename the label, choose the input type, mark a field mandatory, and tick Searchable to offer it in the
       Search by list of the Lambda Functions screen, and tick Search as individual entity on a dropdown / multi-select / searchable-select column to give it its own filter there. This master is separate from the Task Logger Columns and is used for later Lambda logging changes.
     </div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-secondary);cursor:pointer;margin-bottom:12px;padding:8px 10px;border:1px solid var(--border);border-radius:8px" title="Decides whether the Copy button above the ${esc(meta.title)} table includes the column header row">
+      <input type="checkbox" ${lmCopyWithHeader(storeKey) ? 'checked' : ''} onchange="lcToggleCopyHeader(${k})" />
+      <span><strong>Copy with header</strong> — include the column names as the first row when copying the ${esc(meta.title)} table. Off by default (data rows only).</span>
+    </label>
     ${renderColumnConfigIOHTML(storeKey)}
     ${cols.length === 0 ? '<div style="color:var(--text-tertiary);font-size:13px;padding:8px 0">No columns yet. Add the first one below.</div>' : ''}
     <div class="master-list" id="lambda-columns-list-container">${rows}</div>
@@ -18696,6 +18700,19 @@ function lcToggleSearchable(storeKey, key) {
   const col = getLambdaColumnByKey(storeKey, key);
   if (!col) return;
   col.searchable = !col.searchable;
+  saveState();
+  if (typeof lmRefreshIfOpen === 'function') lmRefreshIfOpen();
+}
+// Per-master "Copy with header" flag (masters.flags.lambdaCopyHeader[storeKey]); unset = false = copy without header.
+function lmCopyWithHeader(storeKey) {
+  const f = masters && masters.flags && masters.flags.lambdaCopyHeader;
+  return !!(f && f[storeKey] === true);
+}
+function lcToggleCopyHeader(storeKey) {
+  if (!LAMBDA_COLUMN_STORES[storeKey]) return;
+  if (!masters.flags) masters.flags = {};
+  if (!masters.flags.lambdaCopyHeader || typeof masters.flags.lambdaCopyHeader !== 'object') masters.flags.lambdaCopyHeader = {};
+  masters.flags.lambdaCopyHeader[storeKey] = !lmCopyWithHeader(storeKey);
   saveState();
   if (typeof lmRefreshIfOpen === 'function') lmRefreshIfOpen();
 }
@@ -19316,7 +19333,10 @@ function lmUpdateSelectionUI() {
   const countEl = document.getElementById('lm-count');
   if (countEl && countEl.dataset.base !== undefined) countEl.textContent = countEl.dataset.base + (n ? ' · ' + n + ' selected' : '');
   const copyBtn = document.getElementById('lm-copy-btn');
-  if (copyBtn) copyBtn.innerHTML = '<i class="ti ti-clipboard-copy"></i> Copy' + (n ? ' (' + n + ')' : '');
+  if (copyBtn) {
+    copyBtn.innerHTML = '<i class="ti ti-clipboard-copy"></i> Copy' + (n ? ' (' + n + ')' : '');
+    copyBtn.title = 'Copies the ticked rows, or every row shown if none are ticked — ' + (lmCopyWithHeader(k) ? 'with' : 'without') + ' the header row (set in Masters)';
+  }
   const xBtn = document.getElementById('lm-xlsx-btn');
   if (xBtn) xBtn.innerHTML = '<i class="ti ti-file-spreadsheet"></i> Download XLSX' + (n ? ' (' + n + ')' : '');
   const dBtn = document.getElementById('lm-del-btn');
@@ -19438,7 +19458,8 @@ function lmExportMatrix() {
 }
 function lmCopy(btn) {
   const m = lmExportMatrix(); if (!m) return;
-  const text = [m.headers, ...m.data].map(r => r.map(tsvEscape).join('\t')).join('\n');
+  const withHeader = lmCopyWithHeader(lmActiveTab);   // Masters flag; default = data rows only
+  const text = (withHeader ? [m.headers, ...m.data] : m.data).map(r => r.map(tsvEscape).join('\t')).join('\n');
   const done = () => {
     if (!btn) return;
     const old = btn.innerHTML;
