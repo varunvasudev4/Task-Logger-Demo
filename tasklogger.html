@@ -603,7 +603,13 @@ html.is-touch .pending-card-actions { opacity: 1; }
 .cm-lambda-group.hidden { display: none; }
 .cm-lambda-edit { padding: 4px 10px; font-size: 12px; }
 .cm-lambda-edit.hidden { display: none; }
-@media (max-width: 600px) { .cm-lambda-group { flex: 1 1 100%; margin-right: 0; } }
+/* Small screens: compact — tick shows only the function icon, edit shows only the pencil (full label stays as tooltip) */
+@media (max-width: 600px) {
+  .cm-lambda-group { flex: 0 1 auto; flex-wrap: nowrap; gap: 4px; }
+  .cm-lambda-txt { display: none; }
+  .cm-lambda-group .task-lambda-chk { padding: 6px 8px; border: 1px solid var(--border-md); }
+  .cm-lambda-edit { padding: 6px 9px; min-width: 36px; justify-content: center; }
+}
 
 /* ── Lambda tables: row edit button + date range ── */
 .lm-sel-wrap { display: inline-flex; align-items: center; gap: 4px; }
@@ -2162,8 +2168,8 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
     </div>
     <div class="modal-footer">
       <div class="cm-lambda-group hidden" id="cm-lambda-group">
-        <label class="task-lambda-chk" id="cm-lambda-chk" title="Tick if this task involves Lambda functions. You will be asked to log them when you save."><input type="checkbox" id="cm-lambda-cb" onchange="cmLambdaToggle(this.checked)" /><i class="ti ti-function"></i> Includes Lambda</label>
-        <button type="button" class="btn cm-lambda-edit hidden" id="cm-lambda-edit" onclick="cmLambdaEditLinked()" title="Edit the Lambda functions / changes linked to this task"><i class="ti ti-pencil"></i> Edit linked functions<span id="cm-lambda-count"></span></button>
+        <label class="task-lambda-chk" id="cm-lambda-chk" title="Tick if this task involves Lambda functions. You will be asked to log them when you save."><input type="checkbox" id="cm-lambda-cb" aria-label="Includes Lambda" onchange="cmLambdaToggle(this.checked)" /><i class="ti ti-function"></i><span class="cm-lambda-txt"> Includes Lambda</span></label>
+        <button type="button" class="btn cm-lambda-edit hidden" id="cm-lambda-edit" onclick="cmLambdaEditLinked()" title="Edit the Lambda functions / changes linked to this task"><i class="ti ti-pencil"></i><span class="cm-lambda-txt"> Edit linked functions</span><span id="cm-lambda-count"></span></button>
       </div>
       <button class="btn" onclick="closeCompleteModal()">Cancel</button>
       <button class="btn btn-primary" id="cm-submit-btn" onclick="submitComplete()"><i class="ti ti-check"></i> Mark Complete</button>
@@ -19140,7 +19146,7 @@ function cmLambdaRefresh() {
   if (cb) cb.checked = !!_cmLambda.on;
   if (lbl) lbl.classList.toggle('on', !!_cmLambda.on);
   const n = lambdaLinkedCount(_cmLambda.linkId);
-  if (btn) btn.classList.toggle('hidden', n === 0);
+  if (btn) { btn.classList.toggle('hidden', n === 0); btn.title = 'Edit linked functions' + (n ? ' (' + n + ')' : ''); btn.setAttribute('aria-label', btn.title); }
   if (cnt) cnt.textContent = n ? ' (' + n + ')' : '';
 }
 function cmLambdaToggle(on) {
