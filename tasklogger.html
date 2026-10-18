@@ -21081,7 +21081,7 @@ function askLambdaDateFormats(dateCols, allRows, idx, onOk, onCancel) {
   ov.style.zIndex = '10200';
   ov.innerHTML = `<div class="confirm-box" style="max-width:460px;max-height:90vh;overflow:auto">
     <div class="confirm-title">What format are the dates in?</div>
-    <div class="confirm-msg" style="margin-bottom:12px">Pick the format used in the file for each date column. Dates are converted and then shown using each column’s format in Masters.</div>
+    <div class="confirm-msg" style="margin-bottom:12px">Pick the format used in the file for each date column. Blank dates are left blank. The rest are converted and then shown using each column’s format in Masters.</div>
     ${blocks}
     <div class="confirm-actions">
       <button class="btn" id="lm-datefmt-cancel">Cancel</button>
@@ -21132,7 +21132,10 @@ function importLambdaRows(allRows, storeKey) {
     cols.forEach(c => { idx[c.key] = header.indexOf(norm(c.label)); });
     if (cols.every(c => idx[c.key] === -1)) { prev.innerHTML = `<span style="color:var(--red-mid)">✗ No header in the file matches a ${escHtml(CSV_SCHEMAS[storeKey].label)} column name.</span>`; return; }
     const missingReq = cols.filter(c => c.required && idx[c.key] === -1).map(c => c.label); // imported blank, reported below
-    const dateCols = cols.filter(c => c.type === 'date' && idx[c.key] >= 0);
+    // Blank dates are left blank and never trigger a question; only date columns that actually
+    // contain values are asked about, and only those values are converted.
+    const dateCols = cols.filter(c => c.type === 'date' && idx[c.key] >= 0 &&
+      allRows.slice(1).some(r => String(r[idx[c.key]] == null ? '' : r[idx[c.key]]).trim() !== ''));
     if (!dateCols.length) { finishLambdaImport(allRows, storeKey, cols, idx, missingReq, {}); return; }
     askLambdaDateFormats(dateCols, allRows, idx,
       (fmtMap) => finishLambdaImport(allRows, storeKey, cols, idx, missingReq, fmtMap),
