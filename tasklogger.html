@@ -516,6 +516,73 @@ html.is-touch .pending-card-actions { opacity: 1; }
 #lm-del-btn:disabled { opacity: .45; cursor: not-allowed; }
 .lm-empty { padding: 24px 16px; text-align: center; font-size: 13px; color: var(--text-tertiary); }
 .lm-empty button { margin-top: 10px; }
+
+/* ── Lambda Functions overlay: small-screen layout ─────────────────────────── */
+@media (max-width: 640px) {
+  .lm-head { padding: 8px 12px; padding-top: max(8px, env(safe-area-inset-top, 0px)); }
+  .lm-title { font-size: 14px; }
+  .lm-tabs { flex-wrap: nowrap; overflow-x: auto; gap: 4px; padding: 8px 10px 0; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+  .lm-tabs::-webkit-scrollbar { display: none; }
+  .lm-tabs .tab-btn { flex: 0 0 auto; white-space: nowrap; font-size: 12px; padding: 6px 10px; }
+  /* Filters become a tidy 2-column grid: Search by / Search full width, entity filters side by side,
+     From + To side by side, Reset full width. Scrolls inside itself so the table always keeps room. */
+  .lm-toolbar { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 8px 10px; align-items: end; max-height: 44vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  .lm-toolbar > .lm-field { min-width: 0; }
+  .lm-toolbar > .lm-field:first-child, .lm-toolbar > .lm-field-grow, .lm-toolbar > .lm-hint, .lm-toolbar > .btn { grid-column: 1 / -1; }
+  .lm-toolbar > .lm-field-from { grid-column: 1; }
+  .lm-toolbar > .btn { width: 100%; justify-content: center; }
+  .lm-field > label { font-size: 9.5px; letter-spacing: 0.06em; }
+  .lm-toolbar select.lm-input, .lm-toolbar input.lm-input { width: 100%; box-sizing: border-box; min-height: 36px; font-size: 16px; }   /* 16px stops iOS zooming on focus */
+  .lm-ent-trigger { width: 100%; min-width: 0; max-width: none; min-height: 36px; font-size: 13px; box-sizing: border-box; }
+  .lm-bar { padding: 6px 10px; gap: 6px; }
+  .lm-bar-left { width: 100%; justify-content: space-between; flex-wrap: nowrap; gap: 8px; }
+  .lm-bar .log-count { font-size: 11.5px; text-align: right; min-width: 0; }
+  .lm-bar .log-header-actions { width: 100%; display: flex; flex-wrap: nowrap; gap: 6px; }
+  .lm-bar .log-header-actions .btn { flex: 1 1 0; min-width: 0; justify-content: center; text-align: center; padding: 6px 4px; font-size: 12px; line-height: 1.2; }
+  .lm-bar .btn i { font-size: 14px; }
+  #lm-table th, #lm-table td { padding: 6px 8px; font-size: 12px; }
+  .lm-empty { padding: 18px 12px; font-size: 12.5px; }
+}
+
+/* ── Task card: "Includes Lambda" tick (bottom-right) ──────────────────────── */
+.task-lambda-row { display: flex; justify-content: flex-end; margin-top: 8px; }
+.task-lambda-chk { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); cursor: pointer; user-select: none; padding: 3px 6px; border-radius: var(--radius-md); }
+.task-lambda-chk:hover { background: var(--bg-secondary); }
+.task-lambda-chk input { width: 15px; height: 15px; margin: 0; cursor: pointer; }
+.task-lambda-chk i { font-size: 14px; color: var(--blue-mid); }
+.task-lambda-chk.on { color: var(--blue-dark); font-weight: 600; }
+.task-lambda-chk.disabled { opacity: .55; cursor: default; }
+.task-lambda-chk.disabled input { cursor: default; }
+
+/* ── Lambda log step shown when completing a task that includes Lambda ─────── */
+.llm-hint { font-size: 12px; color: var(--text-tertiary); line-height: 1.45; margin-bottom: 10px; }
+.llm-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.llm-item { display: flex; align-items: flex-start; gap: 8px; border: 1px solid var(--border-md); border-radius: var(--radius-md); padding: 8px 8px 8px 10px; background: var(--bg-secondary); }
+.llm-badge { font-family: var(--font-mono); font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 20px; flex-shrink: 0; margin-top: 1px; }
+.llm-badge.new { background: var(--green-bg); color: var(--green-dark); }
+.llm-badge.change { background: var(--blue-bg); color: var(--blue-dark); }
+.llm-item-body { flex: 1; min-width: 0; font-size: 12.5px; line-height: 1.45; color: var(--text-primary); overflow-wrap: anywhere; }
+.llm-item-body .k { color: var(--text-tertiary); }
+.llm-item-actions { display: flex; gap: 2px; flex-shrink: 0; }
+.llm-empty { border: 1px dashed var(--border-md); border-radius: var(--radius-md); padding: 16px 12px; text-align: center; font-size: 12.5px; color: var(--text-tertiary); margin-bottom: 12px; }
+.llm-error { color: var(--red-mid); font-size: 12px; margin-bottom: 8px; }
+.llm-error.hidden { display: none; }
+.llm-choice { display: flex; flex-direction: column; gap: 10px; }
+.llm-choice-btn { display: flex; align-items: center; gap: 12px; text-align: left; width: 100%; padding: 12px 14px; border: 1px solid var(--border-md); border-radius: var(--radius-md); background: var(--bg); color: var(--text-primary); font: inherit; cursor: pointer; }
+.llm-choice-btn:hover:not(:disabled) { border-color: var(--blue-mid); background: var(--blue-bg); }
+.llm-choice-btn:disabled { opacity: .5; cursor: not-allowed; }
+.llm-choice-btn > i { font-size: 22px; color: var(--blue-mid); flex-shrink: 0; }
+.llm-choice-btn b { display: block; font-size: 14px; }
+.llm-choice-btn span { display: block; font-size: 12px; color: var(--text-tertiary); margin-top: 2px; }
+#lambda-log-modal .modal { max-width: 560px; }
+#lambda-log-modal .meta-input, #lambda-log-modal .meta-select { width: 100%; box-sizing: border-box; }
+@media (max-width: 480px) {
+  #lambda-log-modal { padding: 0.5rem; }
+  #lambda-log-modal .modal-body { padding: 12px 14px; }
+  #lambda-log-modal .modal-footer { padding: 10px 14px; }
+  #lambda-log-modal .modal-footer .btn { flex: 1; justify-content: center; }
+}
+
 .todo-card-planned-chip { background: color-mix(in srgb, var(--blue-mid) 18%, transparent); color: var(--blue-mid); font-weight: 600; }
 
 .task-drag-handle {
@@ -2140,6 +2207,18 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
 
 <!-- Dashboard ▾ menu (items are built by JS from DASHBOARD_MENU_ITEMS) -->
 <div class="pending-menu-dropdown hidden" id="dashboard-menu-dropdown" role="menu"></div>
+
+<!-- Lambda log step (opens from Complete Task when the task has "Includes Lambda" ticked) -->
+<div class="modal-overlay hidden" id="lambda-log-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title"><i class="ti ti-function" style="vertical-align:-2px;margin-right:6px;color:var(--blue-mid)"></i><span id="llm-title">Lambda log</span></div>
+      <button class="btn-icon" onclick="llmCancel()" title="Close" aria-label="Close"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="modal-body" id="llm-body"></div>
+    <div class="modal-footer" id="llm-footer"></div>
+  </div>
+</div>
 
 <!-- Lambda Functions full-page overlay (Dashboard ▾ → Lambda Functions; only reachable while the Lambda logging flag is on) -->
 <div class="lm-overlay hidden" id="lambda-overlay" role="dialog" aria-modal="true" aria-label="Lambda Functions">
@@ -12929,6 +13008,14 @@ function submitComplete() {
     return;
   }
 
+  // Lambda logging: a task ticked "Includes Lambda" must log the lambdas it used before it can
+  // complete. The Lambda log popup opens over this one; its "Save & Complete" re-runs this function.
+  // Nothing has been changed yet at this point, so cancelling the popup leaves the task untouched.
+  if (!_lambdaGateDone && isLambdaLoggingEnabled() && task && task.includesLambda === true) {
+    llmOpen(id, () => { _lambdaGateDone = true; try { submitComplete(); } finally { _lambdaGateDone = false; } });
+    return;
+  }
+
   // Bank final segment (timer was ticking while popup was open)
   if (task.segmentStart !== null) { task.accumulatedMs += Date.now()-task.segmentStart; task.segmentStart=null; }
   clearInterval(intervals[id]); delete intervals[id];
@@ -13688,6 +13775,17 @@ function deleteTask(id) {
   const row = document.getElementById('row-'+id);
   if (row) row.remove();
   saveState(); updateEmptyState(); updateLogPanel();
+}
+
+// "Includes Lambda" tick on the task card (only shown while Lambda logging is enabled).
+function toggleTaskLambda(id, on) {
+  const task = tasks.find(t => t.id === id);
+  if (!task) return;
+  task.includesLambda = !!on;
+  touchSyncMetadata(task);
+  saveState();
+  const lbl = document.querySelector('#row-' + id + ' .task-lambda-chk');
+  if (lbl) lbl.classList.toggle('on', !!on);
 }
 
 function updateTaskField(id, field, val) {
@@ -14477,6 +14575,7 @@ function renderRow(id) {
     <div class="task-meta">
       ${renderTaskCardFields(task, id, dis)}
     </div>
+    ${isLambdaLoggingEnabled() ? `<div class="task-lambda-row"><label class="task-lambda-chk${task.includesLambda ? ' on' : ''}${isDone ? ' disabled' : ''}" title="Tick if this task involves Lambda functions. You will be asked to log them when you complete the task."><input type="checkbox" ${task.includesLambda ? 'checked' : ''} ${dis} onchange="toggleTaskLambda(${id}, this.checked)" /><i class="ti ti-function"></i> Includes Lambda</label></div>` : ''}
     <div class="validation-msg" id="val-msg-${id}">
       <i class="ti ti-alert-circle"></i> Enter a task name.
     </div>
@@ -14778,6 +14877,7 @@ const FS_PORTAL_IDS = [
   'task-search-overlay',   // Ctrl+Shift+F search
   'search-history-modal',  // History popup opened from a search result
   'complete-modal',
+  'lambda-log-modal',
   'carry-forward-modal',
   'pending-tasks-modal',
   'todo-modal',
@@ -18805,6 +18905,122 @@ function lcDragEnd(e) {
   lcDragSrcIdx = null;
 }
 
+// ── Lambda log step in Complete Task ───────────────────────────────────────
+// When a task has "Includes Lambda" ticked (and Lambda logging is on), pressing Complete in the
+// popup opens this second popup. The user adds any number of entries: each is either a NEW function
+// (Function Columns form) or a CHANGE (Change Columns form). Entries are only staged in memory
+// until "Save & Complete": then they are written to the same stores the Lambda Functions screen
+// reads (ttl_lambda_functions / ttl_lambda_functions_changes) and the task completes.
+let _lambdaGateDone = false;
+let _llm = null;   // { taskId, onDone, entries:[{type,values}], view:'list'|'choose'|'form', formType, editIdx }
+const LLM_TYPES = {
+  new:    { store: 'lambdaFunctionColumns', label: 'New function', icon: 'ti-plus' },
+  change: { store: 'lambdaChangeColumns',   label: 'Change',       icon: 'ti-git-pull-request' }
+};
+function llmOpen(taskId, onDone) {
+  _llm = { taskId, onDone, entries: [], view: 'list', formType: null, editIdx: null };
+  document.getElementById('lambda-log-modal').classList.remove('hidden');
+  llmRender();
+}
+function llmClose() {
+  const m = document.getElementById('lambda-log-modal');
+  if (m) m.classList.add('hidden');
+  _llm = null;
+}
+function llmCancel() {
+  if (!_llm) return;
+  if (_llm.view !== 'list') { _llm.view = 'list'; _llm.editIdx = null; llmRender(); return; }   // X inside a step = back
+  if (_llm.entries.length) {
+    showConfirm('Discard Lambda entries?', 'The entries you added will be lost and the task will not be completed yet.', llmClose, 'Discard');
+  } else llmClose();
+}
+function llmShort(s, n) { s = String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
+function llmSummary(e) {
+  const cols = getLambdaColumns(LLM_TYPES[e.type].store);
+  const parts = cols.filter(c => String(e.values[c.key] == null ? '' : e.values[c.key]).trim())
+    .slice(0, 4).map(c => `<span class="k">${esc(c.label)}:</span> ${esc(llmShort(lmDisplayValue(c, e.values[c.key]), 60))}`);
+  return parts.length ? parts.join(' · ') : '<span class="k">(no values)</span>';
+}
+function llmRender() {
+  if (!_llm) return;
+  const body = document.getElementById('llm-body'), foot = document.getElementById('llm-footer'), title = document.getElementById('llm-title');
+  if (!body || !foot || !title) return;
+  if (_llm.view === 'choose') {
+    title.textContent = 'Add Lambda entry';
+    const opt = (type, heading, sub) => {
+      const st = LLM_TYPES[type].store, none = getLambdaColumns(st).length === 0;
+      return `<button type="button" class="llm-choice-btn" ${none ? 'disabled' : ''} onclick="llmPick('${type}')"><i class="ti ${LLM_TYPES[type].icon}"></i><div><b>${heading}</b><span>${none ? 'No columns are configured in the ' + esc(LAMBDA_COLUMN_STORES[st].title) + ' master yet.' : sub}</span></div></button>`;
+    };
+    body.innerHTML = `<div class="llm-hint">Is this a new Lambda function, or a change to an existing one?</div><div class="llm-choice">` +
+      opt('new', 'New function', 'Opens the Function Columns form.') + opt('change', 'Change to an existing function', 'Opens the Change Columns form.') + `</div>`;
+    foot.innerHTML = `<button type="button" class="btn" onclick="llmBack()">Back</button>`;
+  } else if (_llm.view === 'form') {
+    const type = _llm.formType, st = LLM_TYPES[type].store, cols = getLambdaColumns(st);
+    const cur = _llm.editIdx != null ? _llm.entries[_llm.editIdx].values : {};
+    title.textContent = (_llm.editIdx != null ? 'Edit ' : '') + (type === 'new' ? 'New function' : 'Change');
+    body.innerHTML = `<div class="llm-hint">${type === 'new' ? 'Function Columns' : 'Change Columns'} form. Fields marked * are required.</div>` +
+      `<div class="llm-form">` + cols.map((c, i) => {
+        const v = cur[c.key] != null ? cur[c.key] : (c.type === 'date' ? todayStr() : '');
+        return `<div class="complete-field"><label class="complete-label">${esc(c.label)}${c.required ? ' <span class="req">*</span>' : ''}</label>${buildDynamicFieldInput(c, 'llf-' + i, v, '', '', '')}</div>`;
+      }).join('') + `</div>`;
+    foot.innerHTML = `<button type="button" class="btn" onclick="llmBack()">Back</button><button type="button" class="btn btn-primary" onclick="llmSaveEntry()"><i class="ti ti-check"></i> ${_llm.editIdx != null ? 'Update entry' : 'Add entry'}</button>`;
+  } else {
+    title.textContent = 'Lambda log';
+    const list = _llm.entries.map((e, i) => `<div class="llm-item"><span class="llm-badge ${e.type}">${e.type === 'new' ? 'NEW' : 'CHANGE'}</span><div class="llm-item-body">${llmSummary(e)}</div><div class="llm-item-actions"><button type="button" class="btn-icon" title="Edit" onclick="llmEdit(${i})"><i class="ti ti-pencil"></i></button><button type="button" class="btn-icon btn-delete" title="Remove" onclick="llmRemove(${i})"><i class="ti ti-trash"></i></button></div></div>`).join('');
+    body.innerHTML = `<div class="llm-hint">This task includes Lambda. Add an entry for each Lambda function used. The task completes once you save.</div>` +
+      (_llm.entries.length ? `<div class="llm-list">${list}</div>` : `<div class="llm-empty">No entries yet. Tap “Add entry” to log a Lambda.</div>`) +
+      `<div class="llm-error hidden" id="llm-error">Add at least one entry (or untick “Includes Lambda” on the task card).</div>` +
+      `<button type="button" class="btn" onclick="llmAdd()"><i class="ti ti-plus"></i> Add entry</button>`;
+    foot.innerHTML = `<button type="button" class="btn" onclick="llmCancel()">Cancel</button><button type="button" class="btn btn-primary" onclick="llmSubmit()"><i class="ti ti-check"></i> Save &amp; Complete</button>`;
+  }
+}
+function llmAdd() { if (!_llm) return; _llm.view = 'choose'; llmRender(); }
+function llmBack() { if (!_llm) return; _llm.view = (_llm.view === 'form' && _llm.editIdx == null) ? 'choose' : 'list'; _llm.editIdx = null; llmRender(); }
+function llmPick(type) { if (!_llm || !LLM_TYPES[type]) return; _llm.formType = type; _llm.editIdx = null; _llm.view = 'form'; llmRender(); }
+function llmEdit(i) { if (!_llm || !_llm.entries[i]) return; _llm.formType = _llm.entries[i].type; _llm.editIdx = i; _llm.view = 'form'; llmRender(); }
+function llmRemove(i) { if (!_llm) return; _llm.entries.splice(i, 1); llmRender(); }
+function llmSaveEntry() {
+  if (!_llm) return;
+  const cols = getLambdaColumns(LLM_TYPES[_llm.formType].store);
+  const values = {};
+  let bad = null;
+  cols.forEach((c, i) => {
+    const el = document.getElementById('llf-' + i);
+    let v = el ? String(el.value == null ? '' : el.value) : '';
+    if (c.type === 'searchlist') { const tr = document.getElementById('llf-' + i + '-trigger'); if (tr) v = tr.value; }   // typed text counts even if not yet committed
+    v = v.trim();
+    values[c.key] = v;
+    const mark = document.getElementById('llf-' + i + '-trigger') || el;
+    if (c.required && !v) { if (mark) mark.classList.add('invalid'); if (!bad) bad = mark; }
+    else if (mark) mark.classList.remove('invalid');
+  });
+  if (bad) { if (bad.scrollIntoView) bad.scrollIntoView({ block: 'center', behavior: 'smooth' }); return; }
+  const entry = { type: _llm.formType, values };
+  if (_llm.editIdx != null) _llm.entries[_llm.editIdx] = entry; else _llm.entries.push(entry);
+  _llm.view = 'list'; _llm.editIdx = null;
+  llmRender();
+}
+function llmSubmit() {
+  if (!_llm) return;
+  if (!_llm.entries.length) { const er = document.getElementById('llm-error'); if (er) er.classList.remove('hidden'); return; }
+  try {
+    const now = Date.now();
+    _llm.entries.forEach(e => {
+      const sk = LLM_TYPES[e.type].store;
+      const store = readLambdaStore(sk);
+      store.push({ id: 'lm_' + now.toString(36) + '_' + Math.random().toString(36).slice(2, 7) + '_' + store.length, importedAt: now, taskId: _llm.taskId, values: Object.assign({}, e.values) });
+      writeLambdaStore(sk, store);
+    });
+  } catch (err) {
+    alert('Could not save the Lambda entries (' + err.message + '). The task was not completed.');
+    return;
+  }
+  const cb = _llm.onDone;
+  llmClose();
+  if (typeof lmRefreshIfOpen === 'function') lmRefreshIfOpen();   // entries show up in the Lambda Functions lists straight away
+  if (cb) cb();
+}
+
 // ── Dashboard ▾ menu + Lambda Functions overlay ─────────────────────────────
 // The header Dashboard button is a multi-choice button like Pending. Dashboard is always the
 // first (default) item; other items only exist while their condition holds. With a single
@@ -18862,6 +19078,13 @@ function applyDashboardMenuState() {
     else { btn.removeAttribute('aria-haspopup'); btn.title = 'Dashboard'; }
   }
   if (!multi) closeDashboardMenu();
+  {
+    const lam = isLambdaLoggingEnabled();
+    if (window._lastLambdaFlagSeen !== undefined && window._lastLambdaFlagSeen !== lam && typeof tasks !== 'undefined' && Array.isArray(tasks)) {
+      tasks.forEach(tk => { try { renderRow(tk.id); } catch (e) {} });   // show / hide the "Includes Lambda" tick on every card
+    }
+    window._lastLambdaFlagSeen = lam;
+  }
   if (!isLambdaLoggingEnabled() && typeof lmIsOpen === 'function' && lmIsOpen()) closeLambdaOverlay();
 }
 
@@ -18992,7 +19215,7 @@ function lmRenderToolbar() {
      <div class="lm-field lm-field-grow"><label for="lm-q">Search</label>
        <input id="lm-q" class="lm-input" type="search" autocomplete="off" placeholder="${none ? 'Mark a column Searchable first' : 'Type to search…'}" value="${esc(s.q)}" oninput="lmOnQuery(this.value)" ${none ? 'disabled' : ''} /></div>
      ${entFields}
-     <div class="lm-field"><label for="lm-from">From</label>
+     <div class="lm-field lm-field-from"><label for="lm-from">From</label>
        <input id="lm-from" class="lm-input" type="date" value="${esc(s.from)}" onchange="lmOnDate('from', this.value)" /></div>
      <div class="lm-field"><label for="lm-to">To</label>
        <input id="lm-to" class="lm-input" type="date" value="${esc(s.to)}" onchange="lmOnDate('to', this.value)" /></div>
