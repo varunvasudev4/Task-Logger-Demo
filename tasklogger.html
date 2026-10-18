@@ -544,6 +544,12 @@ html.is-touch .pending-card-actions { opacity: 1; }
   .lm-empty { padding: 18px 12px; font-size: 12.5px; }
 }
 
+/* ── Highlight for tasks / entries that include Lambda (log table, Pending, Search) ── */
+#log-tbody tr.lambda-row > td { background: color-mix(in srgb, var(--purple-mid) 14%, var(--bg)) !important; }
+#log-tbody tr.lambda-row > td:first-child { box-shadow: inset 3px 0 0 var(--purple-mid); }
+.lambda-chip { display: inline-flex; align-items: center; gap: 3px; background: color-mix(in srgb, var(--purple-mid) 20%, transparent); color: var(--purple-dark, var(--purple-mid)); border: 1px solid var(--purple-mid); border-radius: 10px; font-size: 10px; font-weight: 600; padding: 1px 7px; white-space: nowrap; }
+.pending-card.lambda-hl, .search-result-item.lambda-hl { box-shadow: inset 3px 0 0 var(--purple-mid); background: color-mix(in srgb, var(--purple-mid) 7%, var(--bg)); }
+
 /* ── Task card: "Includes Lambda" tick (bottom-right) ──────────────────────── */
 .task-lambda-row { display: flex; justify-content: flex-end; margin-top: 8px; }
 .task-lambda-chk { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); cursor: pointer; user-select: none; padding: 3px 6px; border-radius: var(--radius-md); }
@@ -13104,6 +13110,7 @@ function submitComplete() {
       entry.taskStatus = status;
       entry.description = desc;
       entry.remark = remark;
+      if (task.includesLambda === true) entry.includesLambda = true; else delete entry.includesLambda;   // persists the Lambda highlight on the log row
       if (!entry.customFields) entry.customFields = {};
       Object.assign(entry.customFields, customValues);
 
@@ -13777,15 +13784,29 @@ function deleteTask(id) {
   saveState(); updateEmptyState(); updateLogPanel();
 }
 
+// Does this log entry belong to a task that includes Lambda? Stamped on the entry at completion
+// (entry.includesLambda); running entries fall back to the live task's tick. Only while the flag is on.
+function entryHasLambda(e) {
+  if (!e || !isLambdaLoggingEnabled()) return false;
+  if (e.includesLambda === true) return true;
+  if (e.taskId != null && typeof tasks !== 'undefined') { const tk = tasks.find(x => x.id === e.taskId); if (tk && tk.includesLambda === true && e.endTs == null) return true; }
+  return false;
+}
+function anyEntryHasLambda(list) { return Array.isArray(list) && list.some(entryHasLambda); }
+const LAMBDA_CHIP_HTML = '<span class="lambda-chip" title="This task includes Lambda"><i class="ti ti-function" style="font-size:11px"></i> Lambda</span>';
+
 // "Includes Lambda" tick on the task card (only shown while Lambda logging is enabled).
 function toggleTaskLambda(id, on) {
   const task = tasks.find(t => t.id === id);
   if (!task) return;
   task.includesLambda = !!on;
+  const oe = [...logEntries].reverse().find(e => e.taskId === id && e.endTs === null);   // keep the running log row in step
+  if (oe) { if (on) oe.includesLambda = true; else delete oe.includesLambda; }
   touchSyncMetadata(task);
   saveState();
   const lbl = document.querySelector('#row-' + id + ' .task-lambda-chk');
   if (lbl) lbl.classList.toggle('on', !!on);
+  if (typeof updateLogTable === 'function') updateLogTable();
 }
 
 function updateTaskField(id, field, val) {
@@ -14224,11 +14245,41 @@ function toggleTaskCardFieldCollapse(id, key) {
 // Options come from the column's linked master list when one is chosen; otherwise from the
 // unique non-empty values already present for this column in the saved log entries and
 // tasks. The current value is always kept in the options so it never disappears.
+// Unique values already used in one column of a table: 'logColumns' (Task Logger entries/tasks) or a Lambda master.
+const VS_TABLE_LABELS = { logColumns: 'Task Logger', lambdaFunctionColumns: 'Function Columns', lambdaChangeColumns: 'Change Columns' };
+function vsColumnsOf(storeKey) { return storeKey === 'logColumns' ? getLogColumns() : getLambdaColumns(storeKey); }
+function vsOwnerStore(col) {
+  for (const sk of Object.keys(LAMBDA_COLUMN_STORES)) if (getLambdaColumns(sk).indexOf(col) !== -1) return sk;
+  return null;
+}
+function pastValuesOfColumn(storeKey, colKey) {
+  const seen = new Set();
+  const add = v => { v = String(v == null ? '' : v).trim(); if (v) seen.add(v); };
+  const srcCol = vsColumnsOf(storeKey).find(c => c.key === colKey);
+  const multi = !!(srcCol && srcCol.type === 'multilist');
+  const addRaw = raw => { if (multi) String(raw == null ? '' : raw).split(/\s*[\/,]\s*/).forEach(add); else add(raw); };
+  try {
+    if (storeKey === 'logColumns') {
+      (logEntries || []).forEach(e => { try { addRaw(getEntryValueForColumn(e, null, colKey)); } catch (_) {} });
+      (tasks || []).forEach(tk => {
+        if (tk.customFields && tk.customFields[colKey] != null) addRaw(tk.customFields[colKey]);
+        else if (tk[colKey] != null && typeof tk[colKey] === 'string') addRaw(tk[colKey]);
+      });
+    } else if (LAMBDA_COLUMN_STORES[storeKey]) {
+      readLambdaStore(storeKey).forEach(r => addRaw(r.values && r.values[colKey]));
+    }
+  } catch (_) {}
+  return Array.from(seen).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true }));
+}
 function getSearchListOptions(col, currentValue) {
   let opts;
   const linked = col.listSource && masters.customLists && masters.customLists[col.listSource];
   if (linked) {
     opts = linked.slice();
+  } else if (col.valueSource && col.valueSource.store && col.valueSource.key) {
+    opts = pastValuesOfColumn(col.valueSource.store, col.valueSource.key);   // another table's column
+  } else if (vsOwnerStore(col)) {
+    opts = pastValuesOfColumn(vsOwnerStore(col), col.key);                    // this Lambda column's own previous entries
   } else {
     const seen = new Set();
     const add = v => { v = String(v == null ? '' : v).trim(); if (v) seen.add(v); };
@@ -15313,7 +15364,7 @@ function updateLogTable() {
           <div style="display:flex;flex-direction:row;align-items:center;gap:4px">${actionButtonsHtml}</div>
         </td>`;
 
-    return `<tr data-entry-ts="${e.startTs}">
+    return `<tr data-entry-ts="${e.startTs}"${entryHasLambda(e) ? ' class="lambda-row" title="Includes Lambda"' : ''}>
       ${cells}
       ${actionsCellHtml}
     </tr>`;
@@ -18681,6 +18732,9 @@ function renderLambdaColumnsTabHTML(storeKey) {
             <option value="__new__">+ Create new list&hellip;</option>
           </select>
           ${c.listSource ? `<button class="btn" style="font-size:11px;padding:4px 8px" onclick="goToListInListsTab('${esc(c.listSource)}')"><i class="ti ti-list"></i> Manage list</button>` : ''}` : ''}
+          ${c.type === 'searchlist' ? `<select class="meta-select" style="font-size:12px;padding:4px 6px;width:auto;max-width:100%" title="When no list is chosen, suggest the unique values already used in this column of another table. Leave on the first option to suggest this column's own previous entries." onchange="lcChangeValueSource(${k},'${c.key}', this.value)">
+            ${lcValueSourceOptionsHTML(storeKey, c)}
+          </select>` : ''}
         </div>
       </div>
       <div style="display:flex;align-items:center;gap:10px;margin-top:4px;flex-wrap:wrap">
@@ -18744,6 +18798,7 @@ function lcChangeType(storeKey, key, newType) {
   if (newType === 'textarea' && !(col.rows > 0)) col.rows = DEFAULT_TEXTAREA_ROWS;
   if (newType !== 'list' && newType !== 'multilist' && newType !== 'searchlist') {
     col.listSource = undefined;
+    col.valueSource = undefined;
     col.searchEntity = false;   // the individual-entity filter only exists for list-type columns
     cleanupOrphanedList(oldListSource, key);
   }
@@ -18767,6 +18822,31 @@ function lcChangeRows(storeKey, key, rows) {
   col.rows = (Number.isFinite(n) && n >= 1) ? n : DEFAULT_TEXTAREA_ROWS;
   saveState();
 }
+// Options for "values from another table's column" on a Searchable select column.
+function lcValueSourceOptionsHTML(storeKey, c) {
+  const cur = c.valueSource ? c.valueSource.store + '|' + c.valueSource.key : '';
+  let h = `<option value="">${c.listSource ? '— (list above is used) —' : '— previous entries of this column —'}</option>`;
+  Object.keys(VS_TABLE_LABELS).forEach(sk => {
+    const cols = vsColumnsOf(sk).filter(x => !(sk === storeKey && x.key === c.key));
+    if (!cols.length) return;
+    h += `<optgroup label="${esc(VS_TABLE_LABELS[sk])}">` + cols.map(x => { const v = sk + '|' + x.key; return `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>Values from: ${esc(VS_TABLE_LABELS[sk])} › ${esc(x.label)}</option>`; }).join('') + `</optgroup>`;
+  });
+  return h;
+}
+function lcChangeValueSource(storeKey, key, val) {
+  const col = getLambdaColumnByKey(storeKey, key);
+  if (!col) return;
+  if (!val) { col.valueSource = undefined; }
+  else {
+    const i = val.indexOf('|');
+    col.valueSource = { store: val.slice(0, i), key: val.slice(i + 1) };
+    const old = col.listSource;
+    col.listSource = undefined;          // a column uses either a list or another table's values, not both
+    cleanupOrphanedList(old, key);
+  }
+  saveState();
+  renderMastersContent();
+}
 function lcChangeListSource(storeKey, key, listSource) {
   const col = getLambdaColumnByKey(storeKey, key);
   if (!col) return;
@@ -18777,6 +18857,7 @@ function lcChangeListSource(storeKey, key, listSource) {
     const newKey = makeNewListKey(col.label);
     masters.customLists[newKey] = [];
     col.listSource = newKey;
+    col.valueSource = undefined;
     cleanupOrphanedList(oldListSource, key);
     saveState();
     switchTab('lists');
@@ -18785,6 +18866,7 @@ function lcChangeListSource(storeKey, key, listSource) {
     return;
   }
   col.listSource = listSource || undefined;
+  if (listSource) col.valueSource = undefined;
   if (listSource && !masters.customLists[listSource]) masters.customLists[listSource] = [];
   cleanupOrphanedList(oldListSource, key);
   saveState();
@@ -20970,8 +21052,9 @@ function renderSearchResults() {
       e.project ? `<span style="font-size:11px;color:var(--text-secondary)">${highlight(e.project)}</span>` : '',
     ].filter(Boolean).join(' ');
     const gx = groupBadgeAndPanel(hit);
-    const allBadges = [metaBadges, gx.badge].filter(Boolean).join(' ');
-    return `<div class="search-result-item" data-date="${entryDate}" onclick="jumpToDate('${entryDate}', ${e.startTs})" data-idx="${i}">
+    const hasLambda = entryHasLambda(e) || anyEntryHasLambda(hit.matches);
+    const allBadges = [hasLambda ? LAMBDA_CHIP_HTML : '', metaBadges, gx.badge].filter(Boolean).join(' ');
+    return `<div class="search-result-item${hasLambda ? ' lambda-hl' : ''}" data-date="${entryDate}" onclick="jumpToDate('${entryDate}', ${e.startTs})" data-idx="${i}">
       <div class="search-result-date">${dateLabel}</div>
       <div class="search-result-body">
         <div class="search-result-heading">${highlight(e.heading) || '<span style="color:var(--text-tertiary);font-style:italic">Untitled</span>'}</div>
@@ -23470,7 +23553,9 @@ function renderPendingTasksList() {
     const desc = e.description || '';
     const name = (e.heading && e.heading.trim()) ? e.heading.trim() : desc;
     const statusClass = isBlockedStatus(e.taskStatus) ? 'pending-card-status-blocked' : 'pending-card-status-pending';
+    const hasLambda = entryHasLambda(e) || anyEntryHasLambda(g.history);
     const chips = [
+      hasLambda ? LAMBDA_CHIP_HTML : '',
       '<span class="pending-card-chip ' + statusClass + '">' + esc(e.taskStatus || '') + '</span>',
       e.project ? '<span class="pending-card-chip">' + highlight(e.project) + '</span>' : '',
       e.module ? '<span class="pending-card-chip">' + highlight(e.module) + '</span>' : '',
@@ -23489,7 +23574,7 @@ function renderPendingTasksList() {
         (h.remark ? '<div class="pending-history-entry-remark">' + esc(h.remark) + '</div>' : '') +
         '</div>';
     }).join('');
-    return '<div class="pending-card">' +
+    return '<div class="pending-card' + (hasLambda ? ' lambda-hl' : '') + '">' +
       '<div class="pending-card-name" title="' + esc(name || 'Untitled') + '">' + highlight(name || 'Untitled') + '</div>' +
       (chips ? '<div class="pending-card-meta">' + chips + '</div>' : '') +
       (desc ? '<div class="pending-card-desc">' + highlight(desc.slice(0, 100)) + (desc.length > 100 ? '…' : '') + '</div>' : '') +
