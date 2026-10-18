@@ -12209,6 +12209,7 @@ function formatCustomDate(isoStr, dateFormat) {
 function getEntryValueForColumn(e, task, key) {
   switch (key) {
     case 'date': {
+      if (e.dateRaw !== undefined) return e.dateRaw; // imported blank / unrecognised date, shown as-is
       const d = new Date(e.startTs);
       const iso = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
       const colDef = getColumnByKey('date');
@@ -12863,7 +12864,7 @@ function submitComplete() {
       if (!isNaN(adjMinsEdit) && adjMinsEdit > 0) editEntry.durationSecs = adjMinsEdit * 60;
       const csEdit = getCustomStartTimestamp();
       const ceEdit = getCustomEndTimestamp();
-      if (csEdit) editEntry.startTs = csEdit;
+      if (csEdit) { editEntry.startTs = csEdit; delete editEntry.dateRaw; }
       if (ceEdit) editEntry.endTs = ceEdit;
       if (csEdit && ceEdit) {
         const customMins = Math.round((ceEdit - csEdit) / 60000);
@@ -12973,7 +12974,7 @@ function submitComplete() {
       // (after this block) always matches the entry that was actually open.
       const primaryEntryKey = entry.taskId + '@' + entry.startTs;
       entry.endTs = customEnd || Date.now();
-      if (customStart) entry.startTs = customStart;
+      if (customStart) { entry.startTs = customStart; delete entry.dateRaw; }
       // If custom time was used, deduct that window from break
       if (customStart && customEnd) deductFromBreak(customStart, customEnd);
       entry.heading = heading;
@@ -20869,6 +20870,45 @@ function calculateBreakMinutes(startStr, endStr, workingHoursStr) {
   return breakMin;
 }
 
+// Sheet chooser shown when an Excel workbook has more than one sheet. Calls onPick(sheetName)
+// with the chosen sheet, or onCancel() if the user backs out.
+function askExcelSheet(wb, fileName, onPick, onCancel) {
+  const old = document.getElementById('excel-sheet-overlay');
+  if (old) old.remove();
+  const rowsIn = (name) => {
+    try {
+      const ref = wb.Sheets[name] && wb.Sheets[name]['!ref'];
+      if (!ref) return 0;
+      const r = XLSX.utils.decode_range(ref);
+      return Math.max(0, r.e.r - r.s.r); // data rows, excluding the header row
+    } catch (e) { return 0; }
+  };
+  const ov = document.createElement('div');
+  ov.id = 'excel-sheet-overlay';
+  ov.className = 'confirm-overlay';
+  ov.style.zIndex = '10200';
+  const opts = wb.SheetNames.map((n, i) =>
+    `<option value="${i}">${escHtml(n)} (${rowsIn(n)} row${rowsIn(n) === 1 ? '' : 's'})</option>`).join('');
+  ov.innerHTML = `
+    <div class="confirm-box">
+      <div class="confirm-title">Choose sheet to import</div>
+      <div class="confirm-msg" style="margin-bottom:12px">${escHtml(fileName || 'This file')} has ${wb.SheetNames.length} sheets. Which one do you want to import?</div>
+      <select class="csv-input" id="excel-sheet-select" style="width:100%;margin-bottom:20px">${opts}</select>
+      <div class="confirm-actions">
+        <button class="btn" id="excel-sheet-cancel">Cancel</button>
+        <button class="btn btn-primary" id="excel-sheet-ok">Import</button>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+  const close = () => { ov.remove(); };
+  document.getElementById('excel-sheet-cancel').onclick = () => { close(); if (onCancel) onCancel(); };
+  document.getElementById('excel-sheet-ok').onclick = () => {
+    const idx = parseInt(document.getElementById('excel-sheet-select').value, 10) || 0;
+    close();
+    onPick(wb.SheetNames[idx]);
+  };
+}
+
 // Entry point for both the file picker and drag & drop. Reads the file as text
 // (CSV) or binary (Excel) depending on its extension, parses it into a common
 // "array of row arrays" shape, then hands off to importParsedRows() so the rest
@@ -20884,13 +20924,27 @@ function processCSVFile(file) {
     reader.onload = ev => {
       try {
         const wb = XLSX.read(new Uint8Array(ev.target.result), { type: 'array' });
-        const sheet = wb.Sheets[wb.SheetNames[0]];
-        // raw:false gives formatted/display strings (matching how CSV values arrive)
-        // rather than raw numbers/dates, so downstream parsing logic stays identical.
-        const allRows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' })
-          .map(r => r.map(v => String(v == null ? '' : v).trim()))
-          .filter(r => r.some(f => f !== ''));
-        importParsedRows(allRows);
+        const importSheet = (sheetName) => {
+          try {
+            const sheet = wb.Sheets[sheetName];
+            // raw:false gives formatted/display strings (matching how CSV values arrive)
+            // rather than raw numbers/dates, so downstream parsing logic stays identical.
+            const allRows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' })
+              .map(r => r.map(v => String(v == null ? '' : v).trim()))
+              .filter(r => r.some(f => f !== ''));
+            importParsedRows(allRows);
+          } catch (err) {
+            prev.innerHTML = `<span style="color:var(--red-mid)">✗ Error parsing Excel file: ${escHtml(err.message)}</span>`;
+          }
+        };
+        if (wb.SheetNames.length > 1) {
+          prev.textContent = '';
+          askExcelSheet(wb, file.name, importSheet, () => {
+            prev.innerHTML = '<span style="color:var(--text-tertiary)">Import cancelled — no sheet chosen.</span>';
+          });
+        } else {
+          importSheet(wb.SheetNames[0]);
+        }
       } catch (err) {
         prev.innerHTML = `<span style="color:var(--red-mid)">✗ Error parsing Excel file: ${escHtml(err.message)}</span>`;
       }
@@ -20926,15 +20980,13 @@ function importLambdaRows(allRows, storeKey) {
     const idx = {};
     cols.forEach(c => { idx[c.key] = header.indexOf(norm(c.label)); });
     if (cols.every(c => idx[c.key] === -1)) { prev.innerHTML = `<span style="color:var(--red-mid)">✗ No header in the file matches a ${escHtml(CSV_SCHEMAS[storeKey].label)} column name.</span>`; return; }
-    const missingReq = cols.filter(c => c.required && idx[c.key] === -1).map(c => c.label);
-    if (missingReq.length) { prev.innerHTML = `<span style="color:var(--red-mid)">✗ Missing required column${missingReq.length>1?'s':''}: ${missingReq.map(escHtml).join(', ')}</span>`; return; }
+    const missingReq = cols.filter(c => c.required && idx[c.key] === -1).map(c => c.label); // imported blank, reported below
     const store = readLambdaStore(storeKey);
     const seen = new Set(store.map(r => JSON.stringify(cols.map(c => (r.values && r.values[c.key]) || ''))));
     let imported = 0, skipped = 0, failed = 0;
     allRows.slice(1).forEach(vals => {
       const values = {};
       cols.forEach(c => { values[c.key] = idx[c.key] >= 0 ? String(vals[idx[c.key]] == null ? '' : vals[idx[c.key]]).trim() : ''; });
-      if (cols.some(c => c.required && !values[c.key])) { failed++; return; }
       const sig = JSON.stringify(cols.map(c => values[c.key]));
       if (seen.has(sig)) { skipped++; return; }
       seen.add(sig);
@@ -20945,7 +20997,7 @@ function importLambdaRows(allRows, storeKey) {
     if (typeof lmRefreshIfOpen === 'function') lmRefreshIfOpen();
     const parts = [`<span style="color:var(--green-dark)">✓ Imported ${imported} record${imported===1?'':'s'} to ${escHtml(CSV_SCHEMAS[storeKey].storageKey)}</span>`];
     if (skipped) parts.push(`<span style="color:var(--text-tertiary)">${skipped} skipped — duplicate</span>`);
-    if (failed)  parts.push(`<span style="color:var(--red-mid)">${failed} row${failed>1?'s':''} missing a required value</span>`);
+    if (missingReq.length) parts.push(`<span style="color:var(--text-tertiary)">Not in file (imported blank): ${missingReq.map(escHtml).join(', ')}</span>`);
     prev.innerHTML = parts.join(' &middot; ');
   } catch (err) {
     prev.innerHTML = `<span style="color:var(--red-mid)">✗ Error parsing file: ${escHtml(err.message)}</span>`;
@@ -21035,11 +21087,11 @@ function importParsedRows(allRows) {
 
       // Required columns are the ones the app cannot function without (date/effort).
       // Report any that are missing by name instead of silently importing broken rows.
-      const missingRequired = cols.filter(c => c.essential && col[c.key] === -1).map(c => c.label);
-      if (missingRequired.length) {
-        prev.innerHTML = `<span style="color:var(--red-mid)">✗ Missing required column${missingRequired.length>1?'s':''}: ${missingRequired.map(esc).join(', ')}</span>`;
-        return;
-      }
+      // Older logs don't carry every value the latest logs do, so a missing column or an
+      // empty cell is NOT a reason to skip: those rows import with the value left blank.
+      // The summary below just tells the user which columns weren't in the file.
+      const missingRequired = cols.filter(c => (c.essential || isColumnRequired(c)) && col[c.key] === -1).map(c => c.label);
+      let undatedRows = 0, unparsedDateRows = 0;
 
       let imported = 0, skipped = 0, failed = 0;
       dataRows.forEach((vals, rowIdx) => {
@@ -21048,7 +21100,7 @@ function importParsedRows(allRows) {
         const dateStr = getVal('date');
 
         // Parse date: supports DD-MM-YYYY and DD-Mon-YY / DD-Mon-YYYY
-        let startTs, iso;
+        let startTs, iso, dateRaw;
         const numMatch = dateStr.match(/^(\d{1,2})-(\d{2})-(\d{4})$/);
         const monMatch = dateStr.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{2,4})$/);
         if (numMatch) {
@@ -21062,9 +21114,15 @@ function importParsedRows(allRows) {
           startTs = new Date(yr, mo, dy, 9, 0).getTime();
           iso = yr + '-' + String(mo+1).padStart(2,'0') + '-' + String(dy).padStart(2,'0');
         } else {
-          // Unparseable date: don't silently substitute today's date (that would
-          // corrupt the imported record's date). Treat as a row-level failure.
-          throw new Error('Row ' + (rowIdx + 2) + ': unrecognized date "' + dateStr + '"');
+          // Blank or unrecognised date: never skip the row and never lose the value.
+          // The original text (or blank) is kept in entry.dateRaw and shown as-is in the Date
+          // column. startTs is only an internal placement so the row appears in the log: it
+          // goes on the "Import from date" if set, otherwise today.
+          dateRaw = dateStr;
+          if (dateStr === '') undatedRows++; else unparsedDateRows++;
+          iso = from || (function () { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); })();
+          const pp = iso.split('-');
+          startTs = new Date(parseInt(pp[0]), parseInt(pp[1])-1, parseInt(pp[2]), 9, 0).getTime();
         }
 
         if (from && iso < from) { skipped++; return; }
@@ -21084,6 +21142,7 @@ function importParsedRows(allRows) {
           remark: getVal('remark'),
           taskStatus: getVal('status') || getDefaultCompleteStatus(),
           startTs, endTs: startTs + mins * 60000,
+          ...(dateRaw !== undefined ? { dateRaw } : {}),
           durationSecs: mins * 60,
           customFields: {}
         };
@@ -21130,6 +21189,9 @@ function importParsedRows(allRows) {
       const parts = [`<span style="color:var(--green-dark)">✓ Imported ${imported} entries</span>`];
       if (skipped) parts.push(`<span style="color:var(--text-tertiary)">${skipped} skipped — out of range or duplicate</span>`);
       if (failed)  parts.push(`<span style="color:var(--red-mid)">${failed} row${failed>1?'s':''} failed validation</span>`);
+      if (missingRequired.length) parts.push(`<span style="color:var(--amber-mid, var(--text-tertiary))">Not in file (imported blank): ${missingRequired.map(esc).join(', ')}</span>`);
+      if (undatedRows) parts.push(`<span style="color:var(--text-tertiary)">${undatedRows} row${undatedRows>1?'s':''} imported with a blank date</span>`);
+      if (unparsedDateRows) parts.push(`<span style="color:var(--text-tertiary)">${unparsedDateRows} row${unparsedDateRows>1?'s':''} kept their date as text (format not recognised)</span>`);
       prev.innerHTML = parts.join(' &middot; ');
     } catch(err) {
       prev.innerHTML = `<span style="color:var(--red-mid)">✗ Error parsing file: ${escHtml(err.message)}</span>`;
