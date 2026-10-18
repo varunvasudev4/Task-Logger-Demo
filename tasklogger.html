@@ -481,6 +481,32 @@ html.is-touch .pending-card-actions { opacity: 1; }
 .lm-input.invalid { border-color: var(--red-mid); }
 .lm-hint { flex-basis: 100%; font-size: 12px; color: var(--text-tertiary); }
 .lm-hint button { background: none; border: none; padding: 0; font: inherit; color: var(--blue-mid); cursor: pointer; text-decoration: underline; }
+/* "Search as individual entity" filters (list / multi-select / searchable-select columns) */
+.lm-bar-left { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
+.lm-filter-toggle { display: inline-flex; align-items: center; gap: 5px; }
+.lm-filter-toggle .lm-filter-chev { font-size: 13px; }
+.lm-filter-badge { min-width: 16px; height: 16px; padding: 0 5px; border-radius: 8px; background: var(--blue-mid); color: #fff; font-size: 10px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; }
+.lm-filter-badge.hidden { display: none; }
+.lm-ent-field { max-width: 100%; }
+.lm-ent-trigger { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 130px; max-width: 220px; text-align: left; cursor: pointer; }
+.lm-ent-trigger .lm-ent-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lm-ent-trigger i { font-size: 13px; color: var(--text-tertiary); flex-shrink: 0; }
+.lm-ent-trigger.active { border-color: var(--blue-mid); background: var(--blue-bg); }
+.lm-ent-panel {
+  position: fixed; z-index: 120; display: flex; flex-direction: column; overflow: hidden;
+  background: var(--bg); border: 1px solid var(--border-md); border-radius: var(--radius-md);
+  box-shadow: 0 6px 20px rgba(0,0,0,0.18);
+}
+.lm-ent-panel.hidden { display: none; }
+.lm-ent-search { padding: 6px; border-bottom: 1px solid var(--border); }
+.lm-ent-search input { width: 100%; }
+.lm-ent-opt { display: flex; align-items: center; gap: 8px; padding: 7px 10px; font-size: 13px; color: var(--text-primary); cursor: pointer; }
+.lm-ent-opt:hover { background: var(--bg-secondary); }
+.lm-ent-opt input { width: 15px; height: 15px; cursor: pointer; flex-shrink: 0; }
+.lm-ent-opt span { overflow-wrap: anywhere; }
+.lm-ent-all { border-bottom: 1px solid var(--border); font-weight: 600; background: var(--bg-secondary); }
+.lm-ent-list { flex: 1; min-height: 0; overflow-y: auto; }
+.lm-ent-foot { padding: 5px 10px; font-size: 11px; color: var(--text-tertiary); border-top: 1px solid var(--border); }
 .lm-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; padding: 6px 16px 8px; }
 .lm-body { flex: 1; min-height: 0; display: flex; flex-direction: column; border-top: 1px solid var(--border); }
 .lm-table-wrap { flex: 1; min-height: 0; overflow: auto; }
@@ -2124,7 +2150,10 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
   <div class="lm-tabs" id="lm-tabs"></div>
   <div class="lm-toolbar" id="lm-toolbar"></div>
   <div class="lm-bar">
-    <div class="log-count" id="lm-count"></div>
+    <div class="lm-bar-left">
+      <button type="button" class="btn lm-filter-toggle" id="lm-filter-toggle" onclick="lmToggleFilters()" aria-expanded="true" aria-controls="lm-toolbar" title="Show / hide the filters"><i class="ti ti-filter"></i> <span>Filters</span><span class="lm-filter-badge hidden" id="lm-filter-badge"></span><i class="ti ti-chevron-up lm-filter-chev"></i></button>
+      <div class="log-count" id="lm-count"></div>
+    </div>
     <div class="log-header-actions">
       <button class="btn btn-danger" id="lm-del-btn" onclick="lmDeleteSelected()" disabled title="Delete the ticked rows"><i class="ti ti-trash"></i> Delete</button>
       <button class="btn" id="lm-copy-btn" onclick="lmCopy(this)" title="Copies the ticked rows, or every row shown if none are ticked"><i class="ti ti-clipboard-copy"></i> Copy</button>
@@ -18563,6 +18592,10 @@ function renderLambdaColumnsTabHTML(storeKey) {
           <input type="checkbox" ${c.searchable===true?'checked':''} onchange="lcToggleSearchable(${k},'${c.key}')" />
           Searchable
         </label>
+        ${isList ? `<label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-secondary);cursor:pointer" title="Show this column as its own multi-select filter in the Lambda Functions table filter bar (all values selected by default)">
+          <input type="checkbox" ${c.searchEntity===true?'checked':''} onchange="lcToggleSearchEntity(${k},'${c.key}')" />
+          Search as individual entity
+        </label>` : ''}
         <button class="btn-icon btn-delete" onclick="lcConfirmDelete(${k},'${c.key}')" title="Delete column"><i class="ti ti-trash"></i></button>
       </div>
     </div>`;
@@ -18572,7 +18605,7 @@ function renderLambdaColumnsTabHTML(storeKey) {
     <div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">
       Lambda logging master: <strong>${meta.title}</strong>. Configure its columns the same way as the
       Columns master — drag rows to reorder, rename the label, choose the input type, mark a field mandatory, and tick Searchable to offer it in the
-      Search by list of the Lambda Functions screen. This master is separate from the Task Logger Columns and is used for later Lambda logging changes.
+      Search by list of the Lambda Functions screen, and tick Search as individual entity on a dropdown / multi-select / searchable-select column to give it its own filter there. This master is separate from the Task Logger Columns and is used for later Lambda logging changes.
     </div>
     ${renderColumnConfigIOHTML(storeKey)}
     ${cols.length === 0 ? '<div style="color:var(--text-tertiary);font-size:13px;padding:8px 0">No columns yet. Add the first one below.</div>' : ''}
@@ -18607,10 +18640,12 @@ function lcChangeType(storeKey, key, newType) {
   if (newType === 'textarea' && !(col.rows > 0)) col.rows = DEFAULT_TEXTAREA_ROWS;
   if (newType !== 'list' && newType !== 'multilist' && newType !== 'searchlist') {
     col.listSource = undefined;
+    col.searchEntity = false;   // the individual-entity filter only exists for list-type columns
     cleanupOrphanedList(oldListSource, key);
   }
   saveState();
   renderMastersContent();
+  if (typeof lmRefreshIfOpen === 'function') lmRefreshIfOpen();
 }
 function lcChangeDateFormat(storeKey, key, format) {
   const col = getLambdaColumnByKey(storeKey, key);
@@ -18664,6 +18699,14 @@ function lcToggleSearchable(storeKey, key) {
   saveState();
   if (typeof lmRefreshIfOpen === 'function') lmRefreshIfOpen();
 }
+function lcToggleSearchEntity(storeKey, key) {
+  const col = getLambdaColumnByKey(storeKey, key);
+  if (!col) return;
+  col.searchEntity = !col.searchEntity;
+  if (!col.searchEntity && typeof lmGetState === 'function') delete lmGetState(storeKey).ent[key];   // drop its filter selection
+  saveState();
+  if (typeof lmRefreshIfOpen === 'function') lmRefreshIfOpen();
+}
 function lcConfirmDelete(storeKey, key) {
   const col = getLambdaColumnByKey(storeKey, key);
   if (!col) return;
@@ -18698,7 +18741,7 @@ function lcAddColumn(storeKey) {
   let key = baseKey, n = 1;
   const existing = getLambdaColumns(storeKey).map(c => c.key);
   while (existing.includes(key)) { key = baseKey + '_' + (++n); }
-  const col = { key, label, type, required: false, searchable: false };
+  const col = { key, label, type, required: false, searchable: false, searchEntity: false };
   if (type === 'date') col.dateFormat = 'DD-MM-YYYY';
   if (type === 'textarea') col.rows = DEFAULT_TEXTAREA_ROWS;
   if (type === 'list' || type === 'multilist') {
@@ -18820,7 +18863,8 @@ function lmSel(k) { return lmSelected[k] || (lmSelected[k] = new Set()); }
 let lmVisibleIds = [];
 
 function lmGetState(k) {
-  if (!lmTabState[k]) lmTabState[k] = { by: '', q: '', from: '', to: '', fromTouched: false, toTouched: false, sortCol: null, sortDir: 'asc' };
+  if (!lmTabState[k]) lmTabState[k] = { by: '', q: '', from: '', to: '', fromTouched: false, toTouched: false, sortCol: null, sortDir: 'asc', ent: {} };
+  if (!lmTabState[k].ent) lmTabState[k].ent = {};
   return lmTabState[k];
 }
 function lmLoadPrefs(k) {
@@ -18839,6 +18883,7 @@ function openLambdaOverlay(tab) {
   lmRenderAll();
 }
 function closeLambdaOverlay() {
+  lmEntClose();
   Object.keys(lmSelected).forEach(k => lmSelected[k].clear());
   const el = document.getElementById('lambda-overlay');
   if (el) el.classList.add('hidden');
@@ -18896,6 +18941,7 @@ function lmRenderAll() {
   lmRenderTabs();
   lmRenderToolbar();
   lmRenderTable();
+  lmApplyFilterCollapse();
 }
 function lmRenderTabs() {
   const el = document.getElementById('lm-tabs');
@@ -18907,6 +18953,7 @@ function lmRenderTabs() {
 function lmRenderToolbar() {
   const el = document.getElementById('lm-toolbar');
   if (!el) return;
+  lmEntClose();
   const k = lmActiveTab, s = lmGetState(k), cols = getLambdaColumns(k);
   const searchable = cols.filter(c => c.searchable === true);
   if (!searchable.some(c => c.key === s.by)) s.by = searchable.length ? searchable[0].key : '';
@@ -18915,6 +18962,11 @@ function lmRenderToolbar() {
   if (!s.fromTouched) s.from = dates.length ? dates[0] : today;   // oldest record date
   if (!s.toTouched) s.to = today;                                  // current date
   const none = searchable.length === 0;
+  const entFields = lmEntityCols(k).map(c => {
+    const on = Array.isArray(s.ent[c.key]);
+    return `<div class="lm-field lm-ent-field"><label>${esc(c.label)}</label>
+       <button type="button" class="lm-input lm-ent-trigger ${on ? 'active' : ''}" data-key="${esc(c.key)}" aria-haspopup="listbox" aria-expanded="false" title="Filter by ${esc(c.label)}" onclick="lmEntToggle(this)"><span class="lm-ent-label">${esc(lmEntLabel(k, c))}</span><i class="ti ti-chevron-down"></i></button></div>`;
+  }).join('');
   el.innerHTML =
     `<div class="lm-field"><label for="lm-by">Search by <span class="lm-req" title="Required">*</span></label>
        <select id="lm-by" class="lm-input" onchange="lmOnBy(this.value)" ${none ? 'disabled' : ''}>
@@ -18922,11 +18974,12 @@ function lmRenderToolbar() {
        </select></div>
      <div class="lm-field lm-field-grow"><label for="lm-q">Search</label>
        <input id="lm-q" class="lm-input" type="search" autocomplete="off" placeholder="${none ? 'Mark a column Searchable first' : 'Type to search…'}" value="${esc(s.q)}" oninput="lmOnQuery(this.value)" ${none ? 'disabled' : ''} /></div>
+     ${entFields}
      <div class="lm-field"><label for="lm-from">From</label>
        <input id="lm-from" class="lm-input" type="date" value="${esc(s.from)}" onchange="lmOnDate('from', this.value)" /></div>
      <div class="lm-field"><label for="lm-to">To</label>
        <input id="lm-to" class="lm-input" type="date" value="${esc(s.to)}" onchange="lmOnDate('to', this.value)" /></div>
-     <button type="button" class="btn" onclick="lmResetFilters()" title="Clear the search and reset the date range"><i class="ti ti-filter-off"></i> Reset</button>
+     <button type="button" class="btn" onclick="lmResetFilters()" title="Clear the search and entity filters and reset the date range"><i class="ti ti-filter-off"></i> Reset</button>
      ${none ? `<div class="lm-hint">No column in ${esc(LAMBDA_COLUMN_STORES[k].title)} has the Searchable flag on yet. <button type="button" onclick="lmOpenMasters()">Open the master</button> and tick Searchable.</div>` : ''}`;
 }
 function lmOpenMasters() {
@@ -18943,18 +18996,235 @@ function lmOnDate(which, v) {
 }
 function lmResetFilters() {
   const s = lmGetState(lmActiveTab);
-  s.q = ''; s.fromTouched = false; s.toTouched = false;
+  s.q = ''; s.fromTouched = false; s.toTouched = false; s.ent = {};   // entity filters go back to "all selected"
   lmRenderToolbar();
   lmRenderTable();
 }
+
+// ── "Search as individual entity" filters ──────────────────────────────────
+// A dropdown list / multi-select / searchable-select column of a Lambda master with the
+// "Search as individual entity" flag on gets its own filter in the toolbar. Every value is
+// selected by default (= no restriction, so values added later show up too); the user can
+// untick values or use Select all. Searchable-select columns also get a type-to-find box.
+// Selections live in lmGetState(k).ent[colKey]: absent = all selected, array = chosen values.
+const LM_BLANK = '\u0000blank';
+function lmIsListType(t) { return t === 'list' || t === 'multilist' || t === 'searchlist'; }
+// Collapse / expand the filter bar above the table (remembered between visits).
+let lmFiltersCollapsed = false;
+try { lmFiltersCollapsed = localStorage.getItem('ttl_lmFiltersCollapsed') === '1'; } catch (e) {}
+function lmToggleFilters() {
+  lmFiltersCollapsed = !lmFiltersCollapsed;
+  try { localStorage.setItem('ttl_lmFiltersCollapsed', lmFiltersCollapsed ? '1' : '0'); } catch (e) {}
+  lmApplyFilterCollapse();
+}
+// Number of filters currently narrowing the table (shown on the button while the bar is collapsed).
+function lmActiveFilterCount() {
+  const s = lmGetState(lmActiveTab);
+  let n = 0;
+  if (String(s.q || '').trim() && s.by) n++;
+  if (s.fromTouched) n++;
+  if (s.toTouched) n++;
+  n += Object.keys(s.ent || {}).filter(key => Array.isArray(s.ent[key]) && lmEntityCols(lmActiveTab).some(c => c.key === key)).length;
+  return n;
+}
+function lmApplyFilterCollapse() {
+  const tb = document.getElementById('lm-toolbar'), btn = document.getElementById('lm-filter-toggle'), badge = document.getElementById('lm-filter-badge');
+  if (lmFiltersCollapsed) lmEntClose();
+  if (tb) tb.style.display = lmFiltersCollapsed ? 'none' : '';
+  if (btn) {
+    btn.setAttribute('aria-expanded', lmFiltersCollapsed ? 'false' : 'true');
+    btn.title = lmFiltersCollapsed ? 'Show the filters' : 'Hide the filters';
+    const chev = btn.querySelector('.lm-filter-chev');
+    if (chev) chev.className = 'ti ' + (lmFiltersCollapsed ? 'ti-chevron-down' : 'ti-chevron-up') + ' lm-filter-chev';
+  }
+  if (badge) {
+    const n = lmActiveFilterCount();
+    badge.textContent = n; badge.classList.toggle('hidden', !n);
+    badge.title = n + ' active filter' + (n === 1 ? '' : 's');
+  }
+}
+function lmEntityCols(k) { return getLambdaColumns(k).filter(c => c.searchEntity === true && lmIsListType(c.type)); }
+function lmKnownItems(col) {
+  const l = col.listSource && masters.customLists && masters.customLists[col.listSource];
+  return Array.isArray(l) ? l.map(String) : [];
+}
+// Multi-select values are stored joined by " / " (or ","); list items that themselves contain
+// one of those characters (e.g. "N/A") are recognised first so they are not torn apart.
+function lmSplitMulti(raw, known) {
+  let str = String(raw == null ? '' : raw);
+  const out = [];
+  known.filter(x => /[\/,]/.test(x)).sort((a, b) => b.length - a.length).forEach(item => {
+    if (str.indexOf(item) !== -1) { out.push(item); str = str.split(item).join(' / '); }
+  });
+  str.split(/\s*[\/,]\s*/).forEach(x => { x = x.trim(); if (x) out.push(x); });
+  return out;
+}
+function lmCellValues(col, raw, known) {
+  const v = raw == null ? '' : String(raw).trim();
+  if (!v) return [];
+  return col.type === 'multilist' ? lmSplitMulti(v, known) : [v];
+}
+// Options = the master list's items, then any other value found in the records, then (Blank).
+function lmEntOptions(k, col) {
+  const known = lmKnownItems(col);
+  const opts = [], seen = new Set();
+  known.forEach(x => { const t = x.trim(); if (t && !seen.has(t.toLowerCase())) { seen.add(t.toLowerCase()); opts.push({ v: t, label: t }); } });
+  const extras = []; let blank = false;
+  readLambdaStore(k).forEach(r => {
+    const vals = lmCellValues(col, r.values && r.values[col.key], known);
+    if (!vals.length) blank = true;
+    vals.forEach(x => { const l = x.toLowerCase(); if (!seen.has(l)) { seen.add(l); extras.push({ v: x, label: x }); } });
+  });
+  extras.sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: 'base' }));
+  return opts.concat(extras, blank ? [{ v: LM_BLANK, label: '(Blank)' }] : []);
+}
+function lmEntityMatch(rec, e) {
+  const vals = lmCellValues(e.col, rec.values && rec.values[e.col.key], e.known);
+  if (!vals.length) return e.sel.has(LM_BLANK);
+  return vals.some(x => e.sel.has(x.toLowerCase()));   // multi-select: any chosen value matches
+}
+function lmEntSelectedSet(k, col, opts) {
+  const cur = lmGetState(k).ent[col.key];
+  return Array.isArray(cur) ? new Set(cur) : new Set(opts.map(o => o.v));
+}
+function lmEntCommit(k, col, set, opts) {
+  const s = lmGetState(k);
+  if (opts.every(o => set.has(o.v))) delete s.ent[col.key];   // everything ticked = default, no restriction
+  else s.ent[col.key] = opts.filter(o => set.has(o.v)).map(o => o.v);
+}
+function lmEntLabel(k, col) {
+  const cur = lmGetState(k).ent[col.key];
+  if (!Array.isArray(cur)) return 'All';
+  const opts = lmEntOptions(k, col);
+  const sel = opts.filter(o => cur.indexOf(o.v) !== -1);
+  if (!sel.length) return 'None';
+  if (sel.length === 1) return sel[0].label;
+  return sel.length + ' of ' + opts.length + ' selected';
+}
+let _lmEnt = null;   // open panel: { key, btn, opts, query }
+function lmEntToggle(btn) {
+  if (_lmEnt && _lmEnt.key === btn.dataset.key) { lmEntClose(); return; }
+  lmEntOpen(btn);
+}
+function lmEntClose() {
+  const p = document.getElementById('lm-ent-panel');
+  if (p) p.classList.add('hidden');
+  if (_lmEnt && _lmEnt.btn) _lmEnt.btn.setAttribute('aria-expanded', 'false');
+  _lmEnt = null;
+}
+function lmEntOpen(btn) {
+  lmEntClose();
+  const k = lmActiveTab, col = getLambdaColumnByKey(k, btn.dataset.key);
+  const overlay = document.getElementById('lambda-overlay');
+  if (!col || !overlay) return;
+  let p = document.getElementById('lm-ent-panel');
+  if (!p) {
+    p = document.createElement('div');
+    p.id = 'lm-ent-panel'; p.className = 'lm-ent-panel hidden';
+    p.setAttribute('role', 'listbox'); p.setAttribute('aria-multiselectable', 'true');
+    p.addEventListener('change', (e) => {
+      if (!_lmEnt) return;
+      const t = e.target;
+      if (t.id === 'lm-ent-all') lmEntSetVisible(t.checked);
+      else if (t.classList.contains('lm-ent-cb')) lmEntSetOne(+t.dataset.i, t.checked);
+    });
+    p.addEventListener('input', (e) => {
+      if (!_lmEnt || e.target.id !== 'lm-ent-q') return;
+      _lmEnt.query = e.target.value.trim().toLowerCase();
+      lmEntSync();
+    });
+    overlay.appendChild(p);
+  }
+  const opts = lmEntOptions(k, col);
+  _lmEnt = { key: col.key, btn, opts, query: '' };
+  p.innerHTML =
+    (col.type === 'searchlist' ? `<div class="lm-ent-search"><input id="lm-ent-q" class="lm-input" type="search" autocomplete="off" placeholder="Search ${esc(col.label)}…" /></div>` : '') +
+    `<label class="lm-ent-opt lm-ent-all"><input type="checkbox" id="lm-ent-all" /><span class="lm-ent-all-text">Select all</span></label>` +
+    `<div class="lm-ent-list">` + (opts.length
+      ? opts.map((o, i) => `<label class="lm-ent-opt" data-i="${i}"><input type="checkbox" class="lm-ent-cb" data-i="${i}" /><span>${esc(o.label)}</span></label>`).join('')
+      : `<div class="lm-empty" style="padding:12px">No values yet. Add items to the list or import records.</div>`) + `</div>` +
+    `<div class="lm-ent-foot"></div>`;
+  btn.setAttribute('aria-expanded', 'true');
+  p.classList.remove('hidden');
+  lmEntPosition(btn, p);
+  lmEntSync();
+  const q = document.getElementById('lm-ent-q');
+  if (q && !document.documentElement.classList.contains('is-touch')) q.focus();   // avoid popping the keyboard on touch devices
+}
+function lmEntPosition(btn, p) {
+  const r = btn.getBoundingClientRect(), vw = window.innerWidth, vh = window.innerHeight;
+  const w = Math.min(Math.max(r.width, 240), vw - 16);
+  const left = Math.max(8, Math.min(r.left, vw - w - 8));
+  const below = vh - r.bottom - 12, above = r.top - 12;
+  p.style.width = w + 'px'; p.style.left = left + 'px';
+  if (below >= 220 || below >= above) { p.style.top = (r.bottom + 4) + 'px'; p.style.bottom = 'auto'; p.style.maxHeight = Math.max(140, Math.min(380, below)) + 'px'; }
+  else { p.style.bottom = (vh - r.top + 4) + 'px'; p.style.top = 'auto'; p.style.maxHeight = Math.max(140, Math.min(380, above)) + 'px'; }
+}
+function lmEntVisible(o) { return !_lmEnt.query || o.label.toLowerCase().indexOf(_lmEnt.query) !== -1; }
+// Select all / clear acts on the options currently visible (all of them unless the user typed a search).
+function lmEntSetVisible(on) {
+  const k = lmActiveTab, col = getLambdaColumnByKey(k, _lmEnt.key); if (!col) return;
+  const set = lmEntSelectedSet(k, col, _lmEnt.opts);
+  _lmEnt.opts.forEach(o => { if (lmEntVisible(o)) { if (on) set.add(o.v); else set.delete(o.v); } });
+  lmEntCommit(k, col, set, _lmEnt.opts);
+  lmEntSync(); lmRenderTable();
+}
+function lmEntSetOne(i, on) {
+  const k = lmActiveTab, col = getLambdaColumnByKey(k, _lmEnt.key), o = _lmEnt.opts[i]; if (!col || !o) return;
+  const set = lmEntSelectedSet(k, col, _lmEnt.opts);
+  if (on) set.add(o.v); else set.delete(o.v);
+  lmEntCommit(k, col, set, _lmEnt.opts);
+  lmEntSync(); lmRenderTable();
+}
+// Brings the panel's ticks, Select all state, footer and the toolbar button label in line with the selection.
+function lmEntSync() {
+  if (!_lmEnt) return;
+  const k = lmActiveTab, col = getLambdaColumnByKey(k, _lmEnt.key), p = document.getElementById('lm-ent-panel');
+  if (!col || !p) return;
+  const sel = lmEntSelectedSet(k, col, _lmEnt.opts);
+  let vis = 0, visSel = 0;
+  p.querySelectorAll('.lm-ent-list .lm-ent-opt').forEach(row => {
+    const o = _lmEnt.opts[+row.dataset.i], show = lmEntVisible(o);
+    row.style.display = show ? '' : 'none';
+    const cb = row.querySelector('input'); cb.checked = sel.has(o.v);
+    if (show) { vis++; if (cb.checked) visSel++; }
+  });
+  const all = p.querySelector('#lm-ent-all');
+  all.checked = vis > 0 && visSel === vis;
+  all.indeterminate = visSel > 0 && visSel < vis;
+  all.disabled = vis === 0;
+  p.querySelector('.lm-ent-all-text').textContent = _lmEnt.query ? 'Select all matching' : 'Select all';
+  const n = _lmEnt.opts.filter(o => sel.has(o.v)).length;
+  p.querySelector('.lm-ent-foot').textContent = (_lmEnt.opts.length && !vis ? 'No matches · ' : '') + n + ' of ' + _lmEnt.opts.length + ' selected';
+  const btn = _lmEnt.btn;
+  if (btn) {
+    const lab = btn.querySelector('.lm-ent-label'); if (lab) lab.textContent = lmEntLabel(k, col);
+    btn.classList.toggle('active', Array.isArray(lmGetState(k).ent[col.key]));
+  }
+}
+// Esc closes just the open filter panel (capture phase, so the overlay's own Esc handler doesn't also close the screen).
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && _lmEnt) { e.stopImmediatePropagation(); e.preventDefault(); lmEntClose(); }
+}, true);
+document.addEventListener('click', (e) => {
+  if (!_lmEnt) return;
+  if (e.target.closest('#lm-ent-panel') || e.target.closest('.lm-ent-trigger')) return;
+  lmEntClose();
+});
+window.addEventListener('resize', () => lmEntClose());
 
 // Filter + sort the active tab's records.
 function lmFilteredRows() {
   const k = lmActiveTab, s = lmGetState(k), cols = getLambdaColumns(k);
   const q = String(s.q || '').trim().toLowerCase();
+  // Entity filters only restrict once the user has changed them from the default "all selected".
+  const ents = lmEntityCols(k).filter(c => Array.isArray(s.ent[c.key])).map(c => ({
+    col: c, known: lmKnownItems(c), sel: new Set(s.ent[c.key].map(x => String(x).toLowerCase()))
+  }));
   let rows = lmLoadRecords(k, cols).filter(r => {
     if (s.from && r._date && r._date < s.from) return false;
     if (s.to && r._date && r._date > s.to) return false;
+    for (const e of ents) if (!lmEntityMatch(r, e)) return false;
     if (q && s.by) {
       const byCol = cols.find(c => c.key === s.by);
       const raw = String((r.values && r.values[s.by]) == null ? '' : r.values[s.by]).toLowerCase();
@@ -19015,7 +19285,7 @@ function lmRenderTable() {
   }).join('') + '</tr>').join('');
   const msg = rows.length ? '' : `<div class="lm-empty">${total === 0
     ? 'No records yet. Import data with More → Import / Export (choose ' + esc(LAMBDA_COLUMN_STORES[k].title) + ').'
-    : 'No records match the current search and date range.'}</div>`;
+    : 'No records match the current search, filters and date range.'}</div>`;
   body.innerHTML = `<div class="lm-table-wrap"><table id="lm-table" class="log-table"><colgroup>${colgroup}</colgroup>` +
     `<thead><tr id="lm-thead-row">${thead}</tr></thead><tbody>${tbody}</tbody></table>${msg}</div>`;
   const wrap = body.querySelector('.lm-table-wrap');
@@ -19031,6 +19301,7 @@ function lmRenderTable() {
     lmUpdateSelectionUI();
   });
   lmUpdateSelectionUI();
+  lmApplyFilterCollapse();
 }
 // Syncs checkboxes, row highlight, count text and the Copy / Download / Delete buttons with the ticked rows.
 function lmUpdateSelectionUI() {
