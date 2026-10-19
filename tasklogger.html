@@ -512,6 +512,20 @@ html.is-touch .pending-card-actions { opacity: 1; }
 .lm-table-wrap { flex: 1; min-height: 0; overflow: auto; }
 .lm-sel-th, .lm-sel-cell { width: 40px; text-align: center; }
 .lm-edit-th, .lm-edit-cell { width: 44px; text-align: center; white-space: nowrap; }
+.lm-edit-th.lm-has-hist, .lm-edit-cell.lm-has-hist { width: 76px; }
+.lm-row-hist { background: none; border: none; padding: 3px 4px; cursor: pointer; color: var(--text-tertiary); border-radius: var(--radius-md); line-height: 1; font-size: 15px; }
+.lm-row-hist:hover { color: var(--purple-mid); background: var(--bg-secondary); }
+/* History popup (change records of one Lambda function) */
+#lm-hist-modal .modal { max-width: 1000px; width: 100%; }
+#lm-hist-modal .modal-body { padding: 0; }
+.lm-hist-sub { padding: 10px 16px; font-size: 12px; color: var(--text-secondary); border-bottom: 1px solid var(--border); }
+.lm-hist-wrap { max-height: 60vh; overflow: auto; }
+.lm-hist-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.lm-hist-table th { position: sticky; top: 0; z-index: 1; background: var(--bg-secondary); text-align: left; white-space: nowrap; padding: 8px 12px; border-bottom: 1px solid var(--border-md); font-weight: 600; }
+.lm-hist-table td { padding: 8px 12px; border-bottom: 1px solid var(--border); vertical-align: top; min-width: 90px; }
+.lm-hist-table td.lm-hist-wide { min-width: 220px; }
+.lm-hist-empty { padding: 28px 16px; text-align: center; color: var(--text-tertiary); font-size: 13px; }
+@media (max-width: 600px) { #lm-hist-modal { padding: 0.5rem; } }
 .lm-sel-th input, .lm-sel-cell input { cursor: pointer; width: 15px; height: 15px; }
 #lm-table tr.lm-row-selected td { background: var(--blue-bg); }
 #lm-del-btn:disabled { opacity: .45; cursor: not-allowed; }
@@ -2270,6 +2284,18 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
       <button type="button" class="btn" onclick="lmEditClose()">Cancel</button>
       <button type="button" class="btn btn-primary" onclick="lmEditSave()"><i class="ti ti-device-floppy"></i> Save changes</button>
     </div>
+  </div>
+</div>
+
+<!-- History of one Lambda function: its records from the Change Columns table (history button on each row of the Functions tab) -->
+<div class="modal-overlay hidden" id="lm-hist-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title"><i class="ti ti-history" style="vertical-align:-2px;margin-right:6px;color:var(--purple-mid)"></i><span id="lmh-title">History</span></div>
+      <button class="btn-icon" onclick="lmHistClose()" title="Close" aria-label="Close"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="modal-body" id="lmh-body"></div>
+    <div class="modal-footer"><button type="button" class="btn" onclick="lmHistClose()">Close</button></div>
   </div>
 </div>
 
@@ -20225,17 +20251,18 @@ function lmRenderTable() {
   Array.from(sel).forEach(id => { if (lmVisibleIds.indexOf(id) === -1) sel.delete(id); });   // only ticked rows that are on screen count
   if (countEl) countEl.dataset.base = countEl.textContent;
   const widths = lmWidths[k];
-  const colgroup = '<col data-col="__sel" style="width:40px">' + cols.map(c => `<col data-col="${esc(c.key)}" style="width:${widths[c.key] || defaultLogColumnWidth(c)}px">`).join('') + '<col data-col="__edit" style="width:44px">';
+  const hasHist = k === 'lambdaFunctionColumns';   // the Functions tab gets a History button beside Edit
+  const colgroup = '<col data-col="__sel" style="width:40px">' + cols.map(c => `<col data-col="${esc(c.key)}" style="width:${widths[c.key] || defaultLogColumnWidth(c)}px">`).join('') + `<col data-col="__edit" style="width:${hasHist ? 76 : 44}px">`;
   const thead = '<th data-col="__sel" class="lm-sel-th"><input type="checkbox" id="lm-all-cb" title="Select all" aria-label="Select all rows"></th>' + cols.map(c => {
     const arrow = s.sortCol === c.key ? (s.sortDir === 'asc' ? '▲' : '▼') : '';
     return `<th class="log-th-sortable" data-col="${esc(c.key)}">${esc(c.label)}<span class="col-sort-arrow">${arrow}</span>` +
       `<button type="button" class="col-pin-icon" data-col="${esc(c.key)}" title="Pin column">${LOG_TABLE_PIN_ICON_SVG}</button>` +
       `<span class="col-resize-handle"></span></th>`;
-  }).join('') + '<th data-col="__edit" class="lm-edit-th" aria-label="Edit"></th>';
+  }).join('') + `<th data-col="__edit" class="lm-edit-th${hasHist ? ' lm-has-hist' : ''}" aria-label="${hasHist ? 'History and edit' : 'Edit'}"></th>`;
   const tbody = rows.map(r => `<tr data-id="${esc(r.id)}"><td data-col="__sel" class="lm-sel-cell"><input type="checkbox" class="lm-row-cb" data-id="${esc(r.id)}" aria-label="Select row"></td>` + cols.map(c => {
     const v = lmDisplayValue(c, r.values && r.values[c.key]);
     return `<td data-col="${esc(c.key)}" title="${esc(v)}">${esc(v)}</td>`;
-  }).join('') + `<td data-col="__edit" class="lm-edit-cell"><button type="button" class="lm-row-edit" data-id="${esc(r.id)}" title="Edit this record" aria-label="Edit record"><i class="ti ti-pencil"></i></button></td></tr>`).join('');
+  }).join('') + `<td data-col="__edit" class="lm-edit-cell${hasHist ? ' lm-has-hist' : ''}">${hasHist ? `<button type="button" class="lm-row-hist" data-id="${esc(r.id)}" title="History (changes made to this function)" aria-label="History"><i class="ti ti-history"></i></button>` : ''}<button type="button" class="lm-row-edit" data-id="${esc(r.id)}" title="Edit this record" aria-label="Edit record"><i class="ti ti-pencil"></i></button></td></tr>`).join('');
   const msg = rows.length ? '' : `<div class="lm-empty">${total === 0
     ? 'No records yet. Import data with More → Import / Export (choose ' + esc(LAMBDA_COLUMN_STORES[k].title) + ').'
     : 'No records match the current search, filters and date range.'}</div>`;
@@ -20247,6 +20274,8 @@ function lmRenderTable() {
   lmApplyPins();
   const tbl = document.getElementById('lm-table');
   if (tbl) tbl.addEventListener('click', (e) => {
+    const h = e.target.closest && e.target.closest('.lm-row-hist');
+    if (h) { e.stopPropagation(); lmHistOpen(h.dataset.id); return; }
     const b = e.target.closest && e.target.closest('.lm-row-edit');
     if (b) { e.stopPropagation(); lmEditOpen(b.dataset.id); }
   });
@@ -20260,6 +20289,53 @@ function lmRenderTable() {
   lmUpdateSelectionUI();
   lmApplyFilterCollapse();
 }
+// ── History (button on each Function row): the Change Columns records whose Name matches this function ──
+let _lmh = null;
+function lmHistOpen(id) {
+  const fk = 'lambdaFunctionColumns', ck = 'lambdaChangeColumns';
+  const rec = readLambdaStore(fk).find(r => r && r.id === id);
+  if (!rec) return;
+  const fnCols = getLambdaColumns(fk), chCols = getLambdaColumns(ck);
+  const norm = v => String(v == null ? '' : v).trim().toLowerCase();
+  // "Name" is the function identity: the function's Name column, and the Change table's Name column (linked to fn_name).
+  const fnNameCol = fnCols.find(c => c.key === 'fn_name') || fnCols.find(c => norm(c.label) === 'name') || fnCols[0];
+  const chNameCol = chCols.find(c => c.key === 'chg_name') || chCols.find(c => norm(c.label) === 'name') || chCols[0];
+  const fnName = fnNameCol ? String((rec.values || {})[fnNameCol.key] || '').trim() : '';
+  const shown = chCols.filter(c => !chNameCol || c.key !== chNameCol.key);   // Name is already in the title
+  let rows = [];
+  if (fnName && chNameCol) {
+    rows = lmLoadRecords(ck, chCols).filter(r => norm((r.values || {})[chNameCol.key]) === norm(fnName));
+    const dc = chCols.find(c => c.type === 'date' && c.key === 'chg_date') || chCols.find(c => c.type === 'date');
+    rows.sort((a, b) => {   // newest first
+      const da = dc ? (lmParseDate((a.values || {})[dc.key], dc) || '') : '', db = dc ? (lmParseDate((b.values || {})[dc.key], dc) || '') : '';
+      return db.localeCompare(da);
+    });
+  }
+  _lmh = { id };
+  document.getElementById('lmh-title').textContent = 'History' + (fnName ? ' — ' + fnName : '');
+  let html;
+  if (!fnName) html = '<div class="lm-hist-empty">This function has no Name yet, so changes cannot be matched to it.</div>';
+  else if (!chCols.length) html = '<div class="lm-hist-empty">No columns are configured in the Change Columns master.</div>';
+  else if (!rows.length) html = `<div class="lm-hist-empty">No changes recorded for <b>${esc(fnName)}</b> yet.</div>`;
+  else {
+    const wide = c => c.type === 'textarea' || c.key === 'chg_change';
+    html = `<div class="lm-hist-sub">${rows.length} change${rows.length === 1 ? '' : 's'} recorded</div><div class="lm-hist-wrap"><table class="lm-hist-table"><thead><tr>` +
+      shown.map(c => `<th>${esc(c.label)}</th>`).join('') + '</tr></thead><tbody>' +
+      rows.map(r => '<tr>' + shown.map(c => `<td${wide(c) ? ' class="lm-hist-wide"' : ''}>${esc(lmDisplayValue(c, (r.values || {})[c.key]))}</td>`).join('') + '</tr>').join('') +
+      '</tbody></table></div>';
+  }
+  document.getElementById('lmh-body').innerHTML = html;
+  document.getElementById('lm-hist-modal').classList.remove('hidden');
+}
+function lmHistClose() {
+  const m = document.getElementById('lm-hist-modal');
+  if (m) m.classList.add('hidden');
+  _lmh = null;
+}
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && _lmh) { e.stopImmediatePropagation(); lmHistClose(); }
+}, true);
+
 // ── Edit one record (pencil on each row): same form as the Lambda log popup ──
 let _lme = null;   // { k, id }
 function lmEditOpen(id) {
