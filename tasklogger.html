@@ -512,9 +512,19 @@ html.is-touch .pending-card-actions { opacity: 1; }
 .lm-table-wrap { flex: 1; min-height: 0; overflow: auto; }
 .lm-sel-th, .lm-sel-cell { width: 40px; text-align: center; }
 .lm-edit-th, .lm-edit-cell { width: 44px; text-align: center; white-space: nowrap; }
-.lm-edit-th.lm-has-hist, .lm-edit-cell.lm-has-hist { width: 76px; }
+.lm-edit-th.lm-has-hist, .lm-edit-cell.lm-has-hist { width: 108px; }
 .lm-row-hist { background: none; border: none; padding: 3px 4px; cursor: pointer; color: var(--text-tertiary); border-radius: var(--radius-md); line-height: 1; font-size: 15px; }
 .lm-row-hist:hover { color: var(--purple-mid); background: var(--bg-secondary); }
+.lm-row-tasks { background: none; border: none; padding: 3px 4px; cursor: pointer; color: var(--text-tertiary); border-radius: var(--radius-md); line-height: 1; font-size: 15px; }
+.lm-row-tasks:hover { color: var(--blue-mid); background: var(--bg-secondary); }
+/* Linked tasks popup (tasks that added / changed one Lambda function) */
+#lm-tasks-modal .modal { max-width: 1100px; width: 100%; }
+#lm-tasks-modal .modal-body { padding: 0; }
+.lm-lt-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.lm-lt-go { background: none; border: none; padding: 3px 5px; cursor: pointer; color: var(--text-tertiary); border-radius: var(--radius-md); line-height: 1; font-size: 15px; }
+.lm-lt-go:hover { color: var(--blue-mid); background: var(--bg-secondary); }
+.lm-lt-missing { color: var(--text-tertiary); font-style: italic; }
+@media (max-width: 600px) { #lm-tasks-modal { padding: 0.5rem; } }
 /* History popup (change records of one Lambda function) */
 #lm-hist-modal .modal { max-width: 1000px; width: 100%; }
 #lm-hist-modal .modal-body { padding: 0; }
@@ -2296,6 +2306,18 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
     </div>
     <div class="modal-body" id="lmh-body"></div>
     <div class="modal-footer"><button type="button" class="btn" onclick="lmHistClose()">Close</button></div>
+  </div>
+</div>
+
+<!-- Linked tasks of one Lambda function: tasks that added it (Function record) or changed it (Change records), resolved against the task list + TTL log -->
+<div class="modal-overlay hidden" id="lm-tasks-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title"><i class="ti ti-link" style="vertical-align:-2px;margin-right:6px;color:var(--blue-mid)"></i><span id="lmt-title">Linked tasks</span></div>
+      <button class="btn-icon" onclick="lmTasksClose()" title="Close" aria-label="Close"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="modal-body" id="lmt-body"></div>
+    <div class="modal-footer"><button type="button" class="btn" onclick="lmTasksClose()">Close</button></div>
   </div>
 </div>
 
@@ -20252,17 +20274,17 @@ function lmRenderTable() {
   if (countEl) countEl.dataset.base = countEl.textContent;
   const widths = lmWidths[k];
   const hasHist = k === 'lambdaFunctionColumns';   // the Functions tab gets a History button beside Edit
-  const colgroup = '<col data-col="__sel" style="width:40px">' + cols.map(c => `<col data-col="${esc(c.key)}" style="width:${widths[c.key] || defaultLogColumnWidth(c)}px">`).join('') + `<col data-col="__edit" style="width:${hasHist ? 76 : 44}px">`;
+  const colgroup = '<col data-col="__sel" style="width:40px">' + cols.map(c => `<col data-col="${esc(c.key)}" style="width:${widths[c.key] || defaultLogColumnWidth(c)}px">`).join('') + `<col data-col="__edit" style="width:${hasHist ? 108 : 44}px">`;
   const thead = '<th data-col="__sel" class="lm-sel-th"><input type="checkbox" id="lm-all-cb" title="Select all" aria-label="Select all rows"></th>' + cols.map(c => {
     const arrow = s.sortCol === c.key ? (s.sortDir === 'asc' ? '▲' : '▼') : '';
     return `<th class="log-th-sortable" data-col="${esc(c.key)}">${esc(c.label)}<span class="col-sort-arrow">${arrow}</span>` +
       `<button type="button" class="col-pin-icon" data-col="${esc(c.key)}" title="Pin column">${LOG_TABLE_PIN_ICON_SVG}</button>` +
       `<span class="col-resize-handle"></span></th>`;
-  }).join('') + `<th data-col="__edit" class="lm-edit-th${hasHist ? ' lm-has-hist' : ''}" aria-label="${hasHist ? 'History and edit' : 'Edit'}"></th>`;
+  }).join('') + `<th data-col="__edit" class="lm-edit-th${hasHist ? ' lm-has-hist' : ''}" aria-label="${hasHist ? 'Linked tasks, history and edit' : 'Edit'}"></th>`;
   const tbody = rows.map(r => `<tr data-id="${esc(r.id)}"><td data-col="__sel" class="lm-sel-cell"><input type="checkbox" class="lm-row-cb" data-id="${esc(r.id)}" aria-label="Select row"></td>` + cols.map(c => {
     const v = lmDisplayValue(c, r.values && r.values[c.key]);
     return `<td data-col="${esc(c.key)}" title="${esc(v)}">${esc(v)}</td>`;
-  }).join('') + `<td data-col="__edit" class="lm-edit-cell${hasHist ? ' lm-has-hist' : ''}">${hasHist ? `<button type="button" class="lm-row-hist" data-id="${esc(r.id)}" title="History (changes made to this function)" aria-label="History"><i class="ti ti-history"></i></button>` : ''}<button type="button" class="lm-row-edit" data-id="${esc(r.id)}" title="Edit this record" aria-label="Edit record"><i class="ti ti-pencil"></i></button></td></tr>`).join('');
+  }).join('') + `<td data-col="__edit" class="lm-edit-cell${hasHist ? ' lm-has-hist' : ''}">${hasHist ? `<button type="button" class="lm-row-hist" data-id="${esc(r.id)}" title="History (changes made to this function)" aria-label="History"><i class="ti ti-history"></i></button><button type="button" class="lm-row-tasks" data-id="${esc(r.id)}" title="Linked tasks (tasks that added or changed this function)" aria-label="Linked tasks"><i class="ti ti-link"></i></button>` : ''}<button type="button" class="lm-row-edit" data-id="${esc(r.id)}" title="Edit this record" aria-label="Edit record"><i class="ti ti-pencil"></i></button></td></tr>`).join('');
   const msg = rows.length ? '' : `<div class="lm-empty">${total === 0
     ? 'No records yet. Import data with More → Import / Export (choose ' + esc(LAMBDA_COLUMN_STORES[k].title) + ').'
     : 'No records match the current search, filters and date range.'}</div>`;
@@ -20274,6 +20296,8 @@ function lmRenderTable() {
   lmApplyPins();
   const tbl = document.getElementById('lm-table');
   if (tbl) tbl.addEventListener('click', (e) => {
+    const lt = e.target.closest && e.target.closest('.lm-row-tasks');
+    if (lt) { e.stopPropagation(); lmTasksOpen(lt.dataset.id); return; }
     const h = e.target.closest && e.target.closest('.lm-row-hist');
     if (h) { e.stopPropagation(); lmHistOpen(h.dataset.id); return; }
     const b = e.target.closest && e.target.closest('.lm-row-edit');
@@ -20334,6 +20358,102 @@ function lmHistClose() {
 }
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && _lmh) { e.stopImmediatePropagation(); lmHistClose(); }
+}, true);
+
+// ── Linked tasks (button on each Function row) ──────────────────────────────────
+// A function is linked to tasks in two ways, and the popup shows both:
+//   • "New function"  — the task that added the Function record (its taskId / taskSyncId)
+//   • "Change"        — the task behind every Change record whose Name matches the function
+// Each link is resolved against BOTH data sets: the task list (`tasks`, the task cards) and the
+// TTL log (`logEntries`). The log is the fallback when the task card is gone, and entries that
+// have no task at all are linked by 'e<startTs>'. After a sync the stable taskSyncId is used when
+// this device's own task id no longer matches. One row per task, with a chip per link type.
+let _lmt = null;   // { id, rows }
+function lmLinkedTasksCollect(fnRec) {
+  const fk = 'lambdaFunctionColumns', ck = 'lambdaChangeColumns';
+  const fnCols = getLambdaColumns(fk), chCols = getLambdaColumns(ck);
+  const norm = v => String(v == null ? '' : v).trim().toLowerCase();
+  const fnNameCol = fnCols.find(c => c.key === 'fn_name') || fnCols.find(c => norm(c.label) === 'name') || fnCols[0];
+  const chNameCol = chCols.find(c => c.key === 'chg_name') || chCols.find(c => norm(c.label) === 'name') || chCols[0];
+  const fnName = fnNameCol ? String((fnRec.values || {})[fnNameCol.key] || '').trim() : '';
+  const sources = [{ type: 'new', rec: fnRec }];
+  if (fnName && chNameCol) readLambdaStore(ck).forEach(r => { if (r && norm((r.values || {})[chNameCol.key]) === norm(fnName)) sources.push({ type: 'change', rec: r }); });
+  const isoOf = ts => { const d = new Date(ts); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+  const groups = new Map();
+  let unlinked = 0;
+  sources.forEach(src => {
+    const r = src.rec, linkId = r.taskId, sid = r.taskSyncId || lamOwnerSyncId(r);
+    if (linkId == null && !sid) { unlinked++; return; }
+    const card = tasks.find(t => t && !isTaskDeleted(t) && linkId != null && String(t.id) === String(linkId)) || (sid ? lamFindTaskBySyncId(sid) : null);
+    const ents = logEntries.filter(e => e && (
+      (card && e.taskId != null && String(e.taskId) === String(card.id)) ||
+      (sid && e.taskSyncId === sid) ||
+      (linkId != null && ((e.taskId != null && String(e.taskId) === String(linkId)) || ('e' + e.startTs) === String(linkId)))));
+    const key = card ? 'c' + card.id : 'l' + (sid || linkId);
+    let g = groups.get(key);
+    if (!g) { g = { card, entries: [], seen: new Set(), n: { new: 0, change: 0 } }; groups.set(key, g); }
+    g.n[src.type]++;
+    ents.forEach(e => { if (!g.seen.has(e.startTs)) { g.seen.add(e.startTs); g.entries.push(e); } });
+  });
+  const rows = [];
+  groups.forEach(g => {
+    g.entries.sort((a, b) => (a.startTs || 0) - (b.startTs || 0));
+    const c = g.card, e0 = g.entries[0];
+    const base = c || e0 || {};
+    const found = c && e0 ? 'Task list + TTL log' : c ? 'Task list' : e0 ? (e0.taskId != null ? 'TTL log (task card removed)' : 'TTL log') : '';
+    const statusMap = { idle: 'Not started', running: 'Running', paused: 'Paused', done: 'Completed' };
+    const date = c ? taskDateStr(c) : (e0 && e0.startTs ? isoOf(e0.startTs) : '');
+    rows.push({
+      heading: base.heading || '', project: base.project || '', module: base.module || '', ticket: base.ticket || '',
+      status: c ? (statusMap[c.status] || c.status || '') : (e0 ? (e0.endTs ? 'Logged' : 'Logged (open)') : ''),
+      found, date, n: g.n, logCount: g.entries.length,
+      jumpDate: e0 && e0.startTs ? isoOf(e0.startTs) : date, jumpTs: e0 ? e0.startTs : null
+    });
+  });
+  rows.sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  return { fnName, rows, unlinked, sourceCount: sources.length };
+}
+function lmTasksOpen(id) {
+  const rec = readLambdaStore('lambdaFunctionColumns').find(r => r && r.id === id);
+  if (!rec) return;
+  const res = lmLinkedTasksCollect(rec);
+  _lmt = { id, rows: res.rows };
+  document.getElementById('lmt-title').textContent = 'Linked tasks' + (res.fnName ? ' — ' + res.fnName : '');
+  const chip = (txt) => `<span class="lambda-chip">${esc(txt)}</span>`;
+  let html;
+  if (!res.rows.length) {
+    html = `<div class="lm-hist-empty">No tasks are linked to ${res.fnName ? '<b>' + esc(res.fnName) + '</b>' : 'this function'} yet.<br>A task shows here when it added the function or changed it (from a task with “Includes Lambda” ticked).` +
+      (res.unlinked ? `<br>${res.unlinked} of its record${res.unlinked === 1 ? ' has' : 's have'} no task link (imported or added without a task).` : '') + '</div>';
+  } else {
+    const missing = '<span class="lm-lt-missing">not found on this device</span>';
+    html = `<div class="lm-hist-sub">${res.rows.length} task${res.rows.length === 1 ? '' : 's'} linked` +
+      (res.unlinked ? ` · ${res.unlinked} record${res.unlinked === 1 ? '' : 's'} without a task link` : '') + `</div>` +
+      `<div class="lm-hist-wrap"><table class="lm-hist-table"><thead><tr><th>Task</th><th>Linked as</th><th>Date</th><th>Project</th><th>Module</th><th>Ticket</th><th>Status</th><th>Found in</th><th></th></tr></thead><tbody>` +
+      res.rows.map((r, i) => {
+        const chips = (r.n.new ? chip('New function') : '') + (r.n.change ? chip('Change' + (r.n.change > 1 ? ' ×' + r.n.change : '')) : '');
+        const when = r.date ? formatCustomDate(r.date, 'DD-MM-YYYY') : '';
+        const go = r.jumpDate ? `<button type="button" class="lm-lt-go" onclick="lmTasksGo(${i})" title="Show in the log" aria-label="Show in the log"><i class="ti ti-arrow-right"></i></button>` : '';
+        return `<tr><td class="lm-hist-wide">${r.heading ? esc(r.heading) : missing}</td><td><div class="lm-lt-chips">${chips}</div></td><td>${esc(when)}</td><td>${esc(r.project)}</td><td>${esc(r.module)}</td><td>${esc(r.ticket)}</td><td>${esc(r.status)}</td><td>${r.found ? esc(r.found) : missing}</td><td>${go}</td></tr>`;
+      }).join('') + '</tbody></table></div>';
+  }
+  document.getElementById('lmt-body').innerHTML = html;
+  document.getElementById('lm-tasks-modal').classList.remove('hidden');
+}
+function lmTasksClose() {
+  const m = document.getElementById('lm-tasks-modal');
+  if (m) m.classList.add('hidden');
+  _lmt = null;
+}
+// "Show in the log": closes the popup and the Lambda overlay, then jumps to that day (flashing the entry when there is one).
+function lmTasksGo(i) {
+  const r = _lmt && _lmt.rows[i];
+  if (!r || !r.jumpDate) return;
+  lmTasksClose();
+  closeLambdaOverlay();
+  jumpToDate(r.jumpDate, r.jumpTs);
+}
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && _lmt) { e.stopImmediatePropagation(); lmTasksClose(); }
 }, true);
 
 // ── Edit one record (pencil on each row): same form as the Lambda log popup ──
