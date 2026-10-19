@@ -4500,6 +4500,7 @@ function mergeNonTaskDomains(remoteParsed, opts) {
     }
     if (changedSet.indexOf('lambdaRecords') !== -1) {
       if (typeof lmRefreshIfOpen === 'function') lmRefreshIfOpen();   // the Lambda Functions tables, if open
+      elmRefreshLogTable();                                            // Linked Lambda buttons in the log table
     }
     // recurringPlans has no dedicated live panel comparable to the log panel
     // or masters tab (confirmed against existing render call sites) — no
@@ -12562,7 +12563,7 @@ const LOG_ACTIONS_BTN = 30, LOG_ACTIONS_GAP = 4, LOG_ACTIONS_CELL_PADDING = 20;
 // wasted space everywhere else.
 function maxActionButtonsForDay(isPresentDay, isFutureDay) {
   if (isFutureDay) return 0;
-  const lam = (typeof isLambdaLoggingEnabled === 'function' && isLambdaLoggingEnabled()) ? 1 : 0;   // + "Linked Lambda" button
+  const lam = window._elmAnyOnPage ? 1 : 0;   // + "Linked Lambda" button (only when a row on this day has Lambda linked)
   if (isPresentDay) return 5 + lam;
   return 3 + lam; // past day: Edit, Continue, Recurring
 }
@@ -15811,6 +15812,9 @@ function updateLogTable() {
   const isPastDay = selDate < todayForActions;
   const filtered = sortLogEntriesForDisplay(logEntries.filter(e => entryMatchesDate(e, selDate)));
   const cols = getVisibleLogColumns();
+  // Linked Lambda button: only on rows whose task (whole history) has Lambda functions / changes linked.
+  const lamHas = isLambdaLoggingEnabled() ? elmLinkedChecker() : null;
+  window._elmAnyOnPage = !!(lamHas && filtered.some(lamHas));
 
   // Render header row dynamically from configured columns (locked columns keep their
   // fixed labels; configurable columns use the user's renamed label if set).
@@ -15867,7 +15871,7 @@ function updateLogTable() {
                 ? '<button class="btn-icon" onclick="openManageRecurringModal('+linkedPlan.id+')" title="Manage recurring plan" style="border-color:var(--green-mid);color:var(--green-dark)"><i class="ti ti-repeat"></i></button>'
                 : '<button class="btn-icon" onclick="openMakeRecurringModal('+e.taskId+')" title="Make this a recurring daily task" style="border-color:var(--green-mid);color:var(--green-dark)"><i class="ti ti-repeat"></i></button>')
             : '')
-      + ((!isFutureDay && isLambdaLoggingEnabled())
+      + ((!isFutureDay && lamHas && lamHas(e))
             ? '<button class="btn-icon" onclick="elmOpen('+rowIdx+')" title="Linked Lambda functions and changes (whole task history)" style="border-color:var(--purple-mid);color:var(--purple-dark)"><i class="ti ti-function"></i></button>'
             : '')
       + (isPresentDay ? '<button class="btn-icon btn-delete" onclick="confirmDeleteLogEntry('+rowIdx+')" title="Delete entry"><i class="ti ti-trash"></i></button>' : '');
@@ -19539,6 +19543,7 @@ function lambdaDeleteLinked(linkId) {
     const kept = store.filter(r => !(r && r.taskId != null && String(r.taskId) === String(linkId)));
     if (kept.length !== store.length) { writeLambdaStore(sk, kept); lmSel(sk).clear(); }
   });
+  elmRefreshLogTable();
   if (typeof lmRefreshIfOpen === 'function') lmRefreshIfOpen();
 }
 // Asks before unlinking: when Lambda data is already linked, removing the flag deletes it.
@@ -19797,6 +19802,7 @@ function llmSubmit() {
   }
   const cb = _llm.onDone;
   llmClose();
+  elmRefreshLogTable();
   if (typeof lmRefreshIfOpen === 'function') lmRefreshIfOpen();   // entries show up in the Lambda Functions lists straight away
   if (cb) cb();
 }
@@ -20509,6 +20515,37 @@ function elmCollect(entry) {
   };
   return { group, fn: pick('lambdaFunctionColumns'), ch: pick('lambdaChangeColumns') };
 }
+// Fast "does this task's history have Lambda linked?" test for the log table (reads the stores once per render;
+// same matching rules as elmCollect).
+function elmLinkedChecker() {
+  const keyOf = v => /^e/.test(String(v)) ? String(v) : 't' + String(v);
+  const lk = new Set(), ls = new Set();
+  ['lambdaFunctionColumns', 'lambdaChangeColumns'].forEach(k => readLambdaStore(k).forEach(r => {
+    if (!r) return;
+    if (r.taskId != null) lk.add(keyOf(r.taskId));
+    if (r.taskSyncId) ls.add(r.taskSyncId);
+    const o = lamOwnerSyncId(r); if (o) ls.add(o);
+  }));
+  if (!lk.size && !ls.size) return () => false;
+  const byGroup = new Map();
+  logEntries.forEach(le => { if (!le) return; const k = pendingTaskGroupKey(le); if (!byGroup.has(k)) byGroup.set(k, []); byGroup.get(k).push(le); });
+  const cache = new Map();
+  return entry => {
+    const k = pendingTaskGroupKey(entry);
+    if (cache.has(k)) return cache.get(k);
+    const hit = (byGroup.get(k) || [entry]).some(le => {
+      if (lk.has('e' + le.startTs)) return true;
+      if (le.taskId != null && lk.has(keyOf(le.taskId))) return true;
+      if (le.taskSyncId && ls.has(le.taskSyncId)) return true;
+      const tk = le.taskId != null ? tasks.find(t => t && String(t.id) === String(le.taskId)) : null;
+      return !!(tk && tk._sync && tk._sync.syncId && ls.has(tk._sync.syncId));
+    });
+    cache.set(k, hit);
+    return hit;
+  };
+}
+// Lambda links changed (saved / deleted / synced): redraw the log table so the button appears or disappears.
+function elmRefreshLogTable() { try { if (typeof updateLogTable === 'function') updateLogTable(); } catch (e) {} }
 function elmOpen(rowIdx) {
   if (!isLambdaLoggingEnabled()) return;   // button is hidden while the flag is off; belt and braces
   const entry = logEntries[rowIdx];
@@ -20607,6 +20644,7 @@ function lmDeleteSelected() {
     writeLambdaStore(k, readLambdaStore(k).filter(r => !ids.has(r.id)));
     sel.clear();
     lmRenderTable();
+    elmRefreshLogTable();
   }, 'Delete');
 }
 
