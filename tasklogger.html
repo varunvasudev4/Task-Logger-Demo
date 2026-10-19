@@ -525,6 +525,11 @@ html.is-touch .pending-card-actions { opacity: 1; }
 .lm-lt-go:hover { color: var(--blue-mid); background: var(--bg-secondary); }
 .lm-lt-missing { color: var(--text-tertiary); font-style: italic; }
 @media (max-width: 600px) { #lm-tasks-modal { padding: 0.5rem; } }
+/* Linked Lambda popup opened from a log table row */
+#entry-lambda-modal .modal { max-width: 1100px; width: 100%; }
+#entry-lambda-modal .modal-body { padding: 0; }
+.elm-none { padding: 10px 16px; font-size: 12.5px; color: var(--text-tertiary); border-bottom: 1px solid var(--border); }
+@media (max-width: 600px) { #entry-lambda-modal { padding: 0.5rem; } }
 /* History popup (change records of one Lambda function) */
 #lm-hist-modal .modal { max-width: 1000px; width: 100%; }
 #lm-hist-modal .modal-body { padding: 0; }
@@ -2306,6 +2311,18 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
     </div>
     <div class="modal-body" id="lmh-body"></div>
     <div class="modal-footer"><button type="button" class="btn" onclick="lmHistClose()">Close</button></div>
+  </div>
+</div>
+
+<!-- Linked Lambda of one task (button on each log table row): New function + Change records linked anywhere in the task's history -->
+<div class="modal-overlay hidden" id="entry-lambda-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title"><i class="ti ti-function" style="vertical-align:-2px;margin-right:6px;color:var(--blue-mid)"></i><span id="elm-title">Linked Lambda</span></div>
+      <button class="btn-icon" onclick="elmClose()" title="Close" aria-label="Close"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="modal-body" id="elm-body"></div>
+    <div class="modal-footer"><button type="button" class="btn" onclick="elmClose()">Close</button></div>
   </div>
 </div>
 
@@ -12545,8 +12562,9 @@ const LOG_ACTIONS_BTN = 30, LOG_ACTIONS_GAP = 4, LOG_ACTIONS_CELL_PADDING = 20;
 // wasted space everywhere else.
 function maxActionButtonsForDay(isPresentDay, isFutureDay) {
   if (isFutureDay) return 0;
-  if (isPresentDay) return 5;
-  return 3; // past day: Edit, Continue, Recurring
+  const lam = (typeof isLambdaLoggingEnabled === 'function' && isLambdaLoggingEnabled()) ? 1 : 0;   // + "Linked Lambda" button
+  if (isPresentDay) return 5 + lam;
+  return 3 + lam; // past day: Edit, Continue, Recurring
 }
 function ltLoadBool(key, fallback) {
   try {
@@ -15848,6 +15866,9 @@ function updateLogTable() {
             ? (linkedPlan
                 ? '<button class="btn-icon" onclick="openManageRecurringModal('+linkedPlan.id+')" title="Manage recurring plan" style="border-color:var(--green-mid);color:var(--green-dark)"><i class="ti ti-repeat"></i></button>'
                 : '<button class="btn-icon" onclick="openMakeRecurringModal('+e.taskId+')" title="Make this a recurring daily task" style="border-color:var(--green-mid);color:var(--green-dark)"><i class="ti ti-repeat"></i></button>')
+            : '')
+      + ((!isFutureDay && isLambdaLoggingEnabled())
+            ? '<button class="btn-icon" onclick="elmOpen('+rowIdx+')" title="Linked Lambda functions and changes (whole task history)" style="border-color:var(--purple-mid);color:var(--purple-dark)"><i class="ti ti-function"></i></button>'
             : '')
       + (isPresentDay ? '<button class="btn-icon btn-delete" onclick="confirmDeleteLogEntry('+rowIdx+')" title="Delete entry"><i class="ti ti-trash"></i></button>' : '');
 
@@ -19841,6 +19862,8 @@ function applyDashboardMenuState() {
     const lam = isLambdaLoggingEnabled();
     if (window._lastLambdaFlagSeen !== undefined && window._lastLambdaFlagSeen !== lam && typeof tasks !== 'undefined' && Array.isArray(tasks)) {
       tasks.forEach(tk => { try { renderRow(tk.id); } catch (e) {} });   // show / hide the "Includes Lambda" tick on every card
+      try { if (typeof updateLogTable === 'function') updateLogTable(); } catch (e) {}   // show / hide the Linked Lambda button (and its column width) on every log row
+      if (!lam && typeof elmClose === 'function') elmClose();                            // flag turned off while the Linked Lambda popup was open
     }
     window._lastLambdaFlagSeen = lam;
   }
@@ -20454,6 +20477,70 @@ function lmTasksGo(i) {
 }
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && _lmt) { e.stopImmediatePropagation(); lmTasksClose(); }
+}, true);
+
+// ── Linked Lambda for a log row (button in the log table's actions) ──────────────
+// "Task history" is the same grouping Pending and Search use (pendingTaskGroupKey: the Primary /
+// Secondary fields from Masters → Pending & Search, ticket first by default), so every log entry of
+// the task — on any day, including carried-forward ones — counts. A Lambda record is linked when its
+// task link (device taskId, 'e<startTs>', or the stable taskSyncId) points at any entry of that
+// history or at the task card behind one of those entries. New function and Change records are both shown.
+let _elm = null;
+function elmCollect(entry) {
+  const key = pendingTaskGroupKey(entry);
+  const group = logEntries.filter(le => le && pendingTaskGroupKey(le) === key).sort((a, b) => (a.startTs || 0) - (b.startTs || 0));
+  const keyOf = v => /^e/.test(String(v)) ? String(v) : 't' + String(v);
+  const ids = new Map(), sids = new Map();
+  group.forEach(le => {
+    if (le.taskId != null && !ids.has(keyOf(le.taskId))) ids.set(keyOf(le.taskId), le);
+    if (!ids.has('e' + le.startTs)) ids.set('e' + le.startTs, le);
+    const tk = le.taskId != null ? tasks.find(t => t && String(t.id) === String(le.taskId)) : null;
+    [le.taskSyncId, tk && tk._sync && tk._sync.syncId].forEach(sid => { if (sid && !sids.has(sid)) sids.set(sid, le); });
+  });
+  const pick = storeKey => {
+    const out = [];
+    readLambdaStore(storeKey).forEach(r => {
+      if (!r) return;
+      const le = (r.taskId != null && ids.get(keyOf(r.taskId))) || (r.taskSyncId && sids.get(r.taskSyncId)) || (lamOwnerSyncId(r) && sids.get(lamOwnerSyncId(r))) || null;
+      if (le) out.push({ rec: r, le });
+    });
+    out.sort((a, b) => (b.le.startTs || 0) - (a.le.startTs || 0));
+    return out;
+  };
+  return { group, fn: pick('lambdaFunctionColumns'), ch: pick('lambdaChangeColumns') };
+}
+function elmOpen(rowIdx) {
+  if (!isLambdaLoggingEnabled()) return;   // button is hidden while the flag is off; belt and braces
+  const entry = logEntries[rowIdx];
+  if (!entry) return;
+  const res = elmCollect(entry);
+  _elm = { rowIdx };
+  const head = [entry.heading, entry.ticket ? '#' + entry.ticket : ''].filter(Boolean).join(' · ');
+  document.getElementById('elm-title').textContent = 'Linked Lambda' + (head ? ' — ' + head : '');
+  const section = (storeKey, items, label) => {
+    const cols = getLambdaColumns(storeKey);
+    const bar = `<div class="lm-hist-sub">${label} · ${items.length}</div>`;
+    if (!items.length) return bar + '<div class="elm-none">None linked to this task.</div>';
+    if (!cols.length) return bar + '<div class="elm-none">No columns are configured in this master.</div>';
+    const wide = c => c.type === 'textarea' || c.key === 'chg_change';
+    return bar + `<div class="lm-hist-wrap"><table class="lm-hist-table"><thead><tr><th>Logged on</th>` + cols.map(c => `<th>${esc(c.label)}</th>`).join('') + '</tr></thead><tbody>' +
+      items.map(it => `<tr><td>${it.le.startTs ? esc(fmtDate(new Date(it.le.startTs))) : ''}</td>` + cols.map(c => `<td${wide(c) ? ' class="lm-hist-wide"' : ''}>${esc(lmDisplayValue(c, (it.rec.values || {})[c.key]))}</td>`).join('') + '</tr>').join('') +
+      '</tbody></table></div>';
+  };
+  const n = res.group.length;
+  let html = `<div class="lm-hist-sub">Task history (same grouping as Pending and Search): ${n} log entr${n === 1 ? 'y' : 'ies'}</div>`;
+  if (!res.fn.length && !res.ch.length) html += '<div class="lm-hist-empty">No Lambda functions or changes are linked to this task yet.</div>';
+  else html += section('lambdaFunctionColumns', res.fn, 'New functions') + section('lambdaChangeColumns', res.ch, 'Changes');
+  document.getElementById('elm-body').innerHTML = html;
+  document.getElementById('entry-lambda-modal').classList.remove('hidden');
+}
+function elmClose() {
+  const m = document.getElementById('entry-lambda-modal');
+  if (m) m.classList.add('hidden');
+  _elm = null;
+}
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && _elm) { e.stopImmediatePropagation(); elmClose(); }
 }, true);
 
 // ── Edit one record (pencil on each row): same form as the Lambda log popup ──
