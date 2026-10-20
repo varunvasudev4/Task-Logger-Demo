@@ -13946,6 +13946,8 @@ function confirmCarryForward() {
     createdAt: carryTs,
     carriedOver: true       // flag so the card shows a "Carried" badge
   };
+  // "Includes Lambda" follows the task it was carried forward from
+  if (isLambdaLoggingEnabled() && ((entry && entry.includesLambda === true) || (task && task.includesLambda === true))) carriedTask.includesLambda = true;
   // Phase 1: a Carry Forward-created task must receive fresh synchronization metadata.
   createSyncMetadata(carriedTask);
   tasks.unshift(carriedTask);
@@ -14073,6 +14075,7 @@ function confirmMakeRecurring() {
     startDate, endDate, includeWeekends, active: true, disabledFromDate: null,
     generatedDates: [], startTime: startTimeVal
   };
+  if (isLambdaLoggingEnabled() && ((entry && entry.includesLambda === true) || (task && task.includesLambda === true))) plan.includesLambda = true;   // instances inherit "Includes Lambda"
   recurringPlans.push(plan);
 
   // Link the source task to this plan so it shows the "manage" button immediately,
@@ -19418,6 +19421,7 @@ function renderLambdaColumnsTabHTML(storeKey) {
   const DATE_FORMAT_PRESETS = ['DD-MM-YYYY','YYYY-MM-DD','MM-DD-YYYY','DD/MM/YYYY','MM/DD/YYYY','DD MMM YYYY','ddd, DD MMM YYYY','MMMM D, YYYY'];
   const listOptions = Object.keys(masters.customLists || {});
   const k = "'" + storeKey + "'";
+  const chgCols = getLambdaColumns('lambdaChangeColumns');
   const rows = cols.map((c, idx) => {
     const isCustomFormat = c.type === 'date' && c.dateFormat && !DATE_FORMAT_PRESETS.includes(c.dateFormat);
     const isList = c.type === 'list' || c.type === 'multilist' || c.type === 'searchlist';
@@ -19477,6 +19481,14 @@ function renderLambdaColumnsTabHTML(storeKey) {
           <input type="checkbox" ${c.searchEntity===true?'checked':''} onchange="lcToggleSearchEntity(${k},'${c.key}')" />
           Search as individual entity
         </label>` : ''}
+        <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-secondary);cursor:pointer" title="${storeKey === 'lambdaFunctionColumns' ? 'Carry this value into the Change form of the same function (you choose which Change field receives it)' : 'When a change is added for a function, pre-fill this field with the value from its previous entry'}">
+          <input type="checkbox" ${c.carryForward===true?'checked':''} onchange="lcToggleCarryForward(${k},'${c.key}')" />
+          Carry forward
+        </label>
+        ${(storeKey === 'lambdaFunctionColumns' && c.carryForward === true) ? `<select class="meta-select${c.carryTo && chgCols.some(x => x.key === c.carryTo) ? '' : ' invalid'}" style="font-size:11px;padding:3px 6px;width:auto;max-width:100%" title="Which field of the Change form receives this value" onchange="lcChangeCarryTo(${k},'${c.key}', this.value)">
+          <option value="">${chgCols.length ? '— carry to Change field… —' : '— add Change Columns first —'}</option>
+          ${chgCols.map(x => `<option value="${esc(x.key)}" ${c.carryTo===x.key?'selected':''}>${esc(x.label)}</option>`).join('')}
+        </select>` : ''}
         <button class="btn-icon btn-delete" onclick="lcConfirmDelete(${k},'${c.key}')" title="Delete column"><i class="ti ti-trash"></i></button>
       </div>
     </div>`;
@@ -19611,6 +19623,28 @@ function lcToggleSearchable(storeKey, key) {
   col.searchable = !col.searchable;
   saveState();
   if (typeof lmRefreshIfOpen === 'function') lmRefreshIfOpen();
+}
+// Carry forward: Function Columns → value is carried into a chosen Change Columns field (when the function is
+// later changed); Change Columns → value is pre-filled from the function's previous entry (see lamCarryValues).
+function lcToggleCarryForward(storeKey, key) {
+  const col = getLambdaColumnByKey(storeKey, key);
+  if (!col) return;
+  col.carryForward = !col.carryForward;
+  if (!col.carryForward) delete col.carryTo;
+  else if (storeKey === 'lambdaFunctionColumns' && !col.carryTo) {
+    const norm = x => String(x == null ? '' : x).toLowerCase().replace(/[^a-z0-9]+/g, '');
+    const m = getLambdaColumns('lambdaChangeColumns').find(x => norm(x.label) === norm(col.label));
+    if (m) col.carryTo = m.key;   // suggestion only — the picker stays visible so it can be changed
+  }
+  saveState();
+  renderMastersContent();
+}
+function lcChangeCarryTo(storeKey, key, val) {
+  const col = getLambdaColumnByKey(storeKey, key);
+  if (!col) return;
+  if (val) col.carryTo = val; else delete col.carryTo;
+  saveState();
+  renderMastersContent();
 }
 function lcToggleDupCheck(storeKey, key) {
   const col = getLambdaColumnByKey(storeKey, key);
@@ -19906,6 +19940,78 @@ function llmPrefill(storeKey, ctxOverride) {
   return out;
 }
 
+// ── Carry forward into the Change form ───────────────────────────────────────
+// For a change to function X: every Change column ticked "Carry forward" takes its value from X's most recent
+// previous Change record; when X has none yet, the Function column ticked "Carry forward" that targets this
+// Change column (carryTo) supplies it from X's Function record. Untouched date fields stay on today's date.
+function lamNormName(v) { return String(v == null ? '' : v).trim().toLowerCase().replace(/\s+/g, ' '); }
+function lamCarryValues(storeKey, cur) {
+  if (storeKey !== 'lambdaChangeColumns') return {};
+  const ccols = getLambdaColumns(storeKey), fcols = getLambdaColumns('lambdaFunctionColumns'), nc = lcdNameCols();
+  if (!ccols.some(c => c.carryForward === true) && !fcols.some(f => f.carryForward === true && f.carryTo)) return {};
+  const name = nc.ch ? lamNormName(cur && cur[nc.ch.key]) : '';
+  if (nc.ch && !name) return {};   // no function chosen yet
+  const dc = lcdDateCol(ccols);
+  const sk = r => (dc ? (lmParseDate(r.values[dc.key], dc) || '') : '') + '|' + String(r.importedAt || 0).padStart(16, '0');
+  const prev = readLambdaStore(storeKey).filter(r => r && r.values && (!nc.ch || lamNormName(r.values[nc.ch.key]) === name))
+    .sort((a, b) => (sk(a) < sk(b) ? 1 : -1))[0] || null;
+  const fnRec = (nc.fn && name) ? (readLambdaStore('lambdaFunctionColumns').find(r => r && r.values && lamNormName(r.values[nc.fn.key]) === name) || null) : null;
+  const out = {};
+  ccols.forEach(c => {
+    if (nc.ch && c.key === nc.ch.key) return;
+    let v = '';
+    if (c.carryForward === true && prev && prev.values[c.key] != null) v = String(prev.values[c.key]).trim();
+    if (!v && fnRec) {
+      const src = fcols.find(f => f.carryForward === true && f.carryTo === c.key);
+      if (src && fnRec.values[src.key] != null) {
+        v = String(fnRec.values[src.key]).trim();
+        if (v && c.type === 'date') v = lmParseDate(v, src) || v;
+      }
+    }
+    if (v) out[c.key] = v;
+  });
+  return out;
+}
+function lamFormRead(storeKey, prefix) {
+  const o = {};
+  getLambdaColumns(storeKey).forEach((c, i) => {
+    const el = document.getElementById(prefix + i);
+    let v = el ? String(el.value == null ? '' : el.value) : '';
+    if (c.type === 'searchlist') { const tr = document.getElementById(prefix + i + '-trigger'); if (tr) v = tr.value; }
+    o[c.key] = v.trim();
+  });
+  return o;
+}
+// Picking / typing the function name in a Change form refreshes the carried fields that the user has not edited yet.
+function lamCarryBind(storeKey, prefix, initialCarry) {
+  if (storeKey !== 'lambdaChangeColumns') return;
+  const cols = getLambdaColumns(storeKey), nc = lcdNameCols().ch;
+  if (!nc) return;
+  const idx = cols.findIndex(c => c.key === nc.key);
+  if (idx < 0) return;
+  const id = prefix + idx, hold = document.getElementById(id), el = document.getElementById(id + '-trigger') || hold;
+  const form = hold && hold.closest('.llm-form');
+  if (!form || !el) return;
+  if (initialCarry) form.dataset.carried = JSON.stringify(initialCarry);
+  el.addEventListener('change', () => {
+    let prev = {}; try { prev = JSON.parse(form.dataset.carried || '{}'); } catch (e) {}
+    const cur = lamFormRead(storeKey, prefix), carry = lamCarryValues(storeKey, cur), next = {};
+    let touched = false;
+    cols.forEach(c => {
+      if (c.key === nc.key) return;
+      const v = cur[c.key] || '';
+      if (!(!v || v === prev[c.key] || (c.type === 'date' && v === todayStr()))) return;   // user edited it: leave it alone
+      const nv = carry[c.key] != null ? carry[c.key] : (c.type === 'date' ? todayStr() : '');
+      if (nv !== v) { cur[c.key] = nv; touched = true; }
+      if (carry[c.key] != null) next[c.key] = carry[c.key];
+    });
+    form.dataset.carried = JSON.stringify(next);
+    if (!touched) return;
+    form.innerHTML = lamFormHTML(storeKey, prefix, cur);
+    lamCarryBind(storeKey, prefix);
+  });
+}
+
 // Shared form used by the Lambda log popup and the row-edit popup of the Lambda tables.
 function lamFormHTML(storeKey, prefix, cur) {
   return getLambdaColumns(storeKey).map((c, i) => {
@@ -19989,13 +20095,16 @@ function llmRender() {
   } else if (_llm.view === 'form') {
     const type = _llm.formType, st = LLM_TYPES[type].store;
     const isNew = _llm.editIdx == null;
-    const cur = isNew ? Object.assign(llmPrefill(st), _llm.seed || {}) : _llm.entries[_llm.editIdx].values;
+    let carried = {};
+    if (isNew) { const base = Object.assign(llmPrefill(st), _llm.seed || {}); carried = lamCarryValues(st, base); }
+    const cur = isNew ? Object.assign(llmPrefill(st), carried, _llm.seed || {}) : _llm.entries[_llm.editIdx].values;
     const filled = isNew ? Object.keys(cur).length : 0;
     title.textContent = (isNew ? '' : 'Edit ') + (type === 'new' ? 'New function' : 'Change');
     const needMore = !isNew && lamMissingRequired(st, cur).length > 0;
     body.innerHTML = `<div class="llm-hint">${_llm.lcd && isNew ? 'Linking <b>' + esc(_llm.lcdName || '') + '</b> to a completed task — fill in the full details. ' : ''}${needMore ? 'Some required details are still missing — please fill them in. ' : ''}${type === 'new' ? 'Function Columns' : 'Change Columns'} form. Fields marked * are required.${filled ? ' ' + filled + ' field' + (filled === 1 ? ' was' : 's were') + ' filled in from the task.' : ''}</div>` +
       `<div class="llm-form">` + lamFormHTML(st, 'llf-', cur) + `</div>`;
     if (needMore) lamFormCollect(st, 'llf-');   // marks the empty required fields right away
+    if (isNew) lamCarryBind(st, 'llf-', carried);
     foot.innerHTML = `<button type="button" class="btn" onclick="llmBack()">Back</button><button type="button" class="btn btn-primary" onclick="llmSaveEntry()"><i class="ti ti-check"></i> ${isNew ? 'Add entry' : 'Update entry'}</button>`;
   } else {
     const link = _llm.mode === 'link';
@@ -20940,7 +21049,8 @@ function lmAddOpen(opts) {
   _lme = { k, id: null, lcd: !!opts.lcd, iso: opts.iso || null };   // lcd: opened from the Lambda changes popup (Save only — no task link)
   const sb = document.getElementById('lme-save-btn'); if (sb) sb.innerHTML = opts.lcd ? '<i class="ti ti-device-floppy"></i> Save entry' : '<i class="ti ti-plus"></i> Add entry';
   document.getElementById('lme-title').textContent = opts.lcd ? 'Save ' + LAMBDA_COLUMN_STORES[k].noun + (opts.name ? ' — ' + opts.name : '') : 'Add ' + LAMBDA_COLUMN_STORES[k].noun;
-  document.getElementById('lme-body').innerHTML = `<div class="llm-hint">${opts.lcd ? 'Saved to the ' + esc(LAMBDA_COLUMN_STORES[k].title) + ' table only — it is not linked to any task. ' : esc(LAMBDA_COLUMN_STORES[k].title) + ' form. '}Fields marked * are required.</div><div class="llm-form">` + lamFormHTML(k, 'lme-', opts.seed || {}) + `</div>`;
+  document.getElementById('lme-body').innerHTML = `<div class="llm-hint">${opts.lcd ? 'Saved to the ' + esc(LAMBDA_COLUMN_STORES[k].title) + ' table only — it is not linked to any task. ' : esc(LAMBDA_COLUMN_STORES[k].title) + ' form. '}Fields marked * are required.</div><div class="llm-form">` + lamFormHTML(k, 'lme-', Object.assign({}, lamCarryValues(k, opts.seed || {}), opts.seed || {})) + `</div>`;
+  lamCarryBind(k, 'lme-', lamCarryValues(k, opts.seed || {}));
   document.getElementById('lm-edit-modal').classList.remove('hidden');
 }
 function lmEditClose() {
@@ -23658,6 +23768,7 @@ function materializeRecurringTasksUpTo(throughDateStr) {
             // for every other recurring task must NOT be treated as a schedule gate.
             scheduledStartTime: hasScheduledStartTime
           };
+          if (plan.includesLambda === true) generatedTask.includesLambda = true;
           // Phase 1: a task generated by a recurring plan must receive fresh sync metadata.
           createSyncMetadata(generatedTask);
           tasks.unshift(generatedTask);
