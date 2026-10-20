@@ -646,6 +646,26 @@ html.is-touch .pending-card-actions { opacity: 1; }
 .lcd-btn-group .lcd-refetch { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: -1px; padding-left: 8px; padding-right: 8px; }
 .lcd-btn-group .lcd-refetch.busy i { animation: lcd-spin .8s linear infinite; }
 @keyframes lcd-spin { to { transform: rotate(360deg); } }
+/* Lambda changes popup (opens from the "Lambda changes" button): functions changed on the date + New/Change + Linked/Unlinked */
+#lcd-changes-modal .modal { max-width: 900px; width: 100%; }
+#lcd-changes-modal .modal-body { padding: 0; }
+.lcd-chip { display: inline-flex; align-items: center; gap: 3px; border-radius: 10px; font-size: 10.5px; font-weight: 600; padding: 1px 8px; white-space: nowrap; }
+.lcd-chip.new { background: var(--green-bg); color: var(--green-dark); }
+.lcd-chip.change { background: var(--blue-bg); color: var(--blue-dark); }
+.lcd-chip.linked { border: 1px solid currentColor; color: var(--green-dark); }
+.lcd-chip.unlinked { background: var(--amber-bg); color: var(--amber-dark); }
+.lcd-fn { font-weight: 600; overflow-wrap: anywhere; }
+.lcd-sub { font-size: 11.5px; color: var(--text-tertiary); margin-top: 3px; overflow-wrap: anywhere; }
+.lcd-link-btn { padding: 4px 10px; font-size: 12px; }
+.lcd-pick-list { display: flex; flex-direction: column; gap: 8px; padding: 12px 16px; max-height: 60vh; overflow: auto; }
+.lcd-pick-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; text-align: left; width: 100%; padding: 10px 12px; border: 1px solid var(--border-md); border-radius: var(--radius-md); background: var(--bg); color: var(--text-primary); font: inherit; cursor: pointer; }
+.lcd-pick-item:hover:not(:disabled) { border-color: var(--blue-mid); background: var(--blue-bg); }
+.lcd-pick-item:disabled { opacity: .55; cursor: not-allowed; }
+.lcd-pick-item b { display: block; font-size: 13.5px; overflow-wrap: anywhere; }
+.lcd-pick-item .lcd-sub { margin-top: 2px; }
+.lcd-pick-end { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0; }
+@media (max-width: 600px) { #lcd-changes-modal { padding: 0.5rem; } }
+.llm-miss { font-size: 10.5px; font-weight: 600; padding: 1px 8px; border-radius: 10px; background: var(--amber-bg); color: var(--amber-dark); white-space: nowrap; margin-left: 6px; }
 /* ── Lambda tables: row edit button + date range ── */
 .lm-sel-wrap { display: inline-flex; align-items: center; gap: 4px; }
 .lm-row-edit { background: none; border: none; padding: 3px 4px; cursor: pointer; color: var(--text-tertiary); border-radius: var(--radius-md); line-height: 1; font-size: 15px; }
@@ -2291,6 +2311,18 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
 
 <!-- Dashboard ▾ menu (items are built by JS from DASHBOARD_MENU_ITEMS) -->
 <div class="pending-menu-dropdown hidden" id="dashboard-menu-dropdown" role="menu"></div>
+
+<!-- Lambda changes of the selected date (opens from the "Lambda changes" button): New / Change + Linked / Unlinked, link a function to a task -->
+<div class="modal-overlay hidden" id="lcd-changes-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title"><i class="ti ti-function" style="vertical-align:-2px;margin-right:6px;color:var(--blue-mid)"></i><span id="lcdp-title">Lambda changes</span></div>
+      <button class="btn-icon" onclick="lcdpClose()" title="Close" aria-label="Close"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="modal-body" id="lcdp-body"></div>
+    <div class="modal-footer" id="lcdp-footer"></div>
+  </div>
+</div>
 
 <!-- Lambda log step (opens from Complete Task when the task has "Includes Lambda" ticked) -->
 <div class="modal-overlay hidden" id="lambda-log-modal">
@@ -13577,7 +13609,7 @@ function submitComplete() {
   }
 
   // Edit mode + Includes Lambda ticked + nothing linked yet → same Lambda log step as Complete.
-  if (pendingEditIdx !== null && !_lambdaGateDone && isLambdaLoggingEnabled() && _cmLambda && _cmLambda.on && lambdaLinkedCount(_cmLambda.linkId) === 0) {
+  if (pendingEditIdx !== null && !_lambdaGateDone && isLambdaLoggingEnabled() && _cmLambda && _cmLambda.on && (lambdaLinkedCount(_cmLambda.linkId) === 0 || lambdaIncompleteCount(_cmLambda.linkId) > 0)) {
     llmOpen(_cmLambda.linkId, () => { _lambdaGateDone = true; try { submitComplete(); } finally { _lambdaGateDone = false; } },
       { mode: 'complete', ctx: llmCaptureCtx(), confirmLabel: 'Save & Continue' });
     return;
@@ -13643,7 +13675,7 @@ function submitComplete() {
   // The tick in the popup footer is the source of truth (it starts from the task card's tick). When
   // Lambda data is already linked to the task the log step is skipped — use "Edit linked functions".
   const lamOn = isLambdaLoggingEnabled() && (_cmLambda ? _cmLambda.on : !!(task && task.includesLambda === true));
-  if (!_lambdaGateDone && lamOn && task && lambdaLinkedCount(id) === 0) {
+  if (!_lambdaGateDone && lamOn && task && (lambdaLinkedCount(id) === 0 || lambdaIncompleteCount(id) > 0)) {
     llmOpen(id, () => { _lambdaGateDone = true; try { submitComplete(); } finally { _lambdaGateDone = false; } },
       { mode: 'complete', ctx: llmCaptureCtx(), confirmLabel: 'Save & Complete' });
     return;
@@ -15567,6 +15599,7 @@ const FS_PORTAL_IDS = [
   'task-search-overlay',   // Ctrl+Shift+F search
   'search-history-modal',  // History popup opened from a search result
   'complete-modal',
+  'lcd-changes-modal',
   'lambda-log-modal',
   'carry-forward-modal',
   'pending-tasks-modal',
@@ -19681,6 +19714,16 @@ function lambdaLinked(linkId) {
   return out;
 }
 function lambdaLinkedCount(linkId) { const l = lambdaLinked(linkId); return l.new.length + l.change.length; }
+// Required columns (per the Function / Change Columns master) that this record's values leave empty.
+function lamMissingRequired(storeKey, values) {
+  return getLambdaColumns(storeKey).filter(c => c.required && !String(values && values[c.key] != null ? values[c.key] : '').trim());
+}
+// Linked records that still lack required details (e.g. linked from the Lambda changes popup before the task was completed).
+function lambdaIncompleteCount(linkId) {
+  const l = lambdaLinked(linkId); let n = 0;
+  ['new', 'change'].forEach(t => l[t].forEach(r => { if (lamMissingRequired(LLM_TYPES[t].store, r.values).length) n++; }));
+  return n;
+}
 function lambdaDeleteLinked(linkId) {
   Object.keys(LLM_TYPES).forEach(t => {
     const sk = LLM_TYPES[t].store, store = readLambdaStore(sk);
@@ -19783,8 +19826,8 @@ function llmCaptureCtx() {
   return ctx;
 }
 // A Lambda column that has the same name (or key) as a Task Logger column gets that column's value.
-function llmPrefill(storeKey) {
-  const ctx = (_llm && _llm.ctx) || {}, logCols = getLogColumns(), out = {};
+function llmPrefill(storeKey, ctxOverride) {
+  const ctx = ctxOverride || (_llm && _llm.ctx) || {}, logCols = getLogColumns(), out = {};
   const norm = s => String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]+/g, '');
   getLambdaColumns(storeKey).forEach(c => {
     const nl = norm(c.label);
@@ -19847,6 +19890,7 @@ function llmClose() {
 }
 function llmCancel() {
   if (!_llm) return;
+  if (_llm.lcd && _llm.view === 'form' && _llm.editIdx == null) { llmClose(); return; }   // opened from the Lambda changes popup: leave without saving
   if (_llm.view !== 'list') { _llm.view = 'list'; _llm.editIdx = null; llmRender(); return; }   // X inside a step = back
   if (_llm.dirty) {
     showConfirm('Discard Lambda changes?', _llm.mode === 'link' ? 'The changes you made to the linked Lambda entries will be lost.' : 'The changes you made here will be lost and nothing will be saved yet.', llmClose, 'Discard');
@@ -19875,16 +19919,18 @@ function llmRender() {
   } else if (_llm.view === 'form') {
     const type = _llm.formType, st = LLM_TYPES[type].store;
     const isNew = _llm.editIdx == null;
-    const cur = isNew ? llmPrefill(st) : _llm.entries[_llm.editIdx].values;
+    const cur = isNew ? Object.assign(llmPrefill(st), _llm.seed || {}) : _llm.entries[_llm.editIdx].values;
     const filled = isNew ? Object.keys(cur).length : 0;
     title.textContent = (isNew ? '' : 'Edit ') + (type === 'new' ? 'New function' : 'Change');
-    body.innerHTML = `<div class="llm-hint">${type === 'new' ? 'Function Columns' : 'Change Columns'} form. Fields marked * are required.${filled ? ' ' + filled + ' field' + (filled === 1 ? ' was' : 's were') + ' filled in from the task.' : ''}</div>` +
+    const needMore = !isNew && lamMissingRequired(st, cur).length > 0;
+    body.innerHTML = `<div class="llm-hint">${_llm.lcd && isNew ? 'Linking <b>' + esc(_llm.lcdName || '') + '</b> to a completed task — fill in the full details. ' : ''}${needMore ? 'Some required details are still missing — please fill them in. ' : ''}${type === 'new' ? 'Function Columns' : 'Change Columns'} form. Fields marked * are required.${filled ? ' ' + filled + ' field' + (filled === 1 ? ' was' : 's were') + ' filled in from the task.' : ''}</div>` +
       `<div class="llm-form">` + lamFormHTML(st, 'llf-', cur) + `</div>`;
+    if (needMore) lamFormCollect(st, 'llf-');   // marks the empty required fields right away
     foot.innerHTML = `<button type="button" class="btn" onclick="llmBack()">Back</button><button type="button" class="btn btn-primary" onclick="llmSaveEntry()"><i class="ti ti-check"></i> ${isNew ? 'Add entry' : 'Update entry'}</button>`;
   } else {
     const link = _llm.mode === 'link';
     title.textContent = link ? 'Linked Lambda entries' : 'Lambda log';
-    const list = _llm.entries.map((e, i) => `<div class="llm-item"><span class="llm-badge ${e.type}">${e.type === 'new' ? 'NEW' : 'CHANGE'}</span><div class="llm-item-body">${llmSummary(e)}</div><div class="llm-item-actions"><button type="button" class="btn-icon" title="Edit" onclick="llmEdit(${i})"><i class="ti ti-pencil"></i></button><button type="button" class="btn-icon btn-delete" title="Remove" onclick="llmRemove(${i})"><i class="ti ti-trash"></i></button></div></div>`).join('');
+    const list = _llm.entries.map((e, i) => `<div class="llm-item"><span class="llm-badge ${e.type}">${e.type === 'new' ? 'NEW' : 'CHANGE'}</span><div class="llm-item-body">${llmSummary(e)}${lamMissingRequired(LLM_TYPES[e.type].store, e.values).length ? '<span class="llm-miss">Details needed</span>' : ''}</div><div class="llm-item-actions"><button type="button" class="btn-icon" title="Edit" onclick="llmEdit(${i})"><i class="ti ti-pencil"></i></button><button type="button" class="btn-icon btn-delete" title="Remove" onclick="llmRemove(${i})"><i class="ti ti-trash"></i></button></div></div>`).join('');
     body.innerHTML = `<div class="llm-hint">${link ? 'These Lambda entries are linked to this task. Edit, remove or add entries, then press Save.' : 'This task includes Lambda. Add an entry for each Lambda function used. Nothing is saved until you confirm.'}</div>` +
       (_llm.entries.length ? `<div class="llm-list">${list}</div>` : `<div class="llm-empty">No entries yet. Tap “Add entry” to log a Lambda.</div>`) +
       `<div class="llm-error hidden" id="llm-error">Add at least one entry (or untick “Includes Lambda” in the popup).</div>` +
@@ -19893,7 +19939,7 @@ function llmRender() {
   }
 }
 function llmAdd() { if (!_llm) return; _llm.view = 'choose'; llmRender(); }
-function llmBack() { if (!_llm) return; _llm.view = (_llm.view === 'form' && _llm.editIdx == null) ? 'choose' : 'list'; _llm.editIdx = null; llmRender(); }
+function llmBack() { if (!_llm) return; if (_llm.lcd && _llm.view === 'form' && _llm.editIdx == null) { llmClose(); return; } _llm.view = (_llm.view === 'form' && _llm.editIdx == null) ? 'choose' : 'list'; _llm.editIdx = null; llmRender(); }
 function llmPick(type) { if (!_llm || !LLM_TYPES[type]) return; _llm.formType = type; _llm.editIdx = null; _llm.view = 'form'; llmRender(); }
 function llmEdit(i) { if (!_llm || !_llm.entries[i]) return; _llm.formType = _llm.entries[i].type; _llm.editIdx = i; _llm.view = 'form'; llmRender(); }
 function llmRemove(i) { if (!_llm) return; _llm.entries.splice(i, 1); _llm.dirty = true; llmRender(); }
@@ -19904,6 +19950,7 @@ function llmSaveEntry() {
   if (_llm.editIdx != null) { const old = _llm.entries[_llm.editIdx]; _llm.entries[_llm.editIdx] = { type: _llm.formType, rid: old.rid, values: r.values }; }
   else _llm.entries.push({ type: _llm.formType, values: r.values });
   _llm.dirty = true; _llm.view = 'list'; _llm.editIdx = null;
+  if (_llm.lcd) { _llm.lcd = false; llmSubmit(); return; }   // from the Lambda changes popup: the form is the whole job, save and link now
   llmRender();
 }
 // Resets a Lambda tab's search / entity filters / date range so freshly saved records are visible.
@@ -19938,6 +19985,10 @@ function lambdaCommitLinked(linkId, entries) {
 function llmSubmit() {
   if (!_llm) return;
   if (!_llm.entries.length && _llm.mode !== 'link') { const er = document.getElementById('llm-error'); if (er) er.classList.remove('hidden'); return; }
+  if (_llm.mode === 'complete') {   // entries linked early (Lambda changes popup) may lack required details: ask for them before completing
+    const bad = _llm.entries.findIndex(e => lamMissingRequired(LLM_TYPES[e.type].store, e.values).length);
+    if (bad >= 0) { llmEdit(bad); return; }
+  }
   try {
     lambdaCommitLinked(_llm.taskId, _llm.entries);
   } catch (err) {
@@ -20691,7 +20742,10 @@ function elmLinkedChecker() {
   };
 }
 // Lambda links changed (saved / deleted / synced): redraw the log table so the button appears or disappears.
-function elmRefreshLogTable() { try { if (typeof updateLogTable === 'function') updateLogTable(); } catch (e) {} }
+function elmRefreshLogTable() {
+  try { if (typeof updateLogTable === 'function') updateLogTable(); } catch (e) {}
+  try { if (typeof lcdpRefreshIfOpen === 'function') lcdpRefreshIfOpen(); } catch (e) {}   // Linked / Unlinked labels in the Lambda changes popup
+}
 function elmOpen(rowIdx) {
   if (!isLambdaLoggingEnabled()) return;   // button is hidden while the flag is off; belt and braces
   const entry = logEntries[rowIdx];
@@ -25790,6 +25844,7 @@ function lcdCheck(opts) {
 
 function lcdAfterCheck() {
   try { lcdUpdateButton(); } catch (e) {}
+  try { lcdpRefreshIfOpen(); } catch (e) {}
   if (typeof activeMastersTab !== 'undefined' && activeMastersTab === 'lambdaAutoDetect') {
     const modal = document.getElementById('masters-modal');
     if (modal && !modal.classList.contains('hidden') && typeof renderMastersContent === 'function') renderMastersContent();
@@ -25816,11 +25871,231 @@ function lcdUpdateButton() {
   const names = lcdNamesForDate(iso);
   const cnt = document.getElementById('lambda-changes-count');
   if (cnt) cnt.textContent = names.length;
-  btn.title = names.length ? ('Lambda functions changed on this date:\n' + names.join('\n')) : 'No Lambda function changes found for this date';
+  btn.title = 'View the Lambda function changes for this date';   // no function names in the tooltip: they are listed in the popup
 }
-// Click action is added in the next feature.
-function lcdButtonClick() { /* intentionally empty for now */ }
+function lcdButtonClick() { lcdpOpen(); }
 // Suffix button: force a fresh read of the JSON file and reload just the selected date (the file is only read, never changed).
+// ── Lambda changes popup (click on the "Lambda changes" button) ─────────────────────────────
+// Lists the functions the JSON file says changed on the selected date. Each one is labelled
+//   • New / Change : New = its Name is not in the Lambda Functions table (Function Columns records) yet;
+//                    Change = it already is there. (A Function record that was itself linked to a task of
+//                    this same date still counts as New, so the label does not flip right after you link it.)
+//   • Linked / Unlinked : Linked = a Function or Change record with that Name is linked to a task of this date.
+// "Link to task" picks one of the date's tasks. Completed task → the full Function / Change form opens
+// (same form as the Lambda log step). Task not completed yet → the record is linked straight away with
+// whatever can be filled from the task; if the column config needs more, it is asked when the task completes.
+const LCD_FN_STORE = 'lambdaFunctionColumns', LCD_CH_STORE = 'lambdaChangeColumns';
+let _lcdp = null;   // { iso, view:'list'|'pick', rows, pick:{ i, cands } }
+function lcdIsoOfTs(ts) { const d = new Date(ts); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+// "Name" column of each master: the function identity (same rule as History / Linked tasks).
+function lcdNameCols() {
+  const norm = v => String(v == null ? '' : v).trim().toLowerCase();
+  const fc = getLambdaColumns(LCD_FN_STORE), cc = getLambdaColumns(LCD_CH_STORE);
+  return {
+    fn: fc.find(c => c.key === 'fn_name') || fc.find(c => norm(c.label) === 'name') || fc[0] || null,
+    ch: cc.find(c => c.key === 'chg_name') || cc.find(c => norm(c.label) === 'name') || cc[0] || null
+  };
+}
+function lcdRecName(rec, col) { if (!col || !rec || !rec.values) return ''; const v = rec.values[col.key]; return v == null ? '' : String(v).trim(); }
+// Tasks of the date: task cards created on it that are not completed + completed / logged entries of the date.
+function lcdCandidates(iso) {
+  const map = new Map();
+  tasks.forEach(t => {
+    if (!t || isTaskDeleted(t) || t.status === 'done' || taskDateStr(t) !== iso) return;
+    if (typeof isRecurringTaskStillHidden === 'function' && isRecurringTaskStillHidden(t)) return;
+    map.set('t' + t.id, { key: 't' + t.id, linkId: t.id, task: t, entries: [], completed: false, src: t, syncId: (t._sync && t._sync.syncId) || null });
+  });
+  logEntries.forEach(e => {
+    if (!e || !e.startTs || lcdIsoOfTs(e.startTs) !== iso) return;
+    const key = e.taskId != null ? 't' + e.taskId : 'e' + e.startTs;
+    let c = map.get(key);
+    if (!c) {
+      const tk = e.taskId != null ? tasks.find(t => t && t.id === e.taskId && !isTaskDeleted(t)) : null;
+      c = { key, linkId: lamLinkIdForEntry(e), task: tk || null, entries: [], completed: false, src: e, syncId: (tk && tk._sync && tk._sync.syncId) || e.taskSyncId || null, fromEntry: true };
+      map.set(key, c);
+    }
+    c.entries.push(e);
+    if (c.fromEntry && e.endTs != null) c.completed = true;
+  });
+  return Array.from(map.values()).map(c => {
+    c.heading = String(c.src.heading || '').trim() || llmShort(c.src.description, 60) || '(untitled)';
+    c.ticket = c.src.ticket || ''; c.project = c.src.project || '';
+    return c;
+  });
+}
+// Does a Lambda record belong to a task / log entry of this date? (same link rules as the Linked Lambda popup)
+function lcdLinkedChecker(iso) {
+  const keyOf = v => /^e/.test(String(v)) ? String(v) : 't' + String(v);
+  const keys = new Set();
+  tasks.forEach(t => {
+    if (!t || isTaskDeleted(t) || taskDateStr(t) !== iso) return;
+    keys.add('t' + t.id); if (t._sync && t._sync.syncId) keys.add('s' + t._sync.syncId);
+  });
+  logEntries.forEach(e => {
+    if (!e || !e.startTs || lcdIsoOfTs(e.startTs) !== iso) return;
+    keys.add('e' + e.startTs);
+    if (e.taskId != null) { keys.add('t' + e.taskId); const tk = tasks.find(t => t && t.id === e.taskId); if (tk && tk._sync && tk._sync.syncId) keys.add('s' + tk._sync.syncId); }
+    if (e.taskSyncId) keys.add('s' + e.taskSyncId);
+  });
+  return rec => {
+    if (!rec) return false;
+    if (rec.taskId != null && keys.has(keyOf(rec.taskId))) return true;
+    if (rec.taskSyncId && keys.has('s' + rec.taskSyncId)) return true;
+    const o = lamOwnerSyncId(rec);
+    return !!(o && keys.has('s' + o));
+  };
+}
+function lcdTaskLabelOf(rec) {
+  const lid = rec.taskId, sid = rec.taskSyncId || lamOwnerSyncId(rec);
+  const card = (lid != null ? tasks.find(t => t && !isTaskDeleted(t) && String(t.id) === String(lid)) : null) || (sid ? lamFindTaskBySyncId(sid) : null);
+  let h = card ? card.heading : '';
+  if (!h) {
+    const e = logEntries.find(x => x && ((lid != null && ((x.taskId != null && String(x.taskId) === String(lid)) || ('e' + x.startTs) === String(lid))) || (sid && x.taskSyncId === sid)));
+    if (e) h = e.heading;
+  }
+  return String(h || '').trim() || '(untitled task)';
+}
+function lcdRecLinksTo(rec, c) {
+  if (rec.taskId != null && String(rec.taskId) === String(c.linkId)) return true;
+  const sid = rec.taskSyncId || lamOwnerSyncId(rec);
+  return !!(sid && c.syncId && sid === c.syncId);
+}
+// One row per function changed on the date: { name, kind:'new'|'change', linked, labels[], recs[] }
+function lcdClassify(iso) {
+  const nc = lcdNameCols(), isLinked = lcdLinkedChecker(iso);
+  const fnRecs = readLambdaStore(LCD_FN_STORE), chRecs = readLambdaStore(LCD_CH_STORE);
+  return lcdNamesForDate(iso).map(name => {
+    const f = nc.fn ? fnRecs.filter(r => r && lcdSameFunction(lcdRecName(r, nc.fn), name)) : [];
+    const c = nc.ch ? chRecs.filter(r => r && lcdSameFunction(lcdRecName(r, nc.ch), name)) : [];
+    const lf = f.filter(isLinked), lc = c.filter(isLinked);
+    const links = lf.concat(lc), labels = [];
+    links.forEach(r => { const l = lcdTaskLabelOf(r); if (labels.indexOf(l) < 0) labels.push(l); });
+    return { name, kind: (!f.length || lf.length) ? 'new' : 'change', linked: links.length > 0, labels, recs: f.concat(c) };
+  });
+}
+function lcdpOpen() {
+  if (!isLambdaLoggingEnabled()) return;
+  _lcdp = { iso: getSelectedDate(), view: 'list', rows: [], pick: null };
+  document.getElementById('lcd-changes-modal').classList.remove('hidden');
+  lcdpRender();
+}
+function lcdpClose() {
+  const m = document.getElementById('lcd-changes-modal');
+  if (m) m.classList.add('hidden');
+  _lcdp = null;
+}
+function lcdpRefreshIfOpen() { if (_lcdp) lcdpRender(); }
+function lcdpBack() { if (!_lcdp) return; _lcdp.view = 'list'; _lcdp.pick = null; lcdpRender(); }
+function lcdpRender() {
+  if (!_lcdp) return;
+  const body = document.getElementById('lcdp-body'), foot = document.getElementById('lcdp-footer'), title = document.getElementById('lcdp-title');
+  if (!body || !foot || !title) return;
+  const iso = _lcdp.iso, dateTxt = fmtDate(new Date(iso + 'T00:00:00'));
+  const rows = lcdClassify(iso); _lcdp.rows = rows;
+  if (_lcdp.view === 'pick' && _lcdp.pick && rows[_lcdp.pick.i]) {
+    const r = rows[_lcdp.pick.i], cands = _lcdp.pick.cands;
+    title.textContent = 'Link to a task — ' + r.name;
+    const stMap = { idle: 'Not started', running: 'Running', paused: 'Paused' };
+    const items = cands.map((c, j) => {
+      const already = r.recs.some(rec => lcdRecLinksTo(rec, c));
+      const meta = [c.ticket ? '#' + c.ticket : '', c.project].filter(Boolean).join(' · ');
+      const st = c.completed ? 'Completed' : ((c.task && stMap[c.task.status]) || 'Open');
+      return `<button type="button" class="lcd-pick-item" ${already ? 'disabled' : ''} onclick="lcdpPick(${j})"><div><b>${esc(c.heading)}</b>${meta ? `<div class="lcd-sub">${esc(meta)}</div>` : ''}</div><div class="lcd-pick-end"><span class="lcd-chip ${c.completed ? 'new' : 'change'}">${esc(st)}</span>${already ? '<span class="lcd-chip linked">Already linked</span>' : ''}</div></button>`;
+    }).join('');
+    body.innerHTML = `<div class="lm-hist-sub"><b>${esc(r.name)}</b> (${r.kind === 'new' ? 'new function' : 'change'}) · ${esc(dateTxt)}. A completed task asks for the full details now; any other task is linked right away and the remaining details are asked when it is completed.</div>` +
+      (cands.length ? `<div class="lcd-pick-list">${items}</div>` : `<div class="lm-hist-empty">No tasks found on ${esc(dateTxt)}.</div>`);
+    foot.innerHTML = `<button type="button" class="btn" onclick="lcdpBack()">Back</button><button type="button" class="btn" onclick="lcdpClose()">Close</button>`;
+    return;
+  }
+  _lcdp.view = 'list';
+  title.textContent = 'Lambda changes — ' + dateTxt;
+  let html;
+  if (!rows.length) {
+    html = `<div class="lm-hist-empty">No Lambda function changes found for ${esc(dateTxt)}.</div>`;
+  } else {
+    const nUn = rows.filter(r => !r.linked).length;
+    html = `<div class="lm-hist-sub">${rows.length} function${rows.length === 1 ? '' : 's'} changed · ${nUn} unlinked</div><div class="lm-hist-wrap"><table class="lm-hist-table"><thead><tr><th>Function</th><th>Type</th><th>Task link</th><th></th></tr></thead><tbody>` +
+      rows.map((r, i) => `<tr><td><div class="lcd-fn">${esc(r.name)}</div></td><td><span class="lcd-chip ${r.kind}">${r.kind === 'new' ? 'New' : 'Change'}</span></td>` +
+        `<td><span class="lcd-chip ${r.linked ? 'linked' : 'unlinked'}">${r.linked ? 'Linked' : 'Unlinked'}</span>${r.labels.length ? `<div class="lcd-sub">${r.labels.map(x => esc(x)).join(' · ')}</div>` : ''}</td>` +
+        `<td style="text-align:right;white-space:nowrap"><button type="button" class="btn lcd-link-btn" onclick="lcdpLink(${i})"><i class="ti ti-link"></i> ${r.linked ? 'Link another task' : 'Link to task'}</button></td></tr>`).join('') +
+      '</tbody></table></div>';
+  }
+  body.innerHTML = html;
+  foot.innerHTML = `<button type="button" class="btn" onclick="lcdpClose()">Close</button>`;
+}
+function lcdpLink(i) {
+  if (!_lcdp) return;
+  const r = _lcdp.rows[i]; if (!r) return;
+  const st = r.kind === 'new' ? LCD_FN_STORE : LCD_CH_STORE;
+  if (!getLambdaColumns(st).length) { alert('No columns are configured in the ' + LAMBDA_COLUMN_STORES[st].title + ' master yet, so this function cannot be linked.'); return; }
+  _lcdp.pick = { i, cands: lcdCandidates(_lcdp.iso) };
+  _lcdp.view = 'pick';
+  lcdpRender();
+}
+// Task Logger values of the task / entry (same keys llmPrefill matches against the Lambda columns).
+function lcdTaskCtx(c, iso) {
+  const ctx = {};
+  const from = x => {
+    if (!x) return;
+    ['heading', 'project', 'nature', 'module', 'ticket', 'description', 'remark'].forEach(k => { if (x[k] != null && String(x[k]).trim()) ctx[k] = String(x[k]); });
+    if (x.taskStatus) ctx.status = String(x.taskStatus);
+    if (x.customFields) Object.keys(x.customFields).forEach(k => { if (x.customFields[k] != null && ctx[k] == null) ctx[k] = String(x.customFields[k]); });
+  };
+  from(c.completed ? (c.entries[0] || c.task) : (c.task || c.entries[0]));
+  ctx.employee = (typeof userName === 'string') ? userName : '';
+  ctx.date = iso;
+  return ctx;
+}
+// A task that has Lambda linked is an "Includes Lambda" task: tick it, flag its log rows, refresh the screen.
+function lcdMarkIncludesLambda(c) {
+  let dirty = false;
+  const flag = e => { if (e && e.includesLambda !== true) { e.includesLambda = true; dirty = true; } };
+  if (c.task && c.task.includesLambda !== true) { c.task.includesLambda = true; touchSyncMetadata(c.task); dirty = true; }
+  c.entries.forEach(flag);
+  if (c.task && c.task.status !== 'done') flag([...logEntries].reverse().find(e => e.taskId === c.task.id && e.endTs === null));
+  if (dirty) saveState();
+  if (c.task) { try { renderRow(c.task.id); } catch (e) {} }
+  if (typeof updateLogTable === 'function') updateLogTable();
+}
+// Not-completed task: write the record now, linked by taskId, with what is known (name, date, task fields).
+function lcdLinkNow(c, st, values) {
+  const now = Date.now(), store = readLambdaStore(st);
+  const id = 'lm_' + now.toString(36) + '_' + Math.random().toString(36).slice(2, 7) + '_' + store.length;
+  store.push({ id, importedAt: now, taskId: c.linkId, values });
+  writeLambdaStore(st, store);
+  lmRevealTab(st);
+  if (!readLambdaStore(st).some(r => r && r.id === id)) throw new Error('the browser did not keep the data (storage may be full or blocked)');
+}
+function lcdpPick(j) {
+  const p = _lcdp && _lcdp.pick; if (!p) return;
+  const r = _lcdp.rows[p.i], c = p.cands[j]; if (!r || !c) return;
+  const iso = _lcdp.iso, kind = r.kind, st = kind === 'new' ? LCD_FN_STORE : LCD_CH_STORE;
+  const nc = lcdNameCols()[kind === 'new' ? 'fn' : 'ch'], cols = getLambdaColumns(st);
+  const ctx = lcdTaskCtx(c, iso), seed = {};
+  if (nc) seed[nc.key] = r.name;
+  const dc = cols.find(x => x.type === 'date' && (x.key === 'chg_date' || x.key === 'fn_date')) || cols.find(x => x.type === 'date');
+  if (dc) seed[dc.key] = iso;   // the form would otherwise default a date to today
+  const done = () => {
+    _lcdp && (_lcdp.view = 'list', _lcdp.pick = null);
+    lcdMarkIncludesLambda(c);
+    elmRefreshLogTable();
+    if (typeof lmRefreshIfOpen === 'function') lmRefreshIfOpen();
+    lcdpRefreshIfOpen();
+  };
+  if (c.completed) {
+    // Completed task: nothing will ask again later, so open the full form now (Lambda log step, form view).
+    llmOpen(c.linkId, done, { mode: 'link', ctx, confirmLabel: 'Save' });
+    if (_llm) { _llm.lcd = true; _llm.lcdName = r.name; _llm.seed = seed; _llm.formType = kind; _llm.editIdx = null; _llm.view = 'form'; llmRender(); }
+  } else {
+    try { lcdLinkNow(c, st, Object.assign(llmPrefill(st, ctx), seed)); }
+    catch (err) { alert('Could not link the function (' + err.message + ').'); return; }
+    done();
+  }
+}
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && _lcdp && !document.querySelector('#lambda-log-modal:not(.hidden)')) { e.stopImmediatePropagation(); lcdpClose(); }
+}, true);
+
 function lcdRefetch() {
   if (_lcdBusy) return;
   if (!_lcdHandle && !_lcdFile) { lcdPickFile(); return; }
@@ -25871,7 +26146,7 @@ function renderLambdaAutoDetectHTML() {
   const row = (k, v) => `<div style="display:flex;gap:8px;font-size:12.5px;padding:3px 0"><span style="width:130px;color:var(--text-tertiary)">${k}</span><span style="flex:1;color:var(--text-primary);word-break:break-word">${v}</span></div>`;
   return `<div style="padding:4px 2px;max-width:640px">
     <div style="font-size:15px;font-weight:600;margin-bottom:4px"><i class="ti ti-radar" style="color:var(--blue-mid)"></i> Auto Change Detect</div>
-    <div style="font-size:12.5px;color:var(--text-secondary);margin-bottom:12px">Pick the Lambda change-log JSON on this computer. It is re-checked when the app loads and after every task completion, and is only read again when the file has changed. The changed function names for the date selected in the header appear on the <b>Lambda changes</b> button above the log table.</div>
+    <div style="font-size:12.5px;color:var(--text-secondary);margin-bottom:12px">Pick the Lambda change-log JSON on this computer. It is re-checked when the app loads and after every task completion, and is only read again when the file has changed. The number of functions changed on the date selected in the header appears on the <b>Lambda changes</b> button above the log table; click it to see them and link them to tasks.</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
       <button class="btn btn-primary" onclick="lcdPickFile()"><i class="ti ti-file-search"></i> ${hasFile ? 'Change JSON file' : 'Select JSON file'}</button>
       ${hasFile && supported ? `<button class="btn" onclick="lcdCheck({force:true,interactive:true})"><i class="ti ti-refresh"></i> Check now</button>` : ''}
