@@ -1035,7 +1035,8 @@ tbody td:first-child { color: var(--text-primary); font-weight: 500; }
   display: flex; align-items: center; justify-content: center; padding: 2px; line-height: 1;
 }
 .log-actions-collapse-btn:hover { color: var(--text-primary); }
-.log-actions-collapsed-cell { position: sticky; right: 0; text-align: center; }
+.log-actions-collapsed-cell { position: sticky; right: 0; text-align: center; padding-left: 6px !important; padding-right: 6px !important; }
+.log-actions-collapsed-cell .btn-icon { display: inline-flex; margin: 0 auto; }
 .log-actions-menu {
   position: absolute; top: 100%; right: 4px; margin-top: 4px;
   background: var(--bg); border: 1px solid var(--border-md); border-radius: var(--radius-md);
@@ -12559,7 +12560,7 @@ const LOG_ACTIONS_COLLAPSED_KEY = 'ttl_logActionsCollapsed';
 // A fixed 76px floor covers the header's "Action" label + collapse toggle even when a day
 // has zero action buttons (future dates).
 const LOG_ACTIONS_COL_WIDTH_MIN = 76;
-const LOG_ACTIONS_COL_WIDTH_COLLAPSED = 40;
+const LOG_ACTIONS_COL_WIDTH_COLLAPSED = 48;
 const LOG_ACTIONS_BTN = 30, LOG_ACTIONS_GAP = 4, LOG_ACTIONS_CELL_PADDING = 20;
 // Mirrors the button conditions in updateLogTable's actionButtonsHtml: present day can show
 // up to 5 (edit, continue, reopen, recurring, delete); past days only continue + recurring;
@@ -15942,19 +15943,19 @@ function updateLogTable() {
     const btnDelete = isPresentDay ? '<button class="btn-icon btn-delete" onclick="confirmDeleteLogEntry('+rowIdx+')" title="Delete entry"><i class="ti ti-trash"></i></button>' : '';
 
     const inlineButtonsHtml = btnEdit + btnCarry + btnReopen + btnDelete;
-    const menuButtonsHtml = btnTransfer + btnRecurring + btnLambda;
-    const allButtonsHtml = btnEdit + btnTransfer + btnCarry + btnReopen + btnRecurring + btnLambda + btnDelete;
+    // A ⋮ menu is only worth a click when it holds 2+ actions: a single action is shown
+    // directly in its place, and an empty set shows nothing.
+    const menuList = [btnTransfer, btnRecurring, btnLambda].filter(Boolean);
+    const allList  = [btnEdit, btnTransfer, btnCarry, btnReopen, btnRecurring, btnLambda, btnDelete].filter(Boolean);
+    const moreToggle = (rowIdx, list, title) => list.length === 0 ? ''
+      : list.length === 1 ? list[0]
+      : `<button type="button" class="btn-icon log-actions-toggle" onclick="toggleLogRowActionsMenu(event, ${rowIdx})" title="${title}"><i class="ti ti-dots-vertical"></i></button>`
+        + `<div class="log-actions-src" id="log-actions-menu-${rowIdx}">${list.join('')}</div>`;
 
     const actionsCellHtml = logActionsCollapsed
-      ? `<td data-col="__actions" class="log-actions-collapsed-cell">
-          <button type="button" class="btn-icon log-actions-toggle" onclick="toggleLogRowActionsMenu(event, ${rowIdx})" title="Actions"><i class="ti ti-dots-vertical"></i></button>
-          <div class="log-actions-src" id="log-actions-menu-${rowIdx}">${allButtonsHtml}</div>
-        </td>`
+      ? `<td data-col="__actions" class="log-actions-collapsed-cell">${moreToggle(rowIdx, allList, 'Actions')}</td>`
       : `<td data-col="__actions">
-          <div style="display:flex;flex-direction:row;align-items:center;gap:4px">${inlineButtonsHtml}${menuButtonsHtml
-            ? `<button type="button" class="btn-icon log-actions-toggle" onclick="toggleLogRowActionsMenu(event, ${rowIdx})" title="More actions"><i class="ti ti-dots-vertical"></i></button>`
-            : ''}</div>
-          ${menuButtonsHtml ? `<div class="log-actions-src" id="log-actions-menu-${rowIdx}">${menuButtonsHtml}</div>` : ''}
+          <div style="display:flex;flex-direction:row;align-items:center;gap:4px">${inlineButtonsHtml}${moreToggle(rowIdx, menuList, 'More actions')}</div>
         </td>`;
 
     return `<tr data-entry-ts="${e.startTs}"${entryHasLambda(e) ? ' class="lambda-row" title="Includes Lambda"' : ''}>
