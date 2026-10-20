@@ -1042,6 +1042,11 @@ tbody td:first-child { color: var(--text-primary); font-weight: 500; }
   box-shadow: 0 4px 14px rgba(0,0,0,0.18); padding: 6px; z-index: 30; min-width: 40px;
 }
 .log-actions-menu.hidden { display: none; }
+.log-actions-src { display: none !important; }
+/* Single floating menu, outside the table, so the table's 1-second live re-render
+   (tbody.innerHTML) and the scroll container's clipping can't destroy or hide it. */
+.log-actions-float { position: fixed; top: 0; left: 0; right: auto; margin: 0; z-index: 10050; }
+.log-actions-float .actions { display: flex; flex-direction: column; align-items: stretch; gap: 4px; }
 .log-actions-menu .actions { flex-direction: column; align-items: stretch; }
 
 /* ── Custom tooltip (replaces native browser title tooltips) — ported from the
@@ -12589,22 +12594,62 @@ function toggleLogActionsColumn() {
   ltSaveBool(LOG_ACTIONS_COLLAPSED_KEY, logActionsCollapsed);
   updateLogTable();
 }
-// Per-row "more actions" menu, used only in collapsed mode. Only one menu is open
-// at a time; clicking elsewhere on the page closes it.
+// Per-row "more actions" menu. One floating menu element is shared by all rows and lives
+// OUTSIDE the table (on <body>, or inside the log panel while in fullscreen) because
+// updateLogTable() re-renders the tbody every second while a task runs, which would
+// otherwise destroy an open in-row menu. Each row keeps a hidden source block with its buttons.
+let _logActionsFloatRow = null;
+function _logActionsFloatEl() {
+  let f = document.getElementById('log-actions-float');
+  if (!f) {
+    f = document.createElement('div');
+    f.id = 'log-actions-float';
+    f.className = 'log-actions-menu log-actions-float';
+    f.style.display = 'none';
+  }
+  // Native Fullscreen API paints only the fullscreen element, so mount inside the panel then.
+  const panel = document.getElementById('log-panel');
+  const host = (panel && panel.classList.contains('fullscreen')) ? panel : document.body;
+  if (f.parentElement !== host) host.appendChild(f);
+  return f;
+}
+function closeLogRowActionsMenu() {
+  const f = document.getElementById('log-actions-float');
+  if (f) f.style.display = 'none';
+  _logActionsFloatRow = null;
+}
 function toggleLogRowActionsMenu(evt, rowIdx) {
   evt.preventDefault();
   evt.stopPropagation();
-  const menu = document.getElementById('log-actions-menu-' + rowIdx);
-  if (!menu) return;
-  const wasHidden = menu.classList.contains('hidden');
-  document.querySelectorAll('.log-actions-menu').forEach(m => m.classList.add('hidden'));
-  if (wasHidden) menu.classList.remove('hidden');
+  const f = _logActionsFloatEl();
+  if (f.style.display !== 'none' && _logActionsFloatRow === rowIdx) { closeLogRowActionsMenu(); return; }
+  const src = document.getElementById('log-actions-menu-' + rowIdx);
+  if (!src) return;
+  const btn = evt.currentTarget || evt.target.closest('button');
+  f.innerHTML = '<div class="actions">' + src.innerHTML + '</div>';
+  _logActionsFloatRow = rowIdx;
+  f.style.visibility = 'hidden';
+  f.style.display = 'block';
+  const r = btn.getBoundingClientRect();
+  const mw = f.offsetWidth, mh = f.offsetHeight, vw = window.innerWidth, vh = window.innerHeight;
+  let left = Math.min(Math.max(4, r.right - mw), vw - mw - 4);
+  let top = r.bottom + 4;
+  if (top + mh > vh - 4) top = Math.max(4, r.top - mh - 4);   // flip above when no room below
+  f.style.left = left + 'px';
+  f.style.top = top + 'px';
+  f.style.visibility = '';
 }
 document.addEventListener('click', (e) => {
-  if ((!e.target.closest('.log-actions-menu') && !e.target.closest('.log-actions-toggle')) || e.target.closest('.log-actions-menu button')) {
-    document.querySelectorAll('.log-actions-menu').forEach(m => m.classList.add('hidden'));
-  }
+  const f = document.getElementById('log-actions-float');
+  if (!f || f.style.display === 'none') return;
+  const inMenu = e.target.closest('#log-actions-float');
+  if ((!inMenu && !e.target.closest('.log-actions-toggle')) || (inMenu && e.target.closest('button'))) closeLogRowActionsMenu();
 });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeLogRowActionsMenu(); });
+window.addEventListener('resize', closeLogRowActionsMenu);
+document.addEventListener('scroll', (e) => { if (!e.target.closest || !e.target.closest('#log-actions-float')) closeLogRowActionsMenu(); }, true);
+document.addEventListener('fullscreenchange', closeLogRowActionsMenu);
+document.addEventListener('webkitfullscreenchange', closeLogRowActionsMenu);
 
 // ── Log table column configuration helpers ─────────────────────────────────
 function getLogColumns() {
@@ -15863,8 +15908,8 @@ function updateLogTable() {
     const btnCarry = (!isFutureDay)
       ? '<button class="btn-icon" id="continue-'+e.taskId+'" onclick="continueTomorrow('+e.taskId+')" title="Carry forward — add this task to another day" style="border-color:var(--blue-mid);color:var(--blue-dark)"><i class="ti ti-calendar-plus"></i></button>'
       : '';
-    const btnReopen = (isPresentDay && e.endTs !== null)
-      ? '<button class="btn-icon" onclick="reopenTask('+e.taskId+')" title="Reopen task" style="border-color:var(--amber-mid);color:var(--amber-dark)"><i class="ti ti-refresh"></i></button>'
+    const btnReopen = isPresentDay
+      ? '<button class="btn-icon" '+((e.endTs !== null) ? 'onclick="reopenTask('+e.taskId+')" title="Reopen task"' : 'disabled title="Reopen is available once the task is completed"')+' style="border-color:var(--amber-mid);color:var(--amber-dark)"><i class="ti ti-refresh"></i></button>'
       : '';
     const btnRecurring = (!isFutureDay)
       ? (linkedPlan
@@ -15883,17 +15928,13 @@ function updateLogTable() {
     const actionsCellHtml = logActionsCollapsed
       ? `<td data-col="__actions" class="log-actions-collapsed-cell">
           <button type="button" class="btn-icon log-actions-toggle" onclick="toggleLogRowActionsMenu(event, ${rowIdx})" title="Actions"><i class="ti ti-dots-vertical"></i></button>
-          <div class="log-actions-menu hidden" id="log-actions-menu-${rowIdx}">
-            <div class="actions" style="display:flex;gap:4px">${allButtonsHtml}</div>
-          </div>
+          <div class="log-actions-src" id="log-actions-menu-${rowIdx}">${allButtonsHtml}</div>
         </td>`
       : `<td data-col="__actions">
           <div style="display:flex;flex-direction:row;align-items:center;gap:4px">${inlineButtonsHtml}${menuButtonsHtml
             ? `<button type="button" class="btn-icon log-actions-toggle" onclick="toggleLogRowActionsMenu(event, ${rowIdx})" title="More actions"><i class="ti ti-dots-vertical"></i></button>`
             : ''}</div>
-          ${menuButtonsHtml ? `<div class="log-actions-menu hidden" id="log-actions-menu-${rowIdx}">
-            <div class="actions" style="display:flex;gap:4px">${menuButtonsHtml}</div>
-          </div>` : ''}
+          ${menuButtonsHtml ? `<div class="log-actions-src" id="log-actions-menu-${rowIdx}">${menuButtonsHtml}</div>` : ''}
         </td>`;
 
     return `<tr data-entry-ts="${e.startTs}"${entryHasLambda(e) ? ' class="lambda-row" title="Includes Lambda"' : ''}>
