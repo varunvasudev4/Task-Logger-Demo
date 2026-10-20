@@ -1485,7 +1485,7 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
   box-shadow: 0 10px 30px rgba(0,0,0,0.35); width: 100%; max-width: 340px; padding: 24px 20px;
 }
 .confirm-title { font-family: var(--font-head); font-size: 16px; font-weight: 600; margin-bottom: 8px; }
-.confirm-msg { font-size: 13px; color: var(--text-secondary); margin-bottom: 20px; }
+.confirm-msg { white-space: pre-line; max-height: 50vh; overflow-y: auto; font-size: 13px; color: var(--text-secondary); margin-bottom: 20px; }
 .confirm-actions { display: flex; gap: 8px; justify-content: flex-end; }
 
 
@@ -20723,15 +20723,47 @@ function lmEditOpen(id) {
 // Duplicate = an existing record with the same value in EVERY column flagged "Duplicate check" in the
 // master (no static column names). No flagged column = no duplicate check.
 function lmDupCols(k) { return getLambdaColumns(k).filter(c => c.dupCheck === true); }
+function lmDupKey(c, v) {
+  const norm = x => String(x == null ? '' : x).trim().toLowerCase().replace(/\s+/g, ' ');
+  if (c.type === 'date') return lmParseDate(v, c) || norm(v);
+  if (c.type === 'multilist') return lmCellValues(c, v, lmKnownItems(c)).map(norm).filter(Boolean).sort().join('|');
+  return norm(v);
+}
 function lmFindDuplicate(k, values) {
   const dcols = lmDupCols(k);
   if (!dcols.length) return null;
-  const norm = v => String(v == null ? '' : v).trim().toLowerCase().replace(/\s+/g, ' ');
-  const keyOf = (c, v) => c.type === 'date' ? (lmParseDate(v, c) || norm(v)) : norm(v);
-  const want = dcols.map(c => keyOf(c, values[c.key]));
+  const want = dcols.map(c => lmDupKey(c, values[c.key]));
   if (want.every(w => !w)) return null;   // nothing filled in on the flagged columns: nothing to compare
-  const hit = readLambdaStore(k).find(r => r && r.values && dcols.every((c, i) => keyOf(c, r.values[c.key]) === want[i]));
+  const hit = readLambdaStore(k).find(r => r && r.values && dcols.every((c, i) => lmDupKey(c, r.values[c.key]) === want[i]));
   return hit ? { cols: dcols, rec: hit } : null;
+}
+// A multi-select dropdown column ticked "Duplicate check" with several options chosen is split into one
+// entry per option (every other value identical). Several such columns give every combination.
+function lmExpandMulti(k, values) {
+  const mcols = lmDupCols(k).filter(c => c.type === 'multilist');
+  let out = [Object.assign({}, values)];
+  mcols.forEach(c => {
+    const seen = new Set(), opts = [];
+    lmCellValues(c, values[c.key], lmKnownItems(c)).forEach(o => { const key = o.toLowerCase(); if (!seen.has(key)) { seen.add(key); opts.push(o); } });
+    if (opts.length < 2) return;
+    const next = [];
+    out.forEach(v => opts.forEach(o => next.push(Object.assign({}, v, { [c.key]: o }))));
+    out = next;
+  });
+  return out;
+}
+function lmDupDesc(k, values) {
+  return lmDupCols(k).map(c => (c.label || c.key) + ' "' + lmDisplayValue(c, values[c.key]) + '"').join(', ');
+}
+function lmAddRecords(k, list) {
+  try {
+    const store = readLambdaStore(k), now = Date.now();
+    list.forEach((vals, i) => store.push({ id: 'lm_' + now.toString(36) + '_' + Math.random().toString(36).slice(2, 7) + '_' + (store.length + i), importedAt: now, values: vals }));
+    writeLambdaStore(k, store);
+  } catch (err) { alert('Could not add the entry (' + err.message + ').'); return; }
+  lmRevealTab(k);   // clear search / filters / date range so the new record(s) are visible
+  lmEditClose();
+  lmRenderAll();
 }
 function lmAddOpen() {
   const k = lmActiveTab;
@@ -20752,21 +20784,22 @@ function lmEditSave() {
   const k = _lme.k, id = _lme.id;
   const r = lamFormCollect(k, 'lme-');
   if (r.bad) { if (r.bad.scrollIntoView) r.bad.scrollIntoView({ block: 'center', behavior: 'smooth' }); return; }
-  if (id == null) {   // Add entry
-    const dup = lmFindDuplicate(k, r.values);
-    if (dup) {
-      const desc = dup.cols.map(c => (c.label || c.key) + ' "' + lmDisplayValue(c, r.values[c.key]) + '"').join(', ');
-      alert('Duplicate entry: a record with ' + desc + ' already exists in ' + LAMBDA_COLUMN_STORES[k].title + '. Change ' + (dup.cols.length > 1 ? 'one of these values' : 'this value') + ' to add it.');
+  if (id == null) {   // Add entry (split per option of any multi-select Duplicate-check column, each checked for duplicates)
+    const res = lmExpandMulti(k, r.values).map(v => ({ v, dup: lmFindDuplicate(k, v) }));
+    const fresh = res.filter(x => !x.dup), dups = res.filter(x => x.dup);
+    const dupList = dups.map(x => '• ' + lmDupDesc(k, x.v)).join('\n');
+    if (!fresh.length) {
+      alert((dups.length > 1 ? 'Duplicate entries: all ' + dups.length + ' entries already exist in ' : 'Duplicate entry: a record with ' + lmDupDesc(k, dups[0].v) + ' already exists in ') + LAMBDA_COLUMN_STORES[k].title + '.' +
+        (dups.length > 1 ? '\n' + dupList : '') + '\nChange a value to add it.');
       return;
     }
-    try {
-      const store = readLambdaStore(k), now = Date.now();
-      store.push({ id: 'lm_' + now.toString(36) + '_' + Math.random().toString(36).slice(2, 7) + '_' + store.length, importedAt: now, values: r.values });
-      writeLambdaStore(k, store);
-    } catch (err) { alert('Could not add the entry (' + err.message + ').'); return; }
-    lmRevealTab(k);   // clear search / filters / date range so the new record is visible
-    lmEditClose();
-    lmRenderAll();
+    if (dups.length) {
+      showConfirmChoice('Some entries already exist',
+        dups.length + ' of ' + res.length + ' entries are duplicates and will be skipped:\n' + dupList + '\n\nAdd the other ' + fresh.length + ' entr' + (fresh.length === 1 ? 'y' : 'ies') + '?',
+        () => lmAddRecords(k, fresh.map(x => x.v)), null, 'Add new only', 'Cancel');
+      return;
+    }
+    lmAddRecords(k, fresh.map(x => x.v));
     return;
   }
   try {
