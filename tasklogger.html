@@ -19913,7 +19913,21 @@ function llmRender() {
       const st = LLM_TYPES[type].store, none = getLambdaColumns(st).length === 0;
       return `<button type="button" class="llm-choice-btn" ${none ? 'disabled' : ''} onclick="llmPick('${type}')"><i class="ti ${LLM_TYPES[type].icon}"></i><div><b>${heading}</b><span>${none ? 'No columns are configured in the ' + esc(LAMBDA_COLUMN_STORES[st].title) + ' master yet.' : sub}</span></div></button>`;
     };
-    body.innerHTML = `<div class="llm-hint">Is this a new Lambda function, or a change to an existing one?</div><div class="llm-choice">` +
+    // Functions the change-log JSON lists for the task's date, with New / Change + Linked / Unlinked; picking one opens the matching form.
+    let fnPick = '';
+    _llm.fnRows = [];
+    try {
+      const fiso = (_llm.ctx && _llm.ctx.date) || getSelectedDate();
+      const frows = (typeof lcdClassify === 'function') ? lcdClassify(fiso) : [];
+      _llm.fnRows = frows;
+      if (frows.length) {
+        fnPick = `<div class="complete-field" style="margin-bottom:12px"><label class="complete-label">Changed functions on ${esc(fmtDate(new Date(fiso + 'T00:00:00')))}</label>` +
+          `<select class="meta-select" id="llm-fn-select" onchange="llmPickFn(this.value)"><option value="">Select a changed function…</option>` +
+          frows.map((r, i) => `<option value="${i}">${esc(r.name)} — ${r.kind === 'new' ? 'New' : 'Change'} · ${r.linked ? 'Linked' : 'Unlinked'}</option>`).join('') +
+          `</select></div><div class="llm-hint">Or choose manually:</div>`;
+      }
+    } catch (e) { fnPick = ''; }
+    body.innerHTML = fnPick + `<div class="llm-hint">Is this a new Lambda function, or a change to an existing one?</div><div class="llm-choice">` +
       opt('new', 'New function', 'Opens the Function Columns form.') + opt('change', 'Change to an existing function', 'Opens the Change Columns form.') + `</div>`;
     foot.innerHTML = `<button type="button" class="btn" onclick="llmBack()">Back</button>`;
   } else if (_llm.view === 'form') {
@@ -19940,7 +19954,17 @@ function llmRender() {
 }
 function llmAdd() { if (!_llm) return; _llm.view = 'choose'; llmRender(); }
 function llmBack() { if (!_llm) return; if (_llm.lcd && _llm.view === 'form' && _llm.editIdx == null) { llmClose(); return; } _llm.view = (_llm.view === 'form' && _llm.editIdx == null) ? 'choose' : 'list'; _llm.editIdx = null; llmRender(); }
-function llmPick(type) { if (!_llm || !LLM_TYPES[type]) return; _llm.formType = type; _llm.editIdx = null; _llm.view = 'form'; llmRender(); }
+function llmPickFn(i) {
+  if (!_llm || i === '' || !_llm.fnRows || !_llm.fnRows[i]) return;
+  const r = _llm.fnRows[i], st = LLM_TYPES[r.kind].store, cols = getLambdaColumns(st);
+  if (!cols.length) { alert('No columns are configured in the ' + LAMBDA_COLUMN_STORES[st].title + ' master yet.'); llmRender(); return; }
+  const nc = lcdNameCols()[r.kind === 'new' ? 'fn' : 'ch'], seed = {};
+  if (nc) seed[nc.key] = r.name;
+  const dc = cols.find(x => x.type === 'date' && (x.key === 'chg_date' || x.key === 'fn_date')) || cols.find(x => x.type === 'date');
+  if (dc) seed[dc.key] = (_llm.ctx && _llm.ctx.date) || getSelectedDate();
+  _llm.seed = seed; _llm.formType = r.kind; _llm.editIdx = null; _llm.view = 'form'; llmRender();
+}
+function llmPick(type) { if (!_llm || !LLM_TYPES[type]) return; _llm.seed = null; _llm.formType = type; _llm.editIdx = null; _llm.view = 'form'; llmRender(); }
 function llmEdit(i) { if (!_llm || !_llm.entries[i]) return; _llm.formType = _llm.entries[i].type; _llm.editIdx = i; _llm.view = 'form'; llmRender(); }
 function llmRemove(i) { if (!_llm) return; _llm.entries.splice(i, 1); _llm.dirty = true; llmRender(); }
 function llmSaveEntry() {
