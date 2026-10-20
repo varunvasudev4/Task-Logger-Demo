@@ -644,6 +644,8 @@ html.is-touch .pending-card-actions { opacity: 1; }
 .lm-sel-wrap { display: inline-flex; align-items: center; gap: 4px; }
 .lm-row-edit { background: none; border: none; padding: 3px 4px; cursor: pointer; color: var(--text-tertiary); border-radius: var(--radius-md); line-height: 1; font-size: 15px; }
 .lm-row-edit:hover { color: var(--blue-mid); background: var(--bg-secondary); }
+.lm-add-btn { background: var(--blue-bg, transparent); border: 1px solid var(--blue-mid); color: var(--blue-dark, var(--blue-mid)); cursor: pointer; border-radius: var(--radius-md); width: 28px; height: 26px; padding: 0; line-height: 1; font-size: 15px; display: inline-flex; align-items: center; justify-content: center; }
+.lm-add-btn:hover { background: var(--blue-mid); color: #fff; }
 .lm-daterange { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; min-width: 0; }
 
 .todo-card-planned-chip { background: color-mix(in srgb, var(--blue-mid) 18%, transparent); color: var(--blue-mid); font-weight: 600; }
@@ -2305,7 +2307,7 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
     <div class="modal-body" id="lme-body"></div>
     <div class="modal-footer">
       <button type="button" class="btn" onclick="lmEditClose()">Cancel</button>
-      <button type="button" class="btn btn-primary" onclick="lmEditSave()"><i class="ti ti-device-floppy"></i> Save changes</button>
+      <button type="button" class="btn btn-primary" id="lme-save-btn" onclick="lmEditSave()"><i class="ti ti-device-floppy"></i> Save changes</button>
     </div>
   </div>
 </div>
@@ -20423,7 +20425,7 @@ function lmRenderTable() {
     return `<th class="log-th-sortable" data-col="${esc(c.key)}">${esc(c.label)}<span class="col-sort-arrow">${arrow}</span>` +
       `<button type="button" class="col-pin-icon" data-col="${esc(c.key)}" title="Pin column">${LOG_TABLE_PIN_ICON_SVG}</button>` +
       `<span class="col-resize-handle"></span></th>`;
-  }).join('') + `<th data-col="__edit" class="lm-edit-th${hasHist ? ' lm-has-hist' : ''}" aria-label="${hasHist ? 'Linked tasks, history and edit' : 'Edit'}"></th>`;
+  }).join('') + `<th data-col="__edit" class="lm-edit-th${hasHist ? ' lm-has-hist' : ''}" aria-label="${hasHist ? 'Add entry, linked tasks, history and edit' : 'Add entry and edit'}"><button type="button" class="lm-add-btn" title="Add entry" aria-label="Add entry"><i class="ti ti-plus"></i></button></th>`;
   const tbody = rows.map(r => `<tr data-id="${esc(r.id)}"><td data-col="__sel" class="lm-sel-cell"><input type="checkbox" class="lm-row-cb" data-id="${esc(r.id)}" aria-label="Select row"></td>` + cols.map(c => {
     const v = lmDisplayValue(c, r.values && r.values[c.key]);
     return `<td data-col="${esc(c.key)}" title="${esc(v)}">${esc(v)}</td>`;
@@ -20439,6 +20441,8 @@ function lmRenderTable() {
   lmApplyPins();
   const tbl = document.getElementById('lm-table');
   if (tbl) tbl.addEventListener('click', (e) => {
+    const ad = e.target.closest && e.target.closest('.lm-add-btn');
+    if (ad) { e.stopPropagation(); lmAddOpen(); return; }
     const lt = e.target.closest && e.target.closest('.lm-row-tasks');
     if (lt) { e.stopPropagation(); lmTasksOpen(lt.dataset.id); return; }
     const h = e.target.closest && e.target.closest('.lm-row-hist');
@@ -20700,8 +20704,43 @@ function lmEditOpen(id) {
   const k = lmActiveTab, rec = readLambdaStore(k).find(r => r && r.id === id);
   if (!rec || !getLambdaColumns(k).length) return;
   _lme = { k, id };
+  const sb = document.getElementById('lme-save-btn'); if (sb) sb.innerHTML = '<i class="ti ti-device-floppy"></i> Save changes';
   document.getElementById('lme-title').textContent = 'Edit ' + LAMBDA_COLUMN_STORES[k].noun;
   document.getElementById('lme-body').innerHTML = `<div class="llm-hint">${esc(LAMBDA_COLUMN_STORES[k].title)} form. Fields marked * are required.</div><div class="llm-form">` + lamFormHTML(k, 'lme-', rec.values || {}) + `</div>`;
+  document.getElementById('lm-edit-modal').classList.remove('hidden');
+}
+// ── Add entry (+ in the table header's action column): same form as Edit, blank, with a duplicate check ──
+// Duplicate = same Name AND same date. Functions tab: function Name + Create date. Changes tab: Name + Date.
+function lmDupCols(k) {
+  const cols = getLambdaColumns(k);
+  const norm = v => String(v == null ? '' : v).trim().toLowerCase();
+  const nameKey = k === 'lambdaFunctionColumns' ? 'fn_name' : 'chg_name';
+  const nameCol = cols.find(c => c.key === nameKey) || cols.find(c => norm(c.label) === 'name') || cols[0];
+  const dates = cols.filter(c => c.type === 'date');
+  let dateCol = null;
+  if (k === 'lambdaFunctionColumns') dateCol = dates.find(c => /creat/i.test(c.key + ' ' + c.label)) || dates[0] || null;
+  else dateCol = dates.find(c => c.key === 'chg_date') || dates[0] || null;
+  return { nameCol, dateCol };
+}
+function lmFindDuplicate(k, values) {
+  const { nameCol, dateCol } = lmDupCols(k);
+  if (!nameCol) return null;
+  const norm = v => String(v == null ? '' : v).trim().toLowerCase();
+  const dKey = (v, c) => { const iso = lmParseDate(v, c); return iso || norm(v); };
+  const name = norm(values[nameCol.key]);
+  if (!name) return null;
+  const date = dateCol ? dKey(values[dateCol.key], dateCol) : '';
+  const hit = readLambdaStore(k).find(r => r && r.values && norm(r.values[nameCol.key]) === name &&
+    (!dateCol || dKey(r.values[dateCol.key], dateCol) === date));
+  return hit ? { nameCol, dateCol, rec: hit } : null;
+}
+function lmAddOpen() {
+  const k = lmActiveTab;
+  if (!getLambdaColumns(k).length) return;
+  _lme = { k, id: null };
+  const sb = document.getElementById('lme-save-btn'); if (sb) sb.innerHTML = '<i class="ti ti-plus"></i> Add entry';
+  document.getElementById('lme-title').textContent = 'Add ' + LAMBDA_COLUMN_STORES[k].noun;
+  document.getElementById('lme-body').innerHTML = `<div class="llm-hint">${esc(LAMBDA_COLUMN_STORES[k].title)} form. Fields marked * are required.</div><div class="llm-form">` + lamFormHTML(k, 'lme-', {}) + `</div>`;
   document.getElementById('lm-edit-modal').classList.remove('hidden');
 }
 function lmEditClose() {
@@ -20714,6 +20753,25 @@ function lmEditSave() {
   const k = _lme.k, id = _lme.id;
   const r = lamFormCollect(k, 'lme-');
   if (r.bad) { if (r.bad.scrollIntoView) r.bad.scrollIntoView({ block: 'center', behavior: 'smooth' }); return; }
+  if (id == null) {   // Add entry
+    const dup = lmFindDuplicate(k, r.values);
+    if (dup) {
+      const nm = r.values[dup.nameCol.key];
+      const dv = dup.dateCol ? lmDisplayValue(dup.dateCol, r.values[dup.dateCol.key]) : '';
+      alert('Duplicate entry: ' + (dup.nameCol.label || 'Name') + ' "' + nm + '"' + (dup.dateCol ? ' with ' + (dup.dateCol.label || 'Date') + ' ' + dv : '') +
+        ' already exists in ' + LAMBDA_COLUMN_STORES[k].title + '. Change the ' + (dup.dateCol ? 'name or date' : 'name') + ' to add it.');
+      return;
+    }
+    try {
+      const store = readLambdaStore(k), now = Date.now();
+      store.push({ id: 'lm_' + now.toString(36) + '_' + Math.random().toString(36).slice(2, 7) + '_' + store.length, importedAt: now, values: r.values });
+      writeLambdaStore(k, store);
+    } catch (err) { alert('Could not add the entry (' + err.message + ').'); return; }
+    lmRevealTab(k);   // clear search / filters / date range so the new record is visible
+    lmEditClose();
+    lmRenderAll();
+    return;
+  }
   try {
     const store = readLambdaStore(k), rec = store.find(x => x && x.id === id);
     if (!rec) { alert('This record no longer exists.'); lmEditClose(); lmRenderAll(); return; }
