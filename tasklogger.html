@@ -3714,6 +3714,9 @@ function recordSyncChange(domain, entityId, operation) {
     deviceId: (typeof getDeviceId === 'function') ? getDeviceId() : null
   };
   saveDomainSyncState();
+  // Lambda log changes (Function / Change records) must light up "Sync required" on the Sync button straight away,
+  // like every other local change — the Lambda tables write through here, not through saveState().
+  if (domain === 'lambdaRecords' && typeof refreshTopSyncIndicator === 'function') { try { refreshTopSyncIndicator(); } catch (e) {} }
   // Reuses the EXACT SAME hook enqueueTask() (Phase 3/17) already calls — no second
   // scheduler, no second debounce, no second trigger path. A domain change and a
   // task change occurring together collapse into the same one debounce window.
