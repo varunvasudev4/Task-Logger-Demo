@@ -513,6 +513,7 @@ html.is-touch .pending-card-actions { opacity: 1; }
 .lm-sel-th, .lm-sel-cell { width: 40px; text-align: center; }
 .lm-edit-th, .lm-edit-cell { width: 44px; text-align: center; white-space: nowrap; }
 .lm-edit-th.lm-has-hist, .lm-edit-cell.lm-has-hist { width: 108px; }
+.lm-edit-th.lm-has-link, .lm-edit-cell.lm-has-link { width: 76px; }
 .lm-row-hist { background: none; border: none; padding: 3px 4px; cursor: pointer; color: var(--text-tertiary); border-radius: var(--radius-md); line-height: 1; font-size: 15px; }
 .lm-row-hist:hover { color: var(--purple-mid); background: var(--bg-secondary); }
 .lm-row-tasks { background: none; border: none; padding: 3px 4px; cursor: pointer; color: var(--text-tertiary); border-radius: var(--radius-md); line-height: 1; font-size: 15px; }
@@ -654,6 +655,17 @@ html.is-touch .pending-card-actions { opacity: 1; }
 .lcd-chip.change { background: var(--blue-bg); color: var(--blue-dark); }
 .lcd-chip.linked { border: 1px solid currentColor; color: var(--green-dark); }
 .lcd-chip.unlinked { background: var(--amber-bg); color: var(--amber-dark); }
+.lcd-chip.saved { background: var(--green-bg); color: var(--green-dark); }
+.lcd-chip.notsaved { background: var(--amber-bg); color: var(--amber-dark); }
+.lcd-chip.unk { background: var(--bg-secondary); color: var(--text-tertiary); border: 1px dashed var(--border-md); }
+.lcd-cnts { display: inline-flex; gap: 4px; margin-left: 2px; vertical-align: middle; }
+.lcd-cnt { display: inline-flex; align-items: center; gap: 2px; border-radius: 10px; font-size: 10.5px; font-weight: 600; padding: 1px 7px; white-space: nowrap; }
+.lcd-cnt i { font-size: 11px; }
+.lcd-cnt.linked { background: var(--green-bg); color: var(--green-dark); }
+.lcd-cnt.unlinked { background: var(--amber-bg); color: var(--amber-dark); }
+.lcd-acts { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.lcd-acts .btn { padding: 4px 10px; font-size: 12px; white-space: nowrap; }
+@media (max-width: 600px) { .lcd-cnt-w { display: none; } }
 .lcd-fn { font-weight: 600; overflow-wrap: anywhere; }
 .lcd-sub { font-size: 11.5px; color: var(--text-tertiary); margin-top: 3px; overflow-wrap: anywhere; }
 .lcd-link-btn { padding: 4px 10px; font-size: 12px; }
@@ -2034,7 +2046,7 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
         <div class="log-count" id="log-count">0 entries</div>
       </div>
       <div class="log-header-actions">
-        <span class="lcd-btn-group" id="lambda-changes-group" style="display:none"><button class="btn lcd-main" onclick="lcdButtonClick()" id="lambda-changes-btn"><i class="ti ti-function"></i> Lambda changes <span class="lambda-chip" id="lambda-changes-count">0</span></button><button class="btn lcd-refetch" onclick="lcdRefetch()" id="lambda-changes-refetch" title="Re-fetch and check the data from the JSON file for this date" aria-label="Re-fetch Lambda changes from the JSON file"><i class="ti ti-refresh" id="lambda-changes-refetch-icon"></i></button></span>
+        <span class="lcd-btn-group" id="lambda-changes-group" style="display:none"><button class="btn lcd-main" onclick="lcdButtonClick()" id="lambda-changes-btn"><i class="ti ti-function"></i> Lambda changes <span class="lcd-cnts" id="lambda-changes-count"></span></button><button class="btn lcd-refetch" onclick="lcdRefetch()" id="lambda-changes-refetch" title="Re-fetch and check the data from the JSON file for this date" aria-label="Re-fetch Lambda changes from the JSON file"><i class="ti ti-refresh" id="lambda-changes-refetch-icon"></i></button></span>
         <button class="btn" onclick="copyLog()" id="copy-btn"><i class="ti ti-clipboard-copy"></i> Copy</button>
         <button class="btn" onclick="openMailModal()" id="mail-btn" title="Send log via email"><i class="ti ti-mail"></i> Email</button>
         <button class="btn" onclick="openDailySummary()" id="summary-btn" title="Open Daily Summary"><i class="ti ti-report"></i> Summary</button>
@@ -4064,6 +4076,15 @@ function lamOwnerSyncId(r) {
   const t = tasks.find(x => x && String(x.id) === String(r.taskId));
   return (t && t._sync && t._sync.syncId) || null;
 }
+// Which task a record is linked to, in a form that means the same on every device ('' = not linked).
+// Link changes (link / unlink) are compared with this, because lamCanon deliberately ignores the device-local taskId.
+function lamLinkSig(r) {
+  if (!r) return '';
+  if (r.taskSyncId) return 's' + r.taskSyncId;
+  const o = lamOwnerSyncId(r);
+  if (o) return 's' + o;
+  return (r.taskId != null && /^e/.test(String(r.taskId))) ? String(r.taskId) : '';
+}
 function lamFindTaskBySyncId(sid) {
   if (!sid || typeof tasks === 'undefined' || !Array.isArray(tasks)) return null;
   return tasks.find(t => t && t._sync && t._sync.syncId === sid && !isTaskDeleted(t)) || null;
@@ -4139,8 +4160,11 @@ function lambdaMergeTable(local, remote, tomb, adopt) {
     const cur = byId.get(r.id);
     if (!cur) { byId.set(r.id, { rec: r, remote: true }); order.push(r.id); return; }
     const lc = lamCanon(cur.rec), rc = lamCanon(r);
-    if (lc === rc) return;
     const ls = lamStamp(cur.rec), rs = lamStamp(r);
+    if (lc === rc) {   // same content: only a NEWER link change (link / unlink made on another device) replaces this device's copy
+      if (lamLinkSig(cur.rec) !== lamLinkSig(r) && rs > ls) byId.set(r.id, { rec: r, remote: true });
+      return;
+    }
     if (rs > ls || (rs === ls && rc > lc)) byId.set(r.id, { rec: r, remote: true });   // equal stamps: larger content wins, so both devices converge
   });
   const records = [], revived = [];
@@ -19440,6 +19464,11 @@ function renderLambdaColumnsTabHTML(storeKey) {
           <input type="checkbox" ${c.dupCheck===true?'checked':''} onchange="lcToggleDupCheck(${k},'${c.key}')" />
           Duplicate check
         </label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-secondary);cursor:pointer" title="Sort the ${esc(meta.title)} table by this column by default (only one column can be the default)">
+          <input type="checkbox" ${c.defaultSort===true?'checked':''} onchange="lcToggleDefaultSort(${k},'${c.key}')" />
+          Default sort
+        </label>
+        ${c.defaultSort===true ? `<button type="button" class="btn" style="font-size:11px;padding:3px 8px" onclick="lcToggleSortDir(${k},'${c.key}')" title="Switch between ascending and descending">${c.defaultSortDir==='desc' ? '▼ Descending' : '▲ Ascending'}</button>` : ''}
         ${isList ? `<label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-secondary);cursor:pointer" title="Show this column as its own multi-select filter in the Lambda Functions table filter bar (all values selected by default)">
           <input type="checkbox" ${c.searchEntity===true?'checked':''} onchange="lcToggleSearchEntity(${k},'${c.key}')" />
           Search as individual entity
@@ -19453,7 +19482,7 @@ function renderLambdaColumnsTabHTML(storeKey) {
     <div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">
       Lambda logging master: <strong>${meta.title}</strong>. Configure its columns the same way as the
       Columns master — drag rows to reorder, rename the label, choose the input type, mark a field mandatory, and tick Searchable to offer it in the
-      Search by list of the Lambda Functions screen, tick Duplicate check on the column(s) that together identify a unique entry (an Add entry is blocked when all ticked columns match an existing record), and tick Search as individual entity on a dropdown / multi-select / searchable-select column to give it its own filter there. This master is separate from the Task Logger Columns and is used for later Lambda logging changes.
+      Search by list of the Lambda Functions screen, tick Default sort on one column (and switch Ascending / Descending) to sort both Lambda tables by it, tick Duplicate check on the column(s) that together identify a unique entry (an Add entry is blocked when all ticked columns match an existing record), and tick Search as individual entity on a dropdown / multi-select / searchable-select column to give it its own filter there. This master is separate from the Task Logger Columns and is used for later Lambda logging changes.
     </div>
     <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-secondary);cursor:pointer;margin-bottom:12px;padding:8px 10px;border:1px solid var(--border);border-radius:8px" title="Decides whether the Copy button above the ${esc(meta.title)} table includes the column header row">
       <input type="checkbox" ${lmCopyWithHeader(storeKey) ? 'checked' : ''} onchange="lcToggleCopyHeader(${k})" />
@@ -19584,6 +19613,29 @@ function lcToggleDupCheck(storeKey, key) {
   if (!col) return;
   col.dupCheck = !col.dupCheck;
   saveState();
+  try { if (typeof lcdUpdateButton === 'function') lcdUpdateButton(); lcdpRefreshIfOpen(); } catch (e) {}   // Saved / Not saved labels follow the Duplicate check columns
+}
+// Default sort: one column per master. Ticking it makes it the default (others are cleared) and the master's tables
+// follow it right away (a header click made earlier in the session is dropped so the new default shows).
+function lcToggleDefaultSort(storeKey, key) {
+  const col = getLambdaColumnByKey(storeKey, key);
+  if (!col) return;
+  const on = !(col.defaultSort === true);
+  getLambdaColumns(storeKey).forEach(c => { delete c.defaultSort; delete c.defaultSortDir; });
+  if (on) { col.defaultSort = true; col.defaultSortDir = col.type === 'date' ? 'desc' : 'asc'; }
+  lmGetState(storeKey).sortCol = null;
+  saveState();
+  renderMastersContent();
+  if (typeof lmRefreshIfOpen === 'function') lmRefreshIfOpen();
+}
+function lcToggleSortDir(storeKey, key) {
+  const col = getLambdaColumnByKey(storeKey, key);
+  if (!col || col.defaultSort !== true) return;
+  col.defaultSortDir = col.defaultSortDir === 'desc' ? 'asc' : 'desc';
+  lmGetState(storeKey).sortCol = null;
+  saveState();
+  renderMastersContent();
+  if (typeof lmRefreshIfOpen === 'function') lmRefreshIfOpen();
 }
 // Per-master "Copy with header" flag (masters.flags.lambdaCopyHeader[storeKey]); unset = false = copy without header.
 function lmCopyWithHeader(storeKey) {
@@ -20189,6 +20241,7 @@ function lmRenderAll() {
   lmRenderToolbar();
   lmRenderTable();
   lmApplyFilterCollapse();
+  try { if (typeof lcdUpdateButton === 'function') lcdUpdateButton(); } catch (e) {}
 }
 function lmRenderTabs() {
   const el = document.getElementById('lm-tabs');
@@ -20463,6 +20516,15 @@ document.addEventListener('click', (e) => {
 window.addEventListener('resize', () => lmEntClose());
 
 // Filter + sort the active tab's records.
+// Default sort of a Lambda master (Masters → Function / Change Columns → "Default sort" on one column + Ascending / Descending).
+function lmDefaultSort(k) {
+  const c = getLambdaColumns(k).find(x => x.defaultSort === true);
+  return c ? { key: c.key, dir: c.defaultSortDir === 'desc' ? 'desc' : 'asc' } : null;
+}
+// What the table is sorted by now: the user's header click wins, otherwise the master's default sort.
+function lmEffectiveSort(k, s) {
+  return s.sortCol ? { key: s.sortCol, dir: s.sortDir === 'desc' ? 'desc' : 'asc' } : lmDefaultSort(k);
+}
 function lmFilteredRows() {
   const k = lmActiveTab, s = lmGetState(k), cols = getLambdaColumns(k);
   const q = String(s.q || '').trim().toLowerCase();
@@ -20482,14 +20544,15 @@ function lmFilteredRows() {
     }
     return true;
   });
-  if (s.sortCol) {
-    const col = cols.find(c => c.key === s.sortCol);
+  const eff = lmEffectiveSort(k, s);
+  if (eff) {
+    const col = cols.find(c => c.key === eff.key);
     if (col) {
       const keyOf = (r) => {
         const v = (r.values && r.values[col.key]) == null ? '' : String(r.values[col.key]);
         return col.type === 'date' ? (lmParseDate(v, col) || v) : v.toLowerCase();
       };
-      const dir = s.sortDir === 'asc' ? 1 : -1;
+      const dir = eff.dir === 'asc' ? 1 : -1;
       rows = rows.slice().sort((a, b) => dir * keyOf(a).localeCompare(keyOf(b), undefined, { numeric: true }));
     }
   }
@@ -20522,17 +20585,18 @@ function lmRenderTable() {
   if (countEl) countEl.dataset.base = countEl.textContent;
   const widths = lmWidths[k];
   const hasHist = k === 'lambdaFunctionColumns';   // the Functions tab gets a History button beside Edit
-  const colgroup = '<col data-col="__sel" style="width:40px">' + cols.map(c => `<col data-col="${esc(c.key)}" style="width:${widths[c.key] || defaultLogColumnWidth(c)}px">`).join('') + `<col data-col="__edit" style="width:${hasHist ? 108 : 44}px">`;
+  const hasLink = k === 'lambdaChangeColumns';     // the Changes tab gets a Linked task button beside Edit
+  const colgroup = '<col data-col="__sel" style="width:40px">' + cols.map(c => `<col data-col="${esc(c.key)}" style="width:${widths[c.key] || defaultLogColumnWidth(c)}px">`).join('') + `<col data-col="__edit" style="width:${hasHist ? 108 : hasLink ? 76 : 44}px">`;
   const thead = '<th data-col="__sel" class="lm-sel-th"><input type="checkbox" id="lm-all-cb" title="Select all" aria-label="Select all rows"></th>' + cols.map(c => {
-    const arrow = s.sortCol === c.key ? (s.sortDir === 'asc' ? '▲' : '▼') : '';
+    const eS = lmEffectiveSort(k, s), arrow = eS && eS.key === c.key ? (eS.dir === 'asc' ? '▲' : '▼') : '';
     return `<th class="log-th-sortable" data-col="${esc(c.key)}">${esc(c.label)}<span class="col-sort-arrow">${arrow}</span>` +
       `<button type="button" class="col-pin-icon" data-col="${esc(c.key)}" title="Pin column">${LOG_TABLE_PIN_ICON_SVG}</button>` +
       `<span class="col-resize-handle"></span></th>`;
-  }).join('') + `<th data-col="__edit" class="lm-edit-th${hasHist ? ' lm-has-hist' : ''}" aria-label="${hasHist ? 'Add entry, linked tasks, history and edit' : 'Add entry and edit'}"><button type="button" class="lm-add-btn" title="Add entry" aria-label="Add entry"><i class="ti ti-plus"></i></button></th>`;
+  }).join('') + `<th data-col="__edit" class="lm-edit-th${hasHist ? ' lm-has-hist' : ''}${hasLink ? ' lm-has-link' : ''}" aria-label="${hasHist ? 'Add entry, linked tasks, history and edit' : hasLink ? 'Add entry, linked task and edit' : 'Add entry and edit'}"><button type="button" class="lm-add-btn" title="Add entry" aria-label="Add entry"><i class="ti ti-plus"></i></button></th>`;
   const tbody = rows.map(r => `<tr data-id="${esc(r.id)}"><td data-col="__sel" class="lm-sel-cell"><input type="checkbox" class="lm-row-cb" data-id="${esc(r.id)}" aria-label="Select row"></td>` + cols.map(c => {
     const v = lmDisplayValue(c, r.values && r.values[c.key]);
     return `<td data-col="${esc(c.key)}" title="${esc(v)}">${esc(v)}</td>`;
-  }).join('') + `<td data-col="__edit" class="lm-edit-cell${hasHist ? ' lm-has-hist' : ''}">${hasHist ? `<button type="button" class="lm-row-hist" data-id="${esc(r.id)}" title="History (changes made to this function)" aria-label="History"><i class="ti ti-history"></i></button><button type="button" class="lm-row-tasks" data-id="${esc(r.id)}" title="Linked tasks (tasks that added or changed this function)" aria-label="Linked tasks"><i class="ti ti-link"></i></button>` : ''}<button type="button" class="lm-row-edit" data-id="${esc(r.id)}" title="Edit this record" aria-label="Edit record"><i class="ti ti-pencil"></i></button></td></tr>`).join('');
+  }).join('') + `<td data-col="__edit" class="lm-edit-cell${hasHist ? ' lm-has-hist' : ''}${hasLink ? ' lm-has-link' : ''}">${hasHist ? `<button type="button" class="lm-row-hist" data-id="${esc(r.id)}" title="History (changes made to this function)" aria-label="History"><i class="ti ti-history"></i></button><button type="button" class="lm-row-tasks" data-id="${esc(r.id)}" title="Linked tasks (tasks that added or changed this function)" aria-label="Linked tasks"><i class="ti ti-link"></i></button>` : ''}${hasLink ? `<button type="button" class="lm-row-tasks" data-id="${esc(r.id)}" title="Linked task (the task that made this change)" aria-label="Linked task"><i class="ti ti-link"></i></button>` : ''}<button type="button" class="lm-row-edit" data-id="${esc(r.id)}" title="Edit this record" aria-label="Edit record"><i class="ti ti-pencil"></i></button></td></tr>`).join('');
   const msg = rows.length ? '' : `<div class="lm-empty">${total === 0
     ? 'No records yet. Import data with More → Import / Export (choose ' + esc(LAMBDA_COLUMN_STORES[k].title) + ').'
     : 'No records match the current search, filters and date range.'}</div>`;
@@ -20547,7 +20611,7 @@ function lmRenderTable() {
     const ad = e.target.closest && e.target.closest('.lm-add-btn');
     if (ad) { e.stopPropagation(); lmAddOpen(); return; }
     const lt = e.target.closest && e.target.closest('.lm-row-tasks');
-    if (lt) { e.stopPropagation(); lmTasksOpen(lt.dataset.id); return; }
+    if (lt) { e.stopPropagation(); lmTasksOpen(lt.dataset.id, lmActiveTab === 'lambdaChangeColumns'); return; }
     const h = e.target.closest && e.target.closest('.lm-row-hist');
     if (h) { e.stopPropagation(); lmHistOpen(h.dataset.id); return; }
     const b = e.target.closest && e.target.closest('.lm-row-edit');
@@ -20619,15 +20683,16 @@ document.addEventListener('keydown', (e) => {
 // have no task at all are linked by 'e<startTs>'. After a sync the stable taskSyncId is used when
 // this device's own task id no longer matches. One row per task, with a chip per link type.
 let _lmt = null;   // { id, rows }
-function lmLinkedTasksCollect(fnRec) {
+function lmLinkedTasksCollect(fnRec, onlyChange) {
   const fk = 'lambdaFunctionColumns', ck = 'lambdaChangeColumns';
   const fnCols = getLambdaColumns(fk), chCols = getLambdaColumns(ck);
   const norm = v => String(v == null ? '' : v).trim().toLowerCase();
   const fnNameCol = fnCols.find(c => c.key === 'fn_name') || fnCols.find(c => norm(c.label) === 'name') || fnCols[0];
   const chNameCol = chCols.find(c => c.key === 'chg_name') || chCols.find(c => norm(c.label) === 'name') || chCols[0];
-  const fnName = fnNameCol ? String((fnRec.values || {})[fnNameCol.key] || '').trim() : '';
-  const sources = [{ type: 'new', rec: fnRec }];
-  if (fnName && chNameCol) readLambdaStore(ck).forEach(r => { if (r && norm((r.values || {})[chNameCol.key]) === norm(fnName)) sources.push({ type: 'change', rec: r }); });
+  const fnName = onlyChange ? (chNameCol ? String((fnRec.values || {})[chNameCol.key] || '').trim() : '')
+                            : (fnNameCol ? String((fnRec.values || {})[fnNameCol.key] || '').trim() : '');
+  const sources = [{ type: onlyChange ? 'change' : 'new', rec: fnRec }];   // onlyChange: just this one Change record
+  if (!onlyChange && fnName && chNameCol) readLambdaStore(ck).forEach(r => { if (r && norm((r.values || {})[chNameCol.key]) === norm(fnName)) sources.push({ type: 'change', rec: r }); });
   const isoOf = ts => { const d = new Date(ts); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
   const groups = new Map();
   let unlinked = 0;
@@ -20663,17 +20728,17 @@ function lmLinkedTasksCollect(fnRec) {
   rows.sort((a, b) => String(b.date).localeCompare(String(a.date)));
   return { fnName, rows, unlinked, sourceCount: sources.length };
 }
-function lmTasksOpen(id) {
-  const rec = readLambdaStore('lambdaFunctionColumns').find(r => r && r.id === id);
+function lmTasksOpen(id, isChange) {
+  const rec = readLambdaStore(isChange ? 'lambdaChangeColumns' : 'lambdaFunctionColumns').find(r => r && r.id === id);
   if (!rec) return;
-  const res = lmLinkedTasksCollect(rec);
+  const res = lmLinkedTasksCollect(rec, !!isChange);
   _lmt = { id, rows: res.rows };
-  document.getElementById('lmt-title').textContent = 'Linked tasks' + (res.fnName ? ' — ' + res.fnName : '');
+  document.getElementById('lmt-title').textContent = (isChange ? 'Linked task' : 'Linked tasks') + (res.fnName ? ' — ' + res.fnName : '');
   const chip = (txt) => `<span class="lambda-chip">${esc(txt)}</span>`;
   let html;
   if (!res.rows.length) {
-    html = `<div class="lm-hist-empty">No tasks are linked to ${res.fnName ? '<b>' + esc(res.fnName) + '</b>' : 'this function'} yet.<br>A task shows here when it added the function or changed it (from a task with “Includes Lambda” ticked).` +
-      (res.unlinked ? `<br>${res.unlinked} of its record${res.unlinked === 1 ? ' has' : 's have'} no task link (imported or added without a task).` : '') + '</div>';
+    html = `<div class="lm-hist-empty">No tasks are linked to ${res.fnName ? '<b>' + esc(res.fnName) + '</b>' : 'this function'} yet.<br>${isChange ? 'This change record has no task link (imported or added without a task).' : 'A task shows here when it added the function or changed it (from a task with “Includes Lambda” ticked).'}` +
+      (!isChange && res.unlinked ? `<br>${res.unlinked} of its record${res.unlinked === 1 ? ' has' : 's have'} no task link (imported or added without a task).` : '') + '</div>';
   } else {
     const missing = '<span class="lm-lt-missing">not found on this device</span>';
     html = `<div class="lm-hist-sub">${res.rows.length} task${res.rows.length === 1 ? '' : 's'} linked` +
@@ -20852,22 +20917,25 @@ function lmDupDesc(k, values) {
   return lmDupCols(k).map(c => (c.label || c.key) + ' "' + lmDisplayValue(c, values[c.key]) + '"').join(', ');
 }
 function lmAddRecords(k, list) {
+  const fromLcd = (_lme && _lme.lcd) ? (_lme.iso || todayStr()) : null;   // saved from the Lambda changes popup: stays unlinked, remembers its date
   try {
     const store = readLambdaStore(k), now = Date.now();
-    list.forEach((vals, i) => store.push({ id: 'lm_' + now.toString(36) + '_' + Math.random().toString(36).slice(2, 7) + '_' + (store.length + i), importedAt: now, values: vals }));
+    list.forEach((vals, i) => { const rec = { id: 'lm_' + now.toString(36) + '_' + Math.random().toString(36).slice(2, 7) + '_' + (store.length + i), importedAt: now, values: vals }; if (fromLcd) rec.lcdDate = fromLcd; store.push(rec); });
     writeLambdaStore(k, store);
   } catch (err) { alert('Could not add the entry (' + err.message + ').'); return; }
   lmRevealTab(k);   // clear search / filters / date range so the new record(s) are visible
   lmEditClose();
   lmRenderAll();
+  if (fromLcd) { try { lcdpRefreshIfOpen(); lcdUpdateButton(); } catch (e) {} }
 }
-function lmAddOpen() {
-  const k = lmActiveTab;
+function lmAddOpen(opts) {
+  opts = (opts && typeof opts === 'object' && !opts.target) ? opts : {};
+  const k = opts.k || lmActiveTab;
   if (!getLambdaColumns(k).length) return;
-  _lme = { k, id: null };
-  const sb = document.getElementById('lme-save-btn'); if (sb) sb.innerHTML = '<i class="ti ti-plus"></i> Add entry';
-  document.getElementById('lme-title').textContent = 'Add ' + LAMBDA_COLUMN_STORES[k].noun;
-  document.getElementById('lme-body').innerHTML = `<div class="llm-hint">${esc(LAMBDA_COLUMN_STORES[k].title)} form. Fields marked * are required.</div><div class="llm-form">` + lamFormHTML(k, 'lme-', {}) + `</div>`;
+  _lme = { k, id: null, lcd: !!opts.lcd, iso: opts.iso || null };   // lcd: opened from the Lambda changes popup (Save only — no task link)
+  const sb = document.getElementById('lme-save-btn'); if (sb) sb.innerHTML = opts.lcd ? '<i class="ti ti-device-floppy"></i> Save entry' : '<i class="ti ti-plus"></i> Add entry';
+  document.getElementById('lme-title').textContent = opts.lcd ? 'Save ' + LAMBDA_COLUMN_STORES[k].noun + (opts.name ? ' — ' + opts.name : '') : 'Add ' + LAMBDA_COLUMN_STORES[k].noun;
+  document.getElementById('lme-body').innerHTML = `<div class="llm-hint">${opts.lcd ? 'Saved to the ' + esc(LAMBDA_COLUMN_STORES[k].title) + ' table only — it is not linked to any task. ' : esc(LAMBDA_COLUMN_STORES[k].title) + ' form. '}Fields marked * are required.</div><div class="llm-form">` + lamFormHTML(k, 'lme-', opts.seed || {}) + `</div>`;
   document.getElementById('lm-edit-modal').classList.remove('hidden');
 }
 function lmEditClose() {
@@ -21019,7 +21087,8 @@ function lmWireColumns() {
     th.addEventListener('click', (e) => {
       if (e.target.closest('.col-resize-handle') || e.target.closest('.col-pin-icon')) return;
       const key = th.dataset.col;
-      if (s.sortCol === key) s.sortDir = s.sortDir === 'asc' ? 'desc' : 'asc';
+      const eff = lmEffectiveSort(k, s);
+      if (eff && eff.key === key) { s.sortCol = key; s.sortDir = eff.dir === 'asc' ? 'desc' : 'asc'; }
       else { s.sortCol = key; const c = cols.find(x => x.key === key); s.sortDir = (c && c.type === 'date') ? 'desc' : 'asc'; }
       lmRenderTable();
     });
@@ -22603,7 +22672,7 @@ function writeLambdaStore(storeKey, arr, opts) {
   arr.forEach(r => {
     if (!r || typeof r !== 'object') return;
     const o = r.id ? old.get(r.id) : null;
-    if (o && lamCanon(o) !== lamCanon(r) && lamStamp(r) <= lamStamp(o)) r.updatedAt = now;
+    if (o && (lamCanon(o) !== lamCanon(r) || lamLinkSig(o) !== lamLinkSig(r)) && lamStamp(r) <= lamStamp(o)) r.updatedAt = now;   // a link / unlink counts as an edit too, so it wins on the other devices
     if (!r.taskSyncId) { const sid = lamOwnerSyncId(r); if (sid) r.taskSyncId = sid; }
   });
   const newIds = new Set(); arr.forEach(r => { if (r && r.id) newIds.add(r.id); });
@@ -25892,10 +25961,12 @@ function lcdUpdateButton() {
     _lcdWantIso = iso; // date changed: load just this date from the file (the previous date's data is replaced), then refresh the button
     lcdCheck({ iso, interactive: false });
   } else if (lcdLoadIndex()[iso]) _lcdWantIso = null;
-  const names = lcdNamesForDate(iso);
+  let nLinked = 0, nUnlinked = 0;
+  try { lcdClassify(iso).forEach(r => { if (r.linked) nLinked++; else nUnlinked++; }); } catch (e) { nUnlinked = lcdNamesForDate(iso).length; }
   const cnt = document.getElementById('lambda-changes-count');
-  if (cnt) cnt.textContent = names.length;
-  btn.title = 'View the Lambda function changes for this date';   // no function names in the tooltip: they are listed in the popup
+  if (cnt) cnt.innerHTML = '<span class="lcd-cnt linked" title="' + nLinked + ' linked to a task"><i class="ti ti-link"></i>' + nLinked + '<span class="lcd-cnt-w"> linked</span></span>' +
+    '<span class="lcd-cnt unlinked" title="' + nUnlinked + ' not linked to any task"><i class="ti ti-unlink"></i>' + nUnlinked + '<span class="lcd-cnt-w"> unlinked</span></span>';
+  btn.title = 'View the Lambda function changes for this date (' + nLinked + ' linked, ' + nUnlinked + ' unlinked)';   // no function names in the tooltip: they are listed in the popup
 }
 function lcdButtonClick() { lcdpOpen(); }
 // Suffix button: force a fresh read of the JSON file and reload just the selected date (the file is only read, never changed).
@@ -25984,7 +26055,26 @@ function lcdRecLinksTo(rec, c) {
   const sid = rec.taskSyncId || lamOwnerSyncId(rec);
   return !!(sid && c.syncId && sid === c.syncId);
 }
-// One row per function changed on the date: { name, kind:'new'|'change', linked, labels[], recs[] }
+// The Date column used when a function from the JSON is written to a Lambda table (same pick as the link form).
+function lcdDateCol(cols) {
+  return cols.find(x => x.type === 'date' && (x.key === 'chg_date' || x.key === 'fn_date')) || cols.find(x => x.type === 'date') || null;
+}
+// Is this function's log already saved in its Lambda table? Uses the master's "Duplicate check" columns, but only
+// those the JSON can supply: the Name column (region ignored) and the Date column (= the selected date). A record
+// counts as saved when it matches on EVERY such column. true / false, or null when none of the Duplicate check
+// columns can be matched against the JSON (then it cannot be told).
+function lcdSavedState(kind, name, iso) {
+  const st = kind === 'new' ? LCD_FN_STORE : LCD_CH_STORE, cols = getLambdaColumns(st);
+  const nc = lcdNameCols()[kind === 'new' ? 'fn' : 'ch'], dc = lcdDateCol(cols);
+  if (!nc || !cols.length) return null;
+  const dcols = lmDupCols(st).filter(c => c.key === nc.key || (dc && c.key === dc.key));
+  if (!dcols.length) return null;
+  const nameKey = v => lcdBaseName(String(v == null ? '' : v)).trim().toLowerCase();
+  const keyOf = (c, v) => c.key === nc.key ? nameKey(v) : lmDupKey(c, v);
+  const want = dcols.map(c => c.key === nc.key ? nameKey(name) : lmDupKey(c, iso));
+  return readLambdaStore(st).some(r => r && r.values && dcols.every((c, i) => keyOf(c, r.values[c.key]) === want[i]));
+}
+// One row per function changed on the date: { name, kind:'new'|'change', linked, labels[], recs[], linkedRecs[], saved }
 function lcdClassify(iso) {
   const nc = lcdNameCols(), isLinked = lcdLinkedChecker(iso);
   const fnRecs = readLambdaStore(LCD_FN_STORE), chRecs = readLambdaStore(LCD_CH_STORE);
@@ -25994,7 +26084,10 @@ function lcdClassify(iso) {
     const lf = f.filter(isLinked), lc = c.filter(isLinked);
     const links = lf.concat(lc), labels = [];
     links.forEach(r => { const l = lcdTaskLabelOf(r); if (labels.indexOf(l) < 0) labels.push(l); });
-    return { name, kind: (!f.length || lf.length) ? 'new' : 'change', linked: links.length > 0, labels, recs: f.concat(c) };
+    // A Function record saved from this popup for this date (lcdDate) also keeps the row on New, so the label does not flip after Save only.
+    const kind = (!f.length || lf.length || f.some(r => r.lcdDate === iso)) ? 'new' : 'change';
+    const linkedRecs = lf.map(r => ({ store: LCD_FN_STORE, rec: r })).concat(lc.map(r => ({ store: LCD_CH_STORE, rec: r })));
+    return { name, kind, linked: links.length > 0, labels, recs: f.concat(c), linkedRecs, saved: lcdSavedState(kind, name, iso) };
   });
 }
 function lcdpOpen() {
@@ -26031,21 +26124,40 @@ function lcdpRender() {
     foot.innerHTML = `<button type="button" class="btn" onclick="lcdpBack()">Back</button><button type="button" class="btn" onclick="lcdpClose()">Close</button>`;
     return;
   }
+  if (_lcdp.view === 'unlink' && _lcdp.unlinkIdx != null && rows[_lcdp.unlinkIdx]) {
+    const r = rows[_lcdp.unlinkIdx];
+    if (!r.linkedRecs.length) { _lcdp.view = 'list'; _lcdp.unlinkIdx = null; lcdpRender(); return; }
+    title.textContent = 'Unlink from task — ' + r.name;
+    const items = r.linkedRecs.map((x, j) => `<button type="button" class="lcd-pick-item" onclick="lcdpUnlinkOne(${j})"><div><b>${esc(lcdTaskLabelOf(x.rec))}</b><div class="lcd-sub">${x.store === LCD_FN_STORE ? 'Function record' : 'Change record'}</div></div><div class="lcd-pick-end"><span class="lcd-chip unlinked"><i class="ti ti-unlink"></i> Unlink</span></div></button>`).join('');
+    body.innerHTML = `<div class="lm-hist-sub"><b>${esc(r.name)}</b> is linked to ${r.linkedRecs.length} task record${r.linkedRecs.length === 1 ? '' : 's'}. Pick the link to remove. The record stays in its Lambda table; only the link to the task is removed.</div><div class="lcd-pick-list">${items}</div>`;
+    foot.innerHTML = `<button type="button" class="btn" onclick="lcdpBack()">Back</button><button type="button" class="btn" onclick="lcdpUnlinkAll()">Unlink all</button><button type="button" class="btn" onclick="lcdpClose()">Close</button>`;
+    return;
+  }
   _lcdp.view = 'list';
   title.textContent = 'Lambda changes — ' + dateTxt;
   let html;
   if (!rows.length) {
     html = `<div class="lm-hist-empty">No Lambda function changes found for ${esc(dateTxt)}.</div>`;
   } else {
-    const nUn = rows.filter(r => !r.linked).length;
-    html = `<div class="lm-hist-sub">${rows.length} function${rows.length === 1 ? '' : 's'} changed · ${nUn} unlinked</div><div class="lm-hist-wrap"><table class="lm-hist-table"><thead><tr><th>Function</th><th>Type</th><th>Task link</th><th></th></tr></thead><tbody>` +
+    const nLk = rows.filter(r => r.linked).length, nUn = rows.length - nLk, nNs = rows.filter(r => r.saved === false).length;
+    const savedChip = r => {
+      const t = LAMBDA_COLUMN_STORES[r.kind === 'new' ? LCD_FN_STORE : LCD_CH_STORE].title;
+      if (r.saved === true) return `<span class="lcd-chip saved" title="A record matching the Duplicate check columns already exists in ${esc(t)}">Saved</span>`;
+      if (r.saved === false) return `<span class="lcd-chip notsaved" title="No matching record in ${esc(t)} yet">Not saved</span>`;
+      return `<span class="lcd-chip unk" title="Tick Duplicate check on the Name (and Date) column of ${esc(t)} in Masters so this can be checked">Can't check</span>`;
+    };
+    html = `<div class="lm-hist-sub">${rows.length} function${rows.length === 1 ? '' : 's'} changed · ${nLk} linked · ${nUn} unlinked · ${nNs} not saved</div><div class="lm-hist-wrap"><table class="lm-hist-table"><thead><tr><th>Function</th><th>Type</th><th>Task link</th><th>In table</th><th></th></tr></thead><tbody>` +
       rows.map((r, i) => `<tr><td><div class="lcd-fn">${esc(r.name)}</div></td><td><span class="lcd-chip ${r.kind}">${r.kind === 'new' ? 'New' : 'Change'}</span></td>` +
         `<td><span class="lcd-chip ${r.linked ? 'linked' : 'unlinked'}">${r.linked ? 'Linked' : 'Unlinked'}</span>${r.labels.length ? `<div class="lcd-sub">${r.labels.map(x => esc(x)).join(' · ')}</div>` : ''}</td>` +
-        `<td style="text-align:right;white-space:nowrap"><button type="button" class="btn lcd-link-btn" onclick="lcdpLink(${i})"><i class="ti ti-link"></i> ${r.linked ? 'Link another task' : 'Link to task'}</button></td></tr>`).join('') +
+        `<td>${savedChip(r)}</td>` +
+        `<td style="text-align:right"><div class="lcd-acts"><button type="button" class="btn lcd-link-btn" onclick="lcdpLink(${i})"><i class="ti ti-link"></i> ${r.linked ? 'Link another task' : 'Link to task'}</button>` +
+        (r.linked ? `<button type="button" class="btn lcd-link-btn" onclick="lcdpUnlink(${i})" title="Remove the link to the task (the record stays in the table)"><i class="ti ti-unlink"></i> Unlink</button>` : '') +
+        `<button type="button" class="btn lcd-link-btn" ${r.saved === true ? 'disabled' : ''} onclick="lcdpSaveOnly(${i})" title="${r.saved === true ? 'Already saved in the table' : 'Save to the ' + esc(LAMBDA_COLUMN_STORES[r.kind === 'new' ? LCD_FN_STORE : LCD_CH_STORE].title) + ' table without linking to any task'}"><i class="ti ti-device-floppy"></i> Save only</button></div></td></tr>`).join('') +
       '</tbody></table></div>';
   }
   body.innerHTML = html;
   foot.innerHTML = `<button type="button" class="btn" onclick="lcdpClose()">Close</button>`;
+  try { lcdUpdateButton(); } catch (e) {}   // keep the linked / unlinked counts on the button in step
 }
 function lcdpLink(i) {
   if (!_lcdp) return;
@@ -26055,6 +26167,58 @@ function lcdpLink(i) {
   _lcdp.pick = { i, cands: lcdCandidates(_lcdp.iso) };
   _lcdp.view = 'pick';
   lcdpRender();
+}
+// Unlink: removes only the link (taskId / taskSyncId) from the Function / Change record(s); the records stay in their tables.
+function lcdpUnlink(i) {
+  if (!_lcdp) return;
+  const r = _lcdp.rows[i]; if (!r || !r.linkedRecs.length) return;
+  if (r.linkedRecs.length === 1) { lcdpUnlinkConfirm(r, [r.linkedRecs[0]]); return; }
+  _lcdp.unlinkIdx = i; _lcdp.view = 'unlink'; lcdpRender();
+}
+function lcdpUnlinkOne(j) {
+  const r = _lcdp && _lcdp.rows[_lcdp.unlinkIdx]; if (!r || !r.linkedRecs[j]) return;
+  lcdpUnlinkConfirm(r, [r.linkedRecs[j]]);
+}
+function lcdpUnlinkAll() {
+  const r = _lcdp && _lcdp.rows[_lcdp.unlinkIdx]; if (!r || !r.linkedRecs.length) return;
+  lcdpUnlinkConfirm(r, r.linkedRecs.slice());
+}
+function lcdpUnlinkConfirm(r, items) {
+  const where = items.length === 1 ? 'the task "' + lcdTaskLabelOf(items[0].rec) + '"' : items.length + ' task links';
+  showConfirm('Unlink from task?', '"' + r.name + '" will be unlinked from ' + where + '. The record stays in its Lambda table; only the link to the task is removed.', () => {
+    try { lcdUnlinkRecs(items); } catch (err) { alert('Could not unlink (' + err.message + ').'); }
+  }, 'Unlink');
+}
+function lcdUnlinkRecs(items) {
+  const by = {};
+  items.forEach(x => { (by[x.store] || (by[x.store] = [])).push(x.rec); });
+  const now = Date.now();
+  Object.keys(by).forEach(st => {
+    const store = readLambdaStore(st);
+    store.forEach(rr => {
+      if (!rr) return;
+      if (by[st].some(t => t.id ? t.id === rr.id : JSON.stringify(t) === JSON.stringify(rr))) { delete rr.taskId; delete rr.taskSyncId; rr.updatedAt = now; }
+    });
+    writeLambdaStore(st, store);
+  });
+  if (_lcdp) { _lcdp.view = 'list'; _lcdp.unlinkIdx = null; }
+  elmRefreshLogTable();
+  if (typeof lmRefreshIfOpen === 'function') lmRefreshIfOpen();
+  lcdpRefreshIfOpen();
+}
+// Save only: opens the matching Function / Change form (name + date filled in) and writes the record to its table
+// with NO task link. The Duplicate check of the master still applies.
+function lcdpSaveOnly(i) {
+  if (!_lcdp) return;
+  const r = _lcdp.rows[i]; if (!r) return;
+  const st = r.kind === 'new' ? LCD_FN_STORE : LCD_CH_STORE, cols = getLambdaColumns(st);
+  if (!cols.length) { alert('No columns are configured in the ' + LAMBDA_COLUMN_STORES[st].title + ' master yet, so this function cannot be saved.'); return; }
+  const iso = _lcdp.iso, nc = lcdNameCols()[r.kind === 'new' ? 'fn' : 'ch'];
+  const seed = Object.assign({}, llmPrefill(st, { employee: (typeof userName === 'string') ? userName : '', date: iso }));
+  if (nc) seed[nc.key] = r.name;
+  const dc = lcdDateCol(cols);
+  if (dc) seed[dc.key] = iso;
+  lmAddOpen({ k: st, seed, lcd: true, name: r.name, iso });
 }
 // Task Logger values of the task / entry (same keys llmPrefill matches against the Lambda columns).
 function lcdTaskCtx(c, iso) {
@@ -26117,7 +26281,7 @@ function lcdpPick(j) {
   }
 }
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && _lcdp && !document.querySelector('#lambda-log-modal:not(.hidden)')) { e.stopImmediatePropagation(); lcdpClose(); }
+  if (e.key === 'Escape' && _lcdp && !document.querySelector('#lambda-log-modal:not(.hidden), #lm-edit-modal:not(.hidden), #confirm-overlay:not(.hidden)')) { e.stopImmediatePropagation(); lcdpClose(); }
 }, true);
 
 function lcdRefetch() {
