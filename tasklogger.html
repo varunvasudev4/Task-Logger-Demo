@@ -663,9 +663,12 @@ html.is-touch .pending-card-actions { opacity: 1; }
 .lcd-cnt i { font-size: 11px; }
 .lcd-cnt.linked { background: var(--green-bg); color: var(--green-dark); }
 .lcd-cnt.unlinked { background: var(--amber-bg); color: var(--amber-dark); }
-.lcd-acts { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.lcd-acts { display: flex; flex-direction: row; justify-content: flex-end; gap: 6px; }
+.lcd-ic { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; padding: 0; }
+.lcd-ic:disabled { opacity: .4; cursor: not-allowed; }
+.lcd-chip.ic { padding: 3px 7px; font-size: 13px; }
 .lcd-acts .btn { padding: 4px 10px; font-size: 12px; white-space: nowrap; }
-@media (max-width: 600px) { .lcd-cnt-w { display: none; } }
+
 .lcd-fn { font-weight: 600; overflow-wrap: anywhere; }
 .lcd-sub { font-size: 11.5px; color: var(--text-tertiary); margin-top: 3px; overflow-wrap: anywhere; }
 .lcd-link-btn { padding: 4px 10px; font-size: 12px; }
@@ -4039,7 +4042,8 @@ function applyRemoteDashboardConfigIfNewer(remoteParsed) {
 // not re-recorded as local edits — same rule as applyDashboardConfig().
 const LAMBDA_DATA_STORES = [
   { field: 'functions', schema: 'lambdaFunctionColumns', key: 'ttl_lambda_functions' },
-  { field: 'changes',   schema: 'lambdaChangeColumns',   key: 'ttl_lambda_functions_changes' }
+  { field: 'changes',   schema: 'lambdaChangeColumns',   key: 'ttl_lambda_functions_changes' },
+  { field: 'detected',  schema: null,                    key: 'ttl_lambda_detected' }   // functions the change-log JSON listed per date (read on a desktop, shown on every device)
 ];   // keys must match CSV_SCHEMAS[*].storageKey
 const LAMBDA_TOMBSTONES_KEY = 'ttl_lambda_tombstones';
 const LAMBDA_TOMBSTONE_TTL_MS = 180 * 86400000;
@@ -4123,7 +4127,7 @@ function lambdaSyncPayload() {
     lamEnsureIds();
     const records = {}; let any = false;
     LAMBDA_DATA_STORES.forEach(st => {
-      records[st.field] = lamReadRaw(st.key).filter(r => r && typeof r === 'object' && r.id).map(lamForWire);
+      records[st.field] = lamReadRaw(st.key).filter(r => r && typeof r === 'object' && r.id && (st.field !== 'detected' || lcdDetectedFresh(r))).map(lamForWire);
       if (records[st.field].length) any = true;
     });
     const tombstones = lamReadTombs();
@@ -4138,7 +4142,7 @@ function lambdaDigestShape(p) {
   const o = {};
   LAMBDA_DATA_STORES.forEach(st => {
     const m = {};
-    (Array.isArray(rr[st.field]) ? rr[st.field] : []).forEach(r => { if (r && r.id) m[r.id] = simpleHash(stableStringify(r)); });
+    (Array.isArray(rr[st.field]) ? rr[st.field] : []).forEach(r => { if (r && r.id && (st.field !== 'detected' || lcdDetectedFresh(r))) m[r.id] = simpleHash(stableStringify(r)); });
     o[st.field] = m;
   });
   o.tomb = Object.keys((p && p.lambdaTombstones && typeof p.lambdaTombstones === 'object') ? p.lambdaTombstones : {}).sort();
@@ -4208,8 +4212,8 @@ function applyRemoteLambdaRecords(remoteParsed) {
       Object.keys(rtomb).forEach(id => { const t = Number(rtomb[id]); if (isFinite(t) && t > 0 && !(Number(tomb[id]) >= t)) tomb[id] = t; });
       const revived = new Set(), results = [];
       LAMBDA_DATA_STORES.forEach(st => {
-        const remote = (rr && Array.isArray(rr[st.field])) ? rr[st.field].filter(r => r && typeof r === 'object' && typeof r.id === 'string' && r.id) : [];
-        const local = lamReadRaw(st.key);
+        const remote = (rr && Array.isArray(rr[st.field])) ? rr[st.field].filter(r => r && typeof r === 'object' && typeof r.id === 'string' && r.id && (st.field !== 'detected' || lcdDetectedFresh(r))) : [];
+        const local = lamReadRaw(st.key).filter(r => st.field !== 'detected' || lcdDetectedFresh(r));   // detected changes older than 30 days are dropped
         const m = lambdaMergeTable(local, remote, tomb, lamAdoptRemote);
         m.revived.forEach(id => revived.add(id));
         results.push({ st: st, local: local, m: m });
@@ -20833,6 +20837,7 @@ function elmLinkedChecker() {
 // Lambda links changed (saved / deleted / synced): redraw the log table so the button appears or disappears.
 function elmRefreshLogTable() {
   try { if (typeof updateLogTable === 'function') updateLogTable(); } catch (e) {}
+  try { if (typeof lcdUpdateButton === 'function') lcdUpdateButton(); } catch (e) {}   // linked / unlinked counts (also after a sync brings in changes)
   try { if (typeof lcdpRefreshIfOpen === 'function') lcdpRefreshIfOpen(); } catch (e) {}   // Linked / Unlinked labels in the Lambda changes popup
 }
 function elmOpen(rowIdx) {
@@ -25827,6 +25832,7 @@ function initAutoBackup() {
 // Not part of Drive sync / backup: the file and its handle exist only on this device.
 const LCD_DB = 'ttl_lcd_db';
 const LCD_META_KEY = 'ttl_lcd_meta';
+const LCD_DET_KEY = 'ttl_lambda_detected';   // synced copy of the detected functions (names + times) of every date a desktop has loaded
 const LCD_INDEX_KEY = 'ttl_lcd_index';
 let _lcdHandle = null, _lcdBusy = null, _lcdNeedsGesture = false;
 let _lcdFile = null;     // fallback browsers only: the picked File reference (re-read on demand; its content is not kept)
@@ -25877,10 +25883,62 @@ function lcdSliceForDate(data, iso) {
 function lcdStoreDate(data, iso) {
   const day = lcdSliceForDate(data, iso);
   const ok = lcdSaveIndex({ [iso]: day });
+  if (ok) lcdDetectedSave(iso, day);
   return ok ? day : null;
 }
+// Keeps the date's detected functions in a record store that rides on the normal Drive sync, so phones / tablets
+// (which cannot read the JSON file) see the same Lambda changes. Replaces that date's records; deleted ones get tombstones.
+// Detected changes are kept for 30 days on every device (phones / tablets have no file to read them from again).
+// Changing the date never removes them; only age does. Every device applies the same rule, so no tombstones are needed.
+const LCD_DET_KEEP_DAYS = 30;
+function lcdDetectedCutoff() {
+  const d = new Date(); d.setDate(d.getDate() - LCD_DET_KEEP_DAYS);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function lcdDetectedFresh(r) { return !!(r && typeof r.date === 'string' && r.date >= lcdDetectedCutoff()); }
+function lcdDetectedPrune() {
+  const all = lamReadRaw(LCD_DET_KEY), fresh = all.filter(lcdDetectedFresh);
+  if (fresh.length !== all.length) { try { localStorage.setItem(LCD_DET_KEY, JSON.stringify(fresh)); } catch (e) {} }
+}
+function lcdDetectedSave(iso, day) {
+  try {
+    if (iso < lcdDetectedCutoff()) return;   // older than the 30 days kept: shown from the file on a desktop, not stored
+    const all = lamReadRaw(LCD_DET_KEY), old = all.filter(lcdDetectedFresh), now = Date.now(), keep = [], tombs = lamReadTombs();
+    let changed = old.length !== all.length, tchanged = false;
+    const want = {};
+    Object.keys(day || {}).forEach(name => { want['det_' + iso + '|' + name.toLowerCase()] = name; });
+    old.forEach(r => {
+      if (!r || !r.id) return;
+      if (r.date === iso && !Object.prototype.hasOwnProperty.call(want, r.id)) { tombs[r.id] = now; tchanged = true; changed = true; return; }
+      keep.push(r);
+    });
+    Object.keys(want).forEach(id => {
+      const name = want[id], d = day[name] || {}, times = Array.isArray(d.t) ? d.t.slice().sort() : [];
+      const rec = keep.find(r => r.id === id);
+      if (rec) {
+        if (rec.name !== name || JSON.stringify(rec.t || []) !== JSON.stringify(times)) { rec.name = name; rec.t = times; rec.updatedAt = now; changed = true; }
+      } else {
+        keep.push({ id, importedAt: now, date: iso, name, t: times }); changed = true;
+        if (tombs[id] !== undefined) { delete tombs[id]; tchanged = true; }
+      }
+    });
+    if (!changed) return;
+    localStorage.setItem(LCD_DET_KEY, JSON.stringify(keep));
+    if (tchanged) { try { lamWriteTombs(tombs); } catch (e) {} }
+    try { recordSyncChange('lambdaRecords', null, 'update'); } catch (e) {}
+  } catch (e) { console.warn('[LCD] could not keep the detected changes for sync', e); }
+}
+function lcdDetectedDay(iso) {
+  const out = {};
+  lamReadRaw(LCD_DET_KEY).forEach(r => { if (r && r.date === iso && r.name) out[r.name] = { t: Array.isArray(r.t) ? r.t : [], f: {} }; });
+  return out;
+}
 
-function lcdNamesForDate(iso) { const d = lcdLoadIndex()[iso]; return d ? Object.keys(d).sort((a, b) => a.localeCompare(b)) : []; }
+function lcdNamesForDate(iso) {
+  let d = lcdLoadIndex()[iso];   // this device's own read of the file wins; otherwise what another device synced
+  if (!d) { const x = lcdDetectedDay(iso); if (Object.keys(x).length) d = x; }
+  return d ? Object.keys(d).sort((a, b) => a.localeCompare(b)) : [];
+}
 function lcdCountForDate(iso) { return lcdNamesForDate(iso).length; }
 
 // Reads the file only when it changed since the last check (or force). interactive = may show the permission prompt (needs a user gesture).
@@ -25951,10 +26009,10 @@ function lcdUpdateButton() {
   if (!btn || !grp) return;
   const meta = lcdLoadMeta();
   // shown only while "Lambda function logging" is enabled (and a change-log JSON has been selected)
-  const on = (typeof isLambdaLoggingEnabled === 'function') && isLambdaLoggingEnabled() && !!meta.fileName;
+  const on = (typeof isLambdaLoggingEnabled === 'function') && isLambdaLoggingEnabled();   // every device (phones / tablets show what a desktop synced)
   grp.style.display = on ? '' : 'none';
   const rf = document.getElementById('lambda-changes-refetch');
-  if (rf) rf.classList.toggle('busy', !!_lcdBusy);
+  if (rf) { rf.classList.toggle('busy', !!_lcdBusy); rf.style.display = (lcdSupported() || meta.fileName) ? '' : 'none'; }   // re-fetch only where the JSON file can be read
   if (!on) return;
   const iso = getSelectedDate();
   if (!lcdLoadIndex()[iso] && _lcdWantIso !== iso && !_lcdBusy && (_lcdHandle || _lcdFile)) {
@@ -25964,8 +26022,8 @@ function lcdUpdateButton() {
   let nLinked = 0, nUnlinked = 0;
   try { lcdClassify(iso).forEach(r => { if (r.linked) nLinked++; else nUnlinked++; }); } catch (e) { nUnlinked = lcdNamesForDate(iso).length; }
   const cnt = document.getElementById('lambda-changes-count');
-  if (cnt) cnt.innerHTML = '<span class="lcd-cnt linked" title="' + nLinked + ' linked to a task"><i class="ti ti-link"></i>' + nLinked + '<span class="lcd-cnt-w"> linked</span></span>' +
-    '<span class="lcd-cnt unlinked" title="' + nUnlinked + ' not linked to any task"><i class="ti ti-unlink"></i>' + nUnlinked + '<span class="lcd-cnt-w"> unlinked</span></span>';
+  if (cnt) cnt.innerHTML = '<span class="lcd-cnt linked" title="' + nLinked + ' linked to a task"><i class="ti ti-link"></i>' + nLinked + '</span>' +
+    '<span class="lcd-cnt unlinked" title="' + nUnlinked + ' not linked to any task"><i class="ti ti-unlink"></i>' + nUnlinked + '</span>';
   btn.title = 'View the Lambda function changes for this date (' + nLinked + ' linked, ' + nUnlinked + ' unlinked)';   // no function names in the tooltip: they are listed in the popup
 }
 function lcdButtonClick() { lcdpOpen(); }
@@ -26137,22 +26195,22 @@ function lcdpRender() {
   title.textContent = 'Lambda changes — ' + dateTxt;
   let html;
   if (!rows.length) {
-    html = `<div class="lm-hist-empty">No Lambda function changes found for ${esc(dateTxt)}.</div>`;
+    html = `<div class="lm-hist-empty">No Lambda function changes found for ${esc(dateTxt)}.${lcdLoadMeta().fileName ? '' : '<br>Changes are read from the JSON file on the desktop where it is selected (Masters → Auto Change Detect) and reach this device after that desktop syncs.'}</div>`;
   } else {
     const nLk = rows.filter(r => r.linked).length, nUn = rows.length - nLk, nNs = rows.filter(r => r.saved === false).length;
     const savedChip = r => {
       const t = LAMBDA_COLUMN_STORES[r.kind === 'new' ? LCD_FN_STORE : LCD_CH_STORE].title;
-      if (r.saved === true) return `<span class="lcd-chip saved" title="A record matching the Duplicate check columns already exists in ${esc(t)}">Saved</span>`;
-      if (r.saved === false) return `<span class="lcd-chip notsaved" title="No matching record in ${esc(t)} yet">Not saved</span>`;
-      return `<span class="lcd-chip unk" title="Tick Duplicate check on the Name (and Date) column of ${esc(t)} in Masters so this can be checked">Can't check</span>`;
+      if (r.saved === true) return `<span class="lcd-chip ic saved" title="Saved: a record matching the Duplicate check columns already exists in ${esc(t)}" aria-label="Saved"><i class="ti ti-circle-check"></i></span>`;
+      if (r.saved === false) return `<span class="lcd-chip ic notsaved" title="Not saved: no matching record in ${esc(t)} yet" aria-label="Not saved"><i class="ti ti-circle-x"></i></span>`;
+      return `<span class="lcd-chip ic unk" title="Can't check: tick Duplicate check on the Name (and Date) column of ${esc(t)} in Masters" aria-label="Can't check"><i class="ti ti-help-circle"></i></span>`;
     };
     html = `<div class="lm-hist-sub">${rows.length} function${rows.length === 1 ? '' : 's'} changed · ${nLk} linked · ${nUn} unlinked · ${nNs} not saved</div><div class="lm-hist-wrap"><table class="lm-hist-table"><thead><tr><th>Function</th><th>Type</th><th>Task link</th><th>In table</th><th></th></tr></thead><tbody>` +
       rows.map((r, i) => `<tr><td><div class="lcd-fn">${esc(r.name)}</div></td><td><span class="lcd-chip ${r.kind}">${r.kind === 'new' ? 'New' : 'Change'}</span></td>` +
-        `<td><span class="lcd-chip ${r.linked ? 'linked' : 'unlinked'}">${r.linked ? 'Linked' : 'Unlinked'}</span>${r.labels.length ? `<div class="lcd-sub">${r.labels.map(x => esc(x)).join(' · ')}</div>` : ''}</td>` +
+        `<td><span class="lcd-chip ic ${r.linked ? 'linked' : 'unlinked'}" title="${r.linked ? 'Linked to a task' : 'Not linked to any task'}" aria-label="${r.linked ? 'Linked' : 'Unlinked'}"><i class="ti ${r.linked ? 'ti-link' : 'ti-unlink'}"></i></span>${r.labels.length ? `<div class="lcd-sub">${r.labels.map(x => esc(x)).join(' · ')}</div>` : ''}</td>` +
         `<td>${savedChip(r)}</td>` +
-        `<td style="text-align:right"><div class="lcd-acts"><button type="button" class="btn lcd-link-btn" onclick="lcdpLink(${i})"><i class="ti ti-link"></i> ${r.linked ? 'Link another task' : 'Link to task'}</button>` +
-        (r.linked ? `<button type="button" class="btn lcd-link-btn" onclick="lcdpUnlink(${i})" title="Remove the link to the task (the record stays in the table)"><i class="ti ti-unlink"></i> Unlink</button>` : '') +
-        `<button type="button" class="btn lcd-link-btn" ${r.saved === true ? 'disabled' : ''} onclick="lcdpSaveOnly(${i})" title="${r.saved === true ? 'Already saved in the table' : 'Save to the ' + esc(LAMBDA_COLUMN_STORES[r.kind === 'new' ? LCD_FN_STORE : LCD_CH_STORE].title) + ' table without linking to any task'}"><i class="ti ti-device-floppy"></i> Save only</button></div></td></tr>`).join('') +
+        `<td style="text-align:right"><div class="lcd-acts"><button type="button" class="btn-icon lcd-ic" onclick="lcdpLink(${i})" title="${r.linked ? 'Link another task' : 'Link to task'}" aria-label="${r.linked ? 'Link another task' : 'Link to task'}"><i class="ti ti-link"></i></button>` +
+        (r.linked ? `<button type="button" class="btn-icon lcd-ic" onclick="lcdpUnlink(${i})" title="Unlink from task (the record stays in the table)" aria-label="Unlink from task"><i class="ti ti-unlink"></i></button>` : '') +
+        `<button type="button" class="btn-icon lcd-ic" ${r.saved === true ? 'disabled' : ''} onclick="lcdpSaveOnly(${i})" aria-label="Save only" title=""${r.saved === true ? 'Already saved in the table' : 'Save to the ' + esc(LAMBDA_COLUMN_STORES[r.kind === 'new' ? LCD_FN_STORE : LCD_CH_STORE].title) + ' table without linking to any task'}"><i class="ti ti-device-floppy"></i></button></div></td></tr>`).join('') +
       '</tbody></table></div>';
   }
   body.innerHTML = html;
@@ -26335,6 +26393,7 @@ function renderLambdaAutoDetectHTML() {
   return `<div style="padding:4px 2px;max-width:640px">
     <div style="font-size:15px;font-weight:600;margin-bottom:4px"><i class="ti ti-radar" style="color:var(--blue-mid)"></i> Auto Change Detect</div>
     <div style="font-size:12.5px;color:var(--text-secondary);margin-bottom:12px">Pick the Lambda change-log JSON on this computer. It is re-checked when the app loads and after every task completion, and is only read again when the file has changed. The number of functions changed on the date selected in the header appears on the <b>Lambda changes</b> button above the log table; click it to see them and link them to tasks.</div>
+    <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:12px">Only a desktop browser (Chrome / Edge) can keep a link to the file. The functions it finds for each date are saved with your Lambda data, so after Sync the <b>Lambda changes</b> button shows them on your phone and tablet too (for the dates a desktop has opened).</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
       <button class="btn btn-primary" onclick="lcdPickFile()"><i class="ti ti-file-search"></i> ${hasFile ? 'Change JSON file' : 'Select JSON file'}</button>
       ${hasFile && supported ? `<button class="btn" onclick="lcdCheck({force:true,interactive:true})"><i class="ti ti-refresh"></i> Check now</button>` : ''}
@@ -26354,6 +26413,7 @@ function renderLambdaAutoDetectHTML() {
 
 // App load: reload the handle and check (silently if permission is already granted); otherwise retry on the first click.
 function lcdInit() {
+  try { lcdDetectedPrune(); } catch (e) {}
   if (!lcdSupported()) { lcdUpdateButton(); return; }
   lcdIdbGet().then(h => { _lcdHandle = h || null; lcdUpdateButton(); if (_lcdHandle) lcdCheck({ interactive: false }); }).catch(() => {});
   document.addEventListener('click', () => { if (_lcdNeedsGesture) lcdCheck({ interactive: true }); }, true);
