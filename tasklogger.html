@@ -19385,6 +19385,10 @@ function renderLambdaColumnsTabHTML(storeKey) {
           <input type="checkbox" ${c.searchable===true?'checked':''} onchange="lcToggleSearchable(${k},'${c.key}')" />
           Searchable
         </label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-secondary);cursor:pointer" title="When adding an entry on the Lambda Functions screen, an entry is rejected as a duplicate if an existing record has the same value in EVERY column ticked Duplicate check">
+          <input type="checkbox" ${c.dupCheck===true?'checked':''} onchange="lcToggleDupCheck(${k},'${c.key}')" />
+          Duplicate check
+        </label>
         ${isList ? `<label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-secondary);cursor:pointer" title="Show this column as its own multi-select filter in the Lambda Functions table filter bar (all values selected by default)">
           <input type="checkbox" ${c.searchEntity===true?'checked':''} onchange="lcToggleSearchEntity(${k},'${c.key}')" />
           Search as individual entity
@@ -19398,7 +19402,7 @@ function renderLambdaColumnsTabHTML(storeKey) {
     <div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">
       Lambda logging master: <strong>${meta.title}</strong>. Configure its columns the same way as the
       Columns master — drag rows to reorder, rename the label, choose the input type, mark a field mandatory, and tick Searchable to offer it in the
-      Search by list of the Lambda Functions screen, and tick Search as individual entity on a dropdown / multi-select / searchable-select column to give it its own filter there. This master is separate from the Task Logger Columns and is used for later Lambda logging changes.
+      Search by list of the Lambda Functions screen, tick Duplicate check on the column(s) that together identify a unique entry (an Add entry is blocked when all ticked columns match an existing record), and tick Search as individual entity on a dropdown / multi-select / searchable-select column to give it its own filter there. This master is separate from the Task Logger Columns and is used for later Lambda logging changes.
     </div>
     <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-secondary);cursor:pointer;margin-bottom:12px;padding:8px 10px;border:1px solid var(--border);border-radius:8px" title="Decides whether the Copy button above the ${esc(meta.title)} table includes the column header row">
       <input type="checkbox" ${lmCopyWithHeader(storeKey) ? 'checked' : ''} onchange="lcToggleCopyHeader(${k})" />
@@ -19523,6 +19527,12 @@ function lcToggleSearchable(storeKey, key) {
   col.searchable = !col.searchable;
   saveState();
   if (typeof lmRefreshIfOpen === 'function') lmRefreshIfOpen();
+}
+function lcToggleDupCheck(storeKey, key) {
+  const col = getLambdaColumnByKey(storeKey, key);
+  if (!col) return;
+  col.dupCheck = !col.dupCheck;
+  saveState();
 }
 // Per-master "Copy with header" flag (masters.flags.lambdaCopyHeader[storeKey]); unset = false = copy without header.
 function lmCopyWithHeader(storeKey) {
@@ -20710,29 +20720,18 @@ function lmEditOpen(id) {
   document.getElementById('lm-edit-modal').classList.remove('hidden');
 }
 // ── Add entry (+ in the table header's action column): same form as Edit, blank, with a duplicate check ──
-// Duplicate = same Name AND same date. Functions tab: function Name + Create date. Changes tab: Name + Date.
-function lmDupCols(k) {
-  const cols = getLambdaColumns(k);
-  const norm = v => String(v == null ? '' : v).trim().toLowerCase();
-  const nameKey = k === 'lambdaFunctionColumns' ? 'fn_name' : 'chg_name';
-  const nameCol = cols.find(c => c.key === nameKey) || cols.find(c => norm(c.label) === 'name') || cols[0];
-  const dates = cols.filter(c => c.type === 'date');
-  let dateCol = null;
-  if (k === 'lambdaFunctionColumns') dateCol = dates.find(c => /creat/i.test(c.key + ' ' + c.label)) || dates[0] || null;
-  else dateCol = dates.find(c => c.key === 'chg_date') || dates[0] || null;
-  return { nameCol, dateCol };
-}
+// Duplicate = an existing record with the same value in EVERY column flagged "Duplicate check" in the
+// master (no static column names). No flagged column = no duplicate check.
+function lmDupCols(k) { return getLambdaColumns(k).filter(c => c.dupCheck === true); }
 function lmFindDuplicate(k, values) {
-  const { nameCol, dateCol } = lmDupCols(k);
-  if (!nameCol) return null;
-  const norm = v => String(v == null ? '' : v).trim().toLowerCase();
-  const dKey = (v, c) => { const iso = lmParseDate(v, c); return iso || norm(v); };
-  const name = norm(values[nameCol.key]);
-  if (!name) return null;
-  const date = dateCol ? dKey(values[dateCol.key], dateCol) : '';
-  const hit = readLambdaStore(k).find(r => r && r.values && norm(r.values[nameCol.key]) === name &&
-    (!dateCol || dKey(r.values[dateCol.key], dateCol) === date));
-  return hit ? { nameCol, dateCol, rec: hit } : null;
+  const dcols = lmDupCols(k);
+  if (!dcols.length) return null;
+  const norm = v => String(v == null ? '' : v).trim().toLowerCase().replace(/\s+/g, ' ');
+  const keyOf = (c, v) => c.type === 'date' ? (lmParseDate(v, c) || norm(v)) : norm(v);
+  const want = dcols.map(c => keyOf(c, values[c.key]));
+  if (want.every(w => !w)) return null;   // nothing filled in on the flagged columns: nothing to compare
+  const hit = readLambdaStore(k).find(r => r && r.values && dcols.every((c, i) => keyOf(c, r.values[c.key]) === want[i]));
+  return hit ? { cols: dcols, rec: hit } : null;
 }
 function lmAddOpen() {
   const k = lmActiveTab;
@@ -20756,10 +20755,8 @@ function lmEditSave() {
   if (id == null) {   // Add entry
     const dup = lmFindDuplicate(k, r.values);
     if (dup) {
-      const nm = r.values[dup.nameCol.key];
-      const dv = dup.dateCol ? lmDisplayValue(dup.dateCol, r.values[dup.dateCol.key]) : '';
-      alert('Duplicate entry: ' + (dup.nameCol.label || 'Name') + ' "' + nm + '"' + (dup.dateCol ? ' with ' + (dup.dateCol.label || 'Date') + ' ' + dv : '') +
-        ' already exists in ' + LAMBDA_COLUMN_STORES[k].title + '. Change the ' + (dup.dateCol ? 'name or date' : 'name') + ' to add it.');
+      const desc = dup.cols.map(c => (c.label || c.key) + ' "' + lmDisplayValue(c, r.values[c.key]) + '"').join(', ');
+      alert('Duplicate entry: a record with ' + desc + ' already exists in ' + LAMBDA_COLUMN_STORES[k].title + '. Change ' + (dup.cols.length > 1 ? 'one of these values' : 'this value') + ' to add it.');
       return;
     }
     try {
