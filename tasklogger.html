@@ -20729,12 +20729,12 @@ function lmDupKey(c, v) {
   if (c.type === 'multilist') return lmCellValues(c, v, lmKnownItems(c)).map(norm).filter(Boolean).sort().join('|');
   return norm(v);
 }
-function lmFindDuplicate(k, values) {
+function lmFindDuplicate(k, values, excludeId) {
   const dcols = lmDupCols(k);
   if (!dcols.length) return null;
   const want = dcols.map(c => lmDupKey(c, values[c.key]));
   if (want.every(w => !w)) return null;   // nothing filled in on the flagged columns: nothing to compare
-  const hit = readLambdaStore(k).find(r => r && r.values && dcols.every((c, i) => lmDupKey(c, r.values[c.key]) === want[i]));
+  const hit = readLambdaStore(k).find(r => r && r.values && (excludeId == null || r.id !== excludeId) && dcols.every((c, i) => lmDupKey(c, r.values[c.key]) === want[i]));
   return hit ? { cols: dcols, rec: hit } : null;
 }
 // A multi-select dropdown column ticked "Duplicate check" with several options chosen is split into one
@@ -20779,38 +20779,55 @@ function lmEditClose() {
   if (m) m.classList.add('hidden');
   _lme = null;
 }
+// Shared by Add and Edit: split the values per option of any multi-select Duplicate-check column, check
+// every resulting entry for duplicates (a record being edited never counts as a duplicate of itself),
+// then hand the entries that are NOT duplicates to proceed(list).
+function lmResolveEntries(k, values, excludeId, proceed, yesLabel) {
+  const res = lmExpandMulti(k, values).map(v => ({ v, dup: lmFindDuplicate(k, v, excludeId) }));
+  const fresh = res.filter(x => !x.dup), dups = res.filter(x => x.dup);
+  const dupList = dups.map(x => '• ' + lmDupDesc(k, x.v)).join('\n');
+  if (!fresh.length) {
+    alert((dups.length > 1 ? 'Duplicate entries: all ' + dups.length + ' entries already exist in ' : 'Duplicate entry: a record with ' + lmDupDesc(k, dups[0].v) + ' already exists in ') + LAMBDA_COLUMN_STORES[k].title + '.' +
+      (dups.length > 1 ? '\n' + dupList : '') + '\nChange a value to continue.');
+    return;
+  }
+  if (dups.length) {
+    showConfirmChoice('Some entries already exist',
+      dups.length + ' of ' + res.length + ' entries are duplicates and will be skipped:\n' + dupList + '\n\nContinue with the other ' + fresh.length + ' entr' + (fresh.length === 1 ? 'y' : 'ies') + '?',
+      () => proceed(fresh.map(x => x.v)), null, yesLabel, 'Cancel');
+    return;
+  }
+  proceed(fresh.map(x => x.v));
+}
+// Edit: the edited record takes the first entry; any further entries (extra options) become new records
+// with the same task link, so they stay in the same task's history.
+function lmApplyEditSplit(k, id, list) {
+  try {
+    const store = readLambdaStore(k), rec = store.find(x => x && x.id === id), now = Date.now();
+    if (!rec) { alert('This record no longer exists.'); lmEditClose(); lmRenderAll(); return; }
+    rec.values = Object.assign({}, rec.values || {}, list[0]);
+    rec.updatedAt = now;
+    list.slice(1).forEach((vals, i) => {
+      const nr = { id: 'lm_' + now.toString(36) + '_' + Math.random().toString(36).slice(2, 7) + '_' + (store.length + i), importedAt: now, values: vals };
+      if (rec.taskId != null) nr.taskId = rec.taskId;
+      if (rec.taskSyncId) nr.taskSyncId = rec.taskSyncId;
+      store.push(nr);
+    });
+    writeLambdaStore(k, store);
+    if (list.length > 1) lmRevealTab(k);   // show the new records even if a filter / date range would hide them
+  } catch (err) { alert('Could not save the changes (' + err.message + ').'); return; }
+  lmEditClose();
+  lmRenderAll();
+  if (list.length > 1) elmRefreshLogTable();
+}
 function lmEditSave() {
   if (!_lme) return;
   const k = _lme.k, id = _lme.id;
   const r = lamFormCollect(k, 'lme-');
   if (r.bad) { if (r.bad.scrollIntoView) r.bad.scrollIntoView({ block: 'center', behavior: 'smooth' }); return; }
-  if (id == null) {   // Add entry (split per option of any multi-select Duplicate-check column, each checked for duplicates)
-    const res = lmExpandMulti(k, r.values).map(v => ({ v, dup: lmFindDuplicate(k, v) }));
-    const fresh = res.filter(x => !x.dup), dups = res.filter(x => x.dup);
-    const dupList = dups.map(x => '• ' + lmDupDesc(k, x.v)).join('\n');
-    if (!fresh.length) {
-      alert((dups.length > 1 ? 'Duplicate entries: all ' + dups.length + ' entries already exist in ' : 'Duplicate entry: a record with ' + lmDupDesc(k, dups[0].v) + ' already exists in ') + LAMBDA_COLUMN_STORES[k].title + '.' +
-        (dups.length > 1 ? '\n' + dupList : '') + '\nChange a value to add it.');
-      return;
-    }
-    if (dups.length) {
-      showConfirmChoice('Some entries already exist',
-        dups.length + ' of ' + res.length + ' entries are duplicates and will be skipped:\n' + dupList + '\n\nAdd the other ' + fresh.length + ' entr' + (fresh.length === 1 ? 'y' : 'ies') + '?',
-        () => lmAddRecords(k, fresh.map(x => x.v)), null, 'Add new only', 'Cancel');
-      return;
-    }
-    lmAddRecords(k, fresh.map(x => x.v));
-    return;
-  }
-  try {
-    const store = readLambdaStore(k), rec = store.find(x => x && x.id === id);
-    if (!rec) { alert('This record no longer exists.'); lmEditClose(); lmRenderAll(); return; }
-    rec.values = Object.assign({}, rec.values || {}, r.values);
-    rec.updatedAt = Date.now();
-    writeLambdaStore(k, store);
-  } catch (err) { alert('Could not save the changes (' + err.message + ').'); return; }
-  lmEditClose();
-  lmRenderAll();
+  if (id == null) { lmResolveEntries(k, r.values, null, list => lmAddRecords(k, list), 'Add new only'); return; }
+  if (!readLambdaStore(k).some(x => x && x.id === id)) { alert('This record no longer exists.'); lmEditClose(); lmRenderAll(); return; }
+  lmResolveEntries(k, r.values, id, list => lmApplyEditSplit(k, id, list), 'Save new only');
 }
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && _lme && document.getElementById('confirm-overlay').classList.contains('hidden')) lmEditClose();
