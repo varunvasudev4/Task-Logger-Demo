@@ -1056,7 +1056,7 @@ tbody td:first-child { color: var(--text-primary); font-weight: 500; }
    both the Light and Dark themes automatically via CSS variables. ── */
 #appTooltip {
   position: fixed;
-  z-index: 10050;
+  z-index: 10100; /* above the floating row-actions menu (10050) */
   max-width: 320px;
   background: var(--bg);
   color: var(--text-primary);
@@ -1078,7 +1078,7 @@ tbody td:first-child { color: var(--text-primary); font-weight: 500; }
 #appTooltip::after {
   content: '';
   position: absolute;
-  left: 14px;
+  left: var(--tip-arrow-x, 14px);
   width: 8px; height: 8px;
   background: var(--bg);
   border: 1px solid var(--blue-mid);
@@ -1087,6 +1087,8 @@ tbody td:first-child { color: var(--text-primary); font-weight: 500; }
 }
 #appTooltip.tip-below::after { top: -5px; transform: rotate(225deg); }
 #appTooltip.tip-above::after { bottom: -5px; transform: rotate(45deg); }
+#appTooltip.tip-left::after  { left: auto; right: -5px; top: calc(50% - 4px); bottom: auto; transform: rotate(-45deg); }
+#appTooltip.tip-right::after { left: -5px; top: calc(50% - 4px); bottom: auto; transform: rotate(135deg); }
 
 /* Complete modal — description + final meta confirm */
 .modal-overlay {
@@ -2845,19 +2847,59 @@ const DEFAULT_PENDING_IDENTITY = { primary: ['ticket'], fallback: ['taskname', '
 
   function positionTooltip(el) {
     const rect = el.getBoundingClientRect();
-    tip.classList.remove('tip-above', 'tip-below');
+    tip.classList.remove('tip-above', 'tip-below', 'tip-left', 'tip-right');
+    tip.style.removeProperty('--tip-arrow-x');
     const tipRect = tip.getBoundingClientRect();
+    const vw = document.documentElement.clientWidth || window.innerWidth;
+    const vh = document.documentElement.clientHeight || window.innerHeight;
+    // Buttons inside the floating row-actions menu: show the tooltip beside the button
+    // (to its left, or right if no room) so it never covers the menu's other buttons.
+    if (el.closest && el.closest('#log-actions-float')) {
+      let left = rect.left - tipRect.width - 10, side = 'tip-left';
+      if (left < 8) { left = rect.right + 10; side = 'tip-right'; }
+      let top = rect.top + rect.height / 2 - tipRect.height / 2;
+      top = Math.min(Math.max(8, top), vh - tipRect.height - 8);
+      tip.style.left = left + 'px';
+      tip.style.top = top + 'px';
+      tip.classList.add(side);
+      return;
+    }
     let top = rect.top - tipRect.height - 10;
     let below = false;
     if (top < 8) { top = rect.bottom + 10; below = true; }
     let left = rect.left;
-    const maxLeft = window.innerWidth - tipRect.width - 12;
+    const isActionBtn = !!(el.closest && el.closest('td[data-col="__actions"]'));
+    if (isActionBtn) left = rect.left + rect.width / 2 - tipRect.width / 2;   // centred on the button
+    const maxLeft = vw - tipRect.width - 12;
     if (left > maxLeft) left = Math.max(8, maxLeft);
     if (left < 8) left = 8;
+    if (isActionBtn) {
+      const ax = rect.left + rect.width / 2 - left - 4;                        // arrow points at the button
+      tip.style.setProperty('--tip-arrow-x', Math.min(Math.max(8, ax), Math.max(8, tipRect.width - 18)) + 'px');
+    }
     tip.style.left = left + 'px';
     tip.style.top = top + 'px';
     tip.classList.add(below ? 'tip-below' : 'tip-above');
   }
+
+  // The log table re-renders every second while a task runs, which detaches the hovered
+  // button. Re-anchor the tooltip to whatever is now under the pointer (or hide it) so it
+  // never lingers at the old position.
+  let lastX = -1, lastY = -1;
+  document.addEventListener('mousemove', (e) => { lastX = e.clientX; lastY = e.clientY; }, { passive: true });
+  window._refreshAppTooltip = function () {
+    if (!currentTarget || currentTarget.isConnected) return;
+    tip.classList.remove('visible'); currentTarget = null;
+    if (lastX < 0) return;
+    const under = document.elementFromPoint(lastX, lastY);
+    const el = under && under.closest ? under.closest('[title], [data-tooltip-text]') : null;
+    if (!el) return;
+    let text = el.getAttribute('title');
+    if (text) { el.removeAttribute('title'); el.dataset.tooltipText = text; } else { text = el.dataset.tooltipText; }
+    if (!text) return;
+    if (el.matches('.log-table td, .log-table th') && !el.matches('.td-desc') && el.scrollWidth <= el.clientWidth) return;
+    currentTarget = el; tip.textContent = text; positionTooltip(el); tip.classList.add('visible');
+  };
 
   document.addEventListener('mouseover', (e) => {
     const el = e.target.closest ? e.target.closest('[title], [data-tooltip-text]') : null;
@@ -15966,6 +16008,7 @@ function updateLogTable() {
 
   wireLogTableColumnInteractions();
   applyLogTableColumnPins();
+  if (window._refreshAppTooltip) window._refreshAppTooltip();
 }
 
 function updateLogPanel() {
