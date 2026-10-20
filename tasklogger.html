@@ -640,6 +640,12 @@ html.is-touch .pending-card-actions { opacity: 1; }
   .cm-lambda-edit { padding: 6px 9px; min-width: 36px; justify-content: center; }
 }
 
+/* "Lambda changes" button + attached re-fetch (suffix) button */
+.lcd-btn-group { display: inline-flex; align-items: stretch; }
+.lcd-btn-group .lcd-main { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.lcd-btn-group .lcd-refetch { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: -1px; padding-left: 8px; padding-right: 8px; }
+.lcd-btn-group .lcd-refetch.busy i { animation: lcd-spin .8s linear infinite; }
+@keyframes lcd-spin { to { transform: rotate(360deg); } }
 /* ── Lambda tables: row edit button + date range ── */
 .lm-sel-wrap { display: inline-flex; align-items: center; gap: 4px; }
 .lm-row-edit { background: none; border: none; padding: 3px 4px; cursor: pointer; color: var(--text-tertiary); border-radius: var(--radius-md); line-height: 1; font-size: 15px; }
@@ -2008,6 +2014,7 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
         <div class="log-count" id="log-count">0 entries</div>
       </div>
       <div class="log-header-actions">
+        <span class="lcd-btn-group" id="lambda-changes-group" style="display:none"><button class="btn lcd-main" onclick="lcdButtonClick()" id="lambda-changes-btn"><i class="ti ti-function"></i> Lambda changes <span class="lambda-chip" id="lambda-changes-count">0</span></button><button class="btn lcd-refetch" onclick="lcdRefetch()" id="lambda-changes-refetch" title="Re-fetch and check the data from the JSON file for this date" aria-label="Re-fetch Lambda changes from the JSON file"><i class="ti ti-refresh" id="lambda-changes-refetch-icon"></i></button></span>
         <button class="btn" onclick="copyLog()" id="copy-btn"><i class="ti ti-clipboard-copy"></i> Copy</button>
         <button class="btn" onclick="openMailModal()" id="mail-btn" title="Send log via email"><i class="ti ti-mail"></i> Email</button>
         <button class="btn" onclick="openDailySummary()" id="summary-btn" title="Open Daily Summary"><i class="ti ti-report"></i> Summary</button>
@@ -2635,6 +2642,7 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
         <div class="master-nav-group" data-nav-group="lambda" role="presentation">Lambda Logging Masters</div>
         <button class="tab-btn" onclick="switchTab('lambdaFunctionColumns')"><i class="ti ti-function" style="font-size:13px"></i> Function Columns</button>
         <button class="tab-btn" onclick="switchTab('lambdaChangeColumns')"><i class="ti ti-git-pull-request" style="font-size:13px"></i> Change Columns</button>
+        <button class="tab-btn" onclick="switchTab('lambdaAutoDetect')"><i class="ti ti-radar" style="font-size:13px"></i> Auto Change Detect</button>
       </nav>
       <div class="master-nav-backdrop" id="master-nav-backdrop" onclick="closeMasterNav()"></div>
       <div class="master-content-workspace">
@@ -13777,6 +13785,7 @@ function submitComplete() {
     if (doneRow) doneRow.remove();
     updateEmptyState();
     updateLogPanel();
+    if (typeof lcdOnTaskComplete === 'function') lcdOnTaskComplete();
   };
 
   if (multiFieldsToSplit.length > 0) {
@@ -16028,6 +16037,7 @@ function updateLogPanel() {
   updateLogTable();
   if (typeof renderWorkWidget === 'function') renderWorkWidget();
   if (typeof applyLogTableState === 'function') applyLogTableState();
+  if (typeof lcdUpdateButton === 'function') lcdUpdateButton();
 }
 
 function clearLog() {
@@ -16066,7 +16076,7 @@ function openMasters() {
   _masterNavReturnFocusEl = document.activeElement;
   if (typeof applyMastersTabFilter === 'function') applyMastersTabFilter(false); // Masters button: hides User, Colors, Wallpaper + Synchronization
   if (typeof PROFILE_ONLY_TABS !== 'undefined' && PROFILE_ONLY_TABS.includes(activeMastersTab)) switchTab('lists');
-  if (!isLambdaLoggingEnabled() && (activeMastersTab === 'lambdaFunctionColumns' || activeMastersTab === 'lambdaChangeColumns')) switchTab('lists');
+  if (!isLambdaLoggingEnabled() && (activeMastersTab === 'lambdaFunctionColumns' || activeMastersTab === 'lambdaChangeColumns' || activeMastersTab === 'lambdaAutoDetect')) switchTab('lists');
   document.getElementById('masters-modal').classList.remove('hidden');
   // Default to user tab so name is easy to set; switch to projects tab otherwise
   const addSec = document.getElementById('master-add-section');
@@ -16988,6 +16998,10 @@ function renderMastersContent() {
   }
   if (activeMastersTab === 'lambdaFunctionColumns' || activeMastersTab === 'lambdaChangeColumns') {
     content.innerHTML = renderLambdaColumnsTabHTML(activeMastersTab);
+    return;
+  }
+  if (activeMastersTab === 'lambdaAutoDetect') {
+    content.innerHTML = renderLambdaAutoDetectHTML();
     return;
   }
   if (activeMastersTab === 'lists') {
@@ -18495,6 +18509,7 @@ function toggleLambdaLoggingFlag() {
   if (!masters.flags) masters.flags = {};
   masters.flags.lambdaLoggingEnabled = document.getElementById('flag-lambda-logging').checked;
   saveState();
+  if (typeof lcdUpdateButton === 'function') lcdUpdateButton();
   if (typeof applyMastersTabFilter === 'function') applyMastersTabFilter(_mastersProfileMode);
 }
 
@@ -18897,7 +18912,7 @@ function wpBindStage() {
 // Masters tabs visible when the popup is opened from the header photo (User, Colors,
 // Wallpaper and Synchronization). The Masters button shows every other tab.
 const PROFILE_ONLY_TABS = ['user', 'colors', 'wallpaper', 'sync'];
-const LAMBDA_ONLY_TABS = ['lambdaFunctionColumns', 'lambdaChangeColumns'];
+const LAMBDA_ONLY_TABS = ['lambdaFunctionColumns', 'lambdaChangeColumns', 'lambdaAutoDetect'];
 let _mastersProfileMode = false;
 function applyMastersTabFilter(profileOnly) {
   _mastersProfileMode = !!profileOnly;
@@ -25645,6 +25660,241 @@ function initAutoBackup() {
 }
 // ── End Auto Backup ─────────────────────────────────────────────────────────
 
+// ══ Lambda Auto Change Detect (Masters → Lambda Logging Masters → Auto Change Detect) ══════════
+// A device-local JSON file (chosen with a file picker on this laptop) lists the Lambda changes:
+//   { "<function>[@region]": { "DD-MM-YYYY HH:MM:SS": { "<file>": { status, change_blocks? } } } }
+// The picked file's handle is kept in IndexedDB. On app load and after every task completion the file's
+// lastModified/size are compared with the last check; only when they differ is the (large) file read
+// and reduced to a small per-date index { 'YYYY-MM-DD': { fn: { t:[times], f:{file:status} } } } held in
+// localStorage. change_blocks are never stored. The log-table "Lambda changes" button shows the count of
+// unique function names changed on the date selected in the header.
+// ONLY THE SELECTED DATE is kept: localStorage holds just that one date's slice { 'YYYY-MM-DD': { fn: {...} } };
+// when the header date changes, the file is read again, ONLY the new date's entries are extracted and the previously
+// loaded date is dropped — the parsed file is released right after (nothing big stays in memory, nothing is
+// saved to IndexedDB / localStorage). The "@region" suffix is stripped from function names, so
+// `Name` and `Name@us-east-1` are one function. The JSON file is strictly READ-ONLY (opened with mode 'read',
+// never written to or altered by the app).
+// Not part of Drive sync / backup: the file and its handle exist only on this device.
+const LCD_DB = 'ttl_lcd_db';
+const LCD_META_KEY = 'ttl_lcd_meta';
+const LCD_INDEX_KEY = 'ttl_lcd_index';
+let _lcdHandle = null, _lcdBusy = null, _lcdNeedsGesture = false;
+let _lcdFile = null;     // fallback browsers only: the picked File reference (re-read on demand; its content is not kept)
+let _lcdWantIso = null;  // date a fetch is already in flight / failed for (stops the button refresh from looping)
+
+function lcdSupported() { try { return typeof window.showOpenFilePicker === 'function'; } catch (e) { return false; } }
+function lcdLoadMeta() { try { const p = JSON.parse(localStorage.getItem(LCD_META_KEY) || 'null'); if (p && typeof p === 'object') return p; } catch (e) {} return {}; }
+function lcdSaveMeta(m) { try { localStorage.setItem(LCD_META_KEY, JSON.stringify(m)); } catch (e) {} }
+function lcdLoadIndex() { try { const p = JSON.parse(localStorage.getItem(LCD_INDEX_KEY) || 'null'); if (p && typeof p === 'object') return p; } catch (e) {} return {}; }
+function lcdSaveIndex(ix) { try { localStorage.setItem(LCD_INDEX_KEY, JSON.stringify(ix)); return true; } catch (e) { return false; } }
+
+function lcdDb() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open(LCD_DB, 1);
+    r.onupgradeneeded = () => { r.result.createObjectStore('h'); };
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+function lcdIdbGet() { return lcdDb().then(db => new Promise((res, rej) => { const q = db.transaction('h').objectStore('h').get('file'); q.onsuccess = () => res(q.result || null); q.onerror = () => rej(q.error); })); }
+function lcdIdbPut(h) { return lcdDb().then(db => new Promise((res, rej) => { const t = db.transaction('h', 'readwrite'); t.objectStore('h').put(h, 'file'); t.oncomplete = () => res(); t.onerror = () => rej(t.error); })); }
+function lcdIdbDel() { return lcdDb().then(db => new Promise((res, rej) => { const t = db.transaction('h', 'readwrite'); t.objectStore('h').delete('file'); t.oncomplete = () => res(); t.onerror = () => rej(t.error); })); }
+
+// "@region" suffix is ignored when checking: `Name` === `Name@us-east-1`.
+function lcdBaseName(n) { return String(n == null ? '' : n).replace(/@[a-z0-9-]+$/i, ''); }
+function lcdSameFunction(a, b) { return lcdBaseName(a).toLowerCase() === lcdBaseName(b).toLowerCase(); }
+
+// Pick out ONLY the entries of one date (iso 'YYYY-MM-DD') from the parsed JSON (keys are DD-MM-YYYY HH:MM:SS).
+function lcdSliceForDate(data, iso) {
+  const day = {};
+  if (!data || typeof data !== 'object') return day;
+  Object.keys(data).forEach(rawFn => {
+    const versions = data[rawFn];
+    if (!versions || typeof versions !== 'object') return;
+    const fn = lcdBaseName(rawFn);
+    Object.keys(versions).forEach(ts => {
+      const m = /^(\d{2})-(\d{2})-(\d{4})(?:\s+(\d{2}:\d{2}:\d{2}))?/.exec(ts);
+      if (!m || (m[3] + '-' + m[2] + '-' + m[1]) !== iso) return;
+      const rec = day[fn] || (day[fn] = { t: [], f: {} });
+      if (m[4] && rec.t.indexOf(m[4]) < 0) rec.t.push(m[4]);
+      const fobj = versions[ts];
+      if (fobj && typeof fobj === 'object') Object.keys(fobj).forEach(f => { rec.f[f] = (fobj[f] && fobj[f].status) || ''; });
+    });
+  });
+  return day;
+}
+// Store only this date's slice (replaces whatever was stored before).
+function lcdStoreDate(data, iso) {
+  const day = lcdSliceForDate(data, iso);
+  const ok = lcdSaveIndex({ [iso]: day });
+  return ok ? day : null;
+}
+
+function lcdNamesForDate(iso) { const d = lcdLoadIndex()[iso]; return d ? Object.keys(d).sort((a, b) => a.localeCompare(b)) : []; }
+function lcdCountForDate(iso) { return lcdNamesForDate(iso).length; }
+
+// Reads the file only when it changed since the last check (or force). interactive = may show the permission prompt (needs a user gesture).
+function lcdCheck(opts) {
+  opts = opts || {};
+  if (_lcdBusy) return _lcdBusy;
+  const iso = opts.iso || (typeof getSelectedDate === 'function' ? getSelectedDate() : '');
+  _lcdBusy = (async () => {
+    const meta = lcdLoadMeta();
+    try {
+      if (typeof isLambdaLoggingEnabled === 'function' && !isLambdaLoggingEnabled()) return 'off';
+      if (!_lcdHandle && !_lcdFile) _lcdHandle = await lcdIdbGet();
+      if (!_lcdHandle && !_lcdFile) return 'no-file';
+      let file;
+      if (_lcdHandle) {
+        let perm = await _lcdHandle.queryPermission({ mode: 'read' });
+        if (perm !== 'granted' && opts.interactive) perm = await _lcdHandle.requestPermission({ mode: 'read' });
+        if (perm !== 'granted') {
+          _lcdNeedsGesture = true;
+          meta.lastStatus = 'Permission needed — will re-check on your next click';
+          lcdSaveMeta(meta);
+          return 'permission';
+        }
+        _lcdNeedsGesture = false;
+        file = await _lcdHandle.getFile();
+      } else file = _lcdFile;
+      meta.fileName = file.name;
+      meta.lastChecked = Date.now();
+      const sameFile = meta.lastModified === file.lastModified && meta.size === file.size;
+      if (!opts.force && sameFile && meta.indexed && meta.v === 3 && meta.iso === iso && lcdLoadIndex()[iso]) {
+        meta.lastStatus = 'No change since last check';
+        lcdSaveMeta(meta);
+        return 'unchanged';
+      }
+      // read the file, keep ONLY this date's entries (replacing the previously loaded date), then let go of the parsed data
+      let data = JSON.parse(await file.text());
+      const day = lcdStoreDate(data, iso);
+      data = null;
+      if (!day) { meta.lastStatus = 'Could not store the date (browser storage full)'; lcdSaveMeta(meta); return 'error'; }
+      meta.lastModified = file.lastModified; meta.size = file.size; meta.indexed = true; meta.v = 3;
+      meta.iso = iso; meta.dateFunctions = Object.keys(day).length;
+      delete meta.dates; delete meta.functions;
+      meta.lastStatus = 'Changes for the selected date fetched from the file';
+      lcdSaveMeta(meta);
+      return 'updated';
+    } catch (e) {
+      meta.lastStatus = 'Could not read the file: ' + (e && e.message ? e.message : e);
+      lcdSaveMeta(meta);
+      return 'error';
+    }
+  })().then(r => { _lcdBusy = null; lcdAfterCheck(); return r; }, e => { _lcdBusy = null; lcdAfterCheck(); return 'error'; });
+  return _lcdBusy;
+}
+
+function lcdAfterCheck() {
+  try { lcdUpdateButton(); } catch (e) {}
+  if (typeof activeMastersTab !== 'undefined' && activeMastersTab === 'lambdaAutoDetect') {
+    const modal = document.getElementById('masters-modal');
+    if (modal && !modal.classList.contains('hidden') && typeof renderMastersContent === 'function') renderMastersContent();
+  }
+}
+
+// "Lambda changes (N)" button on the log table header, before Copy.
+function lcdUpdateButton() {
+  const btn = document.getElementById('lambda-changes-btn');
+  const grp = document.getElementById('lambda-changes-group');
+  if (!btn || !grp) return;
+  const meta = lcdLoadMeta();
+  // shown only while "Lambda function logging" is enabled (and a change-log JSON has been selected)
+  const on = (typeof isLambdaLoggingEnabled === 'function') && isLambdaLoggingEnabled() && !!meta.fileName;
+  grp.style.display = on ? '' : 'none';
+  const rf = document.getElementById('lambda-changes-refetch');
+  if (rf) rf.classList.toggle('busy', !!_lcdBusy);
+  if (!on) return;
+  const iso = getSelectedDate();
+  if (!lcdLoadIndex()[iso] && _lcdWantIso !== iso && !_lcdBusy && (_lcdHandle || _lcdFile)) {
+    _lcdWantIso = iso; // date changed: load just this date from the file (the previous date's data is replaced), then refresh the button
+    lcdCheck({ iso, interactive: false });
+  } else if (lcdLoadIndex()[iso]) _lcdWantIso = null;
+  const names = lcdNamesForDate(iso);
+  const cnt = document.getElementById('lambda-changes-count');
+  if (cnt) cnt.textContent = names.length;
+  btn.title = names.length ? ('Lambda functions changed on this date:\n' + names.join('\n')) : 'No Lambda function changes found for this date';
+}
+// Click action is added in the next feature.
+function lcdButtonClick() { /* intentionally empty for now */ }
+// Suffix button: force a fresh read of the JSON file and reload just the selected date (the file is only read, never changed).
+function lcdRefetch() {
+  if (_lcdBusy) return;
+  if (!_lcdHandle && !_lcdFile) { lcdPickFile(); return; }
+  _lcdWantIso = null;
+  const p = lcdCheck({ force: true, interactive: true, iso: getSelectedDate() });
+  try { lcdUpdateButton(); } catch (e) {}
+  return p;
+}
+
+async function lcdPickFile() {
+  if (!lcdSupported()) { const inp = document.getElementById('lcd-fallback-input'); if (inp) inp.click(); return; }
+  try {
+    const [h] = await window.showOpenFilePicker({ multiple: false, types: [{ description: 'Lambda change log (JSON)', accept: { 'application/json': ['.json'] } }] });
+    _lcdHandle = h;
+    await lcdIdbPut(h);
+    _lcdFile = null; _lcdWantIso = null;
+    const m = lcdLoadMeta(); m.fileName = h.name; m.lastModified = 0; m.size = 0; m.indexed = false; lcdSaveMeta(m);
+    await lcdCheck({ force: true, interactive: true });
+  } catch (e) { if (!e || e.name !== 'AbortError') console.warn('Lambda change file pick failed', e); }
+}
+// Browsers without the File System Access API: one-time read, no automatic re-checks.
+function lcdFallbackPicked(input) {
+  const f = input.files && input.files[0]; if (!f) return;
+  f.text().then(t => {
+    _lcdHandle = null; _lcdFile = f; // keep the File reference only; its content is re-read per date
+    const iso = getSelectedDate();
+    let data = JSON.parse(t);
+    const day = lcdStoreDate(data, iso) || {};
+    data = null;
+    _lcdWantIso = null;
+    lcdSaveMeta({ fileName: f.name, lastModified: f.lastModified, size: f.size, indexed: true, v: 3, iso, lastChecked: Date.now(), dateFunctions: Object.keys(day).length, lastStatus: 'Loaded for the selected date (this browser cannot detect later file edits automatically)' });
+    lcdAfterCheck();
+  }).catch(e => { const m = lcdLoadMeta(); m.lastStatus = 'Could not read the file: ' + e.message; lcdSaveMeta(m); lcdAfterCheck(); });
+  input.value = '';
+}
+function lcdClear() {
+  _lcdHandle = null; _lcdFile = null; _lcdWantIso = null;
+  lcdIdbDel().catch(() => {});
+  try { localStorage.removeItem(LCD_META_KEY); localStorage.removeItem(LCD_INDEX_KEY); } catch (e) {}
+  lcdAfterCheck();
+}
+
+function renderLambdaAutoDetectHTML() {
+  const m = lcdLoadMeta();
+  const fmt = ts => ts ? new Date(ts).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+  const hasFile = !!m.fileName;
+  const supported = lcdSupported();
+  const row = (k, v) => `<div style="display:flex;gap:8px;font-size:12.5px;padding:3px 0"><span style="width:130px;color:var(--text-tertiary)">${k}</span><span style="flex:1;color:var(--text-primary);word-break:break-word">${v}</span></div>`;
+  return `<div style="padding:4px 2px;max-width:640px">
+    <div style="font-size:15px;font-weight:600;margin-bottom:4px"><i class="ti ti-radar" style="color:var(--blue-mid)"></i> Auto Change Detect</div>
+    <div style="font-size:12.5px;color:var(--text-secondary);margin-bottom:12px">Pick the Lambda change-log JSON on this computer. It is re-checked when the app loads and after every task completion, and is only read again when the file has changed. The changed function names for the date selected in the header appear on the <b>Lambda changes</b> button above the log table.</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+      <button class="btn btn-primary" onclick="lcdPickFile()"><i class="ti ti-file-search"></i> ${hasFile ? 'Change JSON file' : 'Select JSON file'}</button>
+      ${hasFile && supported ? `<button class="btn" onclick="lcdCheck({force:true,interactive:true})"><i class="ti ti-refresh"></i> Check now</button>` : ''}
+      ${hasFile ? `<button class="btn" onclick="lcdClear()"><i class="ti ti-x"></i> Remove</button>` : ''}
+    </div>
+    <input type="file" id="lcd-fallback-input" accept=".json,application/json" style="display:none" onchange="lcdFallbackPicked(this)" />
+    ${hasFile ? `<div style="border:1px solid var(--border-md);border-radius:var(--radius-md);padding:8px 12px">
+      ${row('File', esc(m.fileName))}
+      ${row('File modified', fmt(m.lastModified))}
+      ${row('Last checked', fmt(m.lastChecked))}
+      ${row('Status', esc(m.lastStatus || '—'))}
+      ${row('Loaded date', m.iso ? (esc(m.iso) + ' · ' + (m.dateFunctions || 0) + ' functions (region ignored)') : '—')}
+    </div>` : `<div style="font-size:12.5px;color:var(--text-tertiary)">No file selected yet.</div>`}
+    ${supported ? '' : `<div style="font-size:12px;color:var(--text-tertiary);margin-top:10px">This browser cannot keep a link to the file, so it is read once when selected. Use Chrome or Edge on Windows for automatic re-checks.</div>`}
+  </div>`;
+}
+
+// App load: reload the handle and check (silently if permission is already granted); otherwise retry on the first click.
+function lcdInit() {
+  if (!lcdSupported()) { lcdUpdateButton(); return; }
+  lcdIdbGet().then(h => { _lcdHandle = h || null; lcdUpdateButton(); if (_lcdHandle) lcdCheck({ interactive: false }); }).catch(() => {});
+  document.addEventListener('click', () => { if (_lcdNeedsGesture) lcdCheck({ interactive: true }); }, true);
+}
+// Called after a task is completed.
+function lcdOnTaskComplete() { if (lcdSupported()) lcdCheck({ interactive: true }); }
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 loadState();
 try { renderHeaderAvatar(); } catch (e) {}
@@ -25666,6 +25916,7 @@ updateTaskVisibility();
 updateSummaryButtonVisibility();
 initBreakTimer();
 initAutoBackup();
+lcdInit();
 if (!tasks.some(t => !isTaskDeleted(t))) addTask();
 
 // Scheduled recurring tasks (plan.startTime) are hidden until their exact
