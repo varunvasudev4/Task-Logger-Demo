@@ -12631,12 +12631,32 @@ function toggleLogRowActionsMenu(evt, rowIdx) {
   f.style.visibility = 'hidden';
   f.style.display = 'block';
   const r = btn.getBoundingClientRect();
-  const mw = f.offsetWidth, mh = f.offsetHeight, vw = window.innerWidth, vh = window.innerHeight;
-  let left = Math.min(Math.max(4, r.right - mw), vw - mw - 4);
-  let top = r.bottom + 4;
-  if (top + mh > vh - 4) top = Math.max(4, r.top - mh - 4);   // flip above when no room below
+  const vw = document.documentElement.clientWidth || window.innerWidth;
+  const vh = document.documentElement.clientHeight || window.innerHeight;
+  const gap = 4, pad = 6;
+  f.style.maxHeight = (vh - pad * 2) + 'px';
+  f.style.overflowY = 'auto';
+  const mw = f.offsetWidth, mh = f.offsetHeight;
+  let left, top;
+  const roomBelow = vh - r.bottom - gap - pad, roomAbove = r.top - gap - pad;
+  if (mh <= roomBelow) {            // below the button, right edges aligned
+    top = r.bottom + gap; left = r.right - mw;
+  } else if (mh <= roomAbove) {     // above the button, right edges aligned
+    top = r.top - gap - mh; left = r.right - mw;
+  } else {                          // tall menu on a short screen: sit beside the button
+    left = r.left - gap - mw;
+    top = r.top + r.height / 2 - mh / 2;
+  }
+  left = Math.min(Math.max(pad, left), vw - mw - pad);
+  top = Math.min(Math.max(pad, top), vh - mh - pad);
   f.style.left = left + 'px';
   f.style.top = top + 'px';
+  // Correct for any ancestor that shifts fixed positioning (transform/filter/fullscreen host).
+  const fr = f.getBoundingClientRect();
+  if (Math.abs(fr.left - left) > 1 || Math.abs(fr.top - top) > 1) {
+    f.style.left = (left - (fr.left - left)) + 'px';
+    f.style.top = (top - (fr.top - top)) + 'px';
+  }
   f.style.visibility = '';
 }
 document.addEventListener('click', (e) => {
