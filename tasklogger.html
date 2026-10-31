@@ -531,6 +531,7 @@ html.is-touch .pending-card-actions { opacity: 1; }
 .lam-fn-chip { max-width: 190px; overflow: hidden; text-overflow: ellipsis; }
 .lam-fn-chip.change { background: color-mix(in srgb, var(--blue-mid) 14%, transparent); border-color: var(--blue-mid); color: var(--blue-dark); }
 .lam-fn-chips-cell { display: flex; margin-top: 3px; }
+.lam-fn-count { cursor: help; }
 .cm-lambda-fns { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 8px 20px 0; font-size: 12px; color: var(--text-secondary); }
 .cm-lambda-fns.hidden { display: none; }
 #lambda-log-modal { z-index: 130; }
@@ -19881,7 +19882,7 @@ function cmLambdaRefresh() {
   if (fl) {
     const tk = _cmLambda.taskId != null ? tasks.find(t => t && t.id === _cmLambda.taskId) : null;
     const names = lamFnNamesFor(_cmLambda.linkId, (tk && tk._sync && tk._sync.syncId) || null);
-    fl.innerHTML = names.length ? '<i class="ti ti-function" style="color:var(--purple-mid)"></i> Linked functions: ' + lamFnChipsHtml(names, 8) : '';
+    fl.innerHTML = names.length ? '<i class="ti ti-function" style="color:var(--purple-mid)"></i> Linked functions: ' + lamFnCountHtml(names) : '';
     fl.classList.toggle('hidden', !names.length);
   }
 }
@@ -20846,9 +20847,15 @@ function lamFnChipsHtml(list, max) {
   const more = list.length > max ? `<span class="lambda-chip lam-fn-chip" title="${esc(list.slice(max).map(x => x.name).join(', '))}">+${list.length - max}</span>` : '';
   return list.slice(0, max).map(one).join('') + more;
 }
+// Task card + Complete / Edit popup: just the number of linked functions; hovering it lists the names (app tooltip, one per line).
+function lamFnCountHtml(list) {
+  if (!list || !list.length) return '';
+  const n = list.length;
+  return `<span class="lambda-chip lam-fn-chip lam-fn-count" tabindex="0" title="${esc(list.map(x => x.name).join('\n'))}" aria-label="${n} linked function${n === 1 ? '' : 's'}"><i class="ti ti-function" style="font-size:11px"></i>${n}</span>`;
+}
 function lamTaskChipsHtml(task) {
   if (!task || !isLambdaLoggingEnabled()) return '';
-  return lamFnChipsHtml(lamFnNamesFor(task.id, (task._sync && task._sync.syncId) || null), 3);
+  return lamFnCountHtml(lamFnNamesFor(task.id, (task._sync && task._sync.syncId) || null));
 }
 // Task cards already on screen: redraw only their chip strip after a link / unlink / edit.
 function lamRefreshTaskChips() {
