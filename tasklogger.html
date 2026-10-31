@@ -695,6 +695,36 @@ html.is-touch .pending-card-actions { opacity: 1; }
 .lcd-fn { font-weight: 600; overflow-wrap: anywhere; }
 .lcd-sub { font-size: 11.5px; color: var(--text-tertiary); margin-top: 3px; overflow-wrap: anywhere; }
 .lcd-link-btn { padding: 4px 10px; font-size: 12px; }
+
+/* Lambda change viewer (View change button in the Lambda changes popup): per-version file diffs read from the JSON on demand */
+.lcd-view-head { padding: 12px 16px 6px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.lcd-ver { margin: 8px 16px; border: 1px solid var(--border-md); border-radius: var(--radius-md); background: var(--bg); overflow: hidden; }
+.lcd-ver > summary { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 9px 12px; cursor: pointer; font-weight: 600; font-size: 13px; background: var(--bg-secondary); list-style: none; }
+.lcd-ver > summary::-webkit-details-marker { display: none; }
+.lcd-ver > summary .lcd-caret, .lcd-file > summary .lcd-caret { transition: transform .15s; color: var(--text-tertiary); }
+.lcd-ver[open] > summary .lcd-caret, .lcd-file[open] > summary .lcd-caret { transform: rotate(90deg); }
+.lcd-file { border-top: 1px solid var(--border-md); }
+.lcd-file > summary { display: flex; align-items: center; gap: 8px; padding: 8px 12px; cursor: pointer; list-style: none; font-size: 12.5px; }
+.lcd-file > summary::-webkit-details-marker { display: none; }
+.lcd-file > summary code { font-family: var(--font-mono); overflow-wrap: anywhere; flex: 1; min-width: 0; }
+.lcd-st { border-radius: 10px; font-size: 10.5px; font-weight: 600; padding: 1px 8px; text-transform: uppercase; white-space: nowrap; }
+.lcd-st.modified { background: var(--blue-bg); color: var(--blue-dark); }
+.lcd-st.added { background: var(--green-bg); color: var(--green-dark); }
+.lcd-st.deleted { background: var(--red-bg); color: var(--red-mid); }
+.lcd-pm { font-family: var(--font-mono); font-size: 11px; white-space: nowrap; }
+.lcd-pm .p { color: var(--green-dark); } .lcd-pm .m { color: var(--red-mid); margin-left: 6px; }
+.lcd-diff { overflow-x: auto; border-top: 1px dashed var(--border-md); font-family: var(--font-mono); font-size: 12px; }
+.lcd-hunk { padding: 3px 12px; background: var(--bg-secondary); color: var(--text-tertiary); font-size: 11px; }
+.lcd-dl { display: flex; min-width: max-content; }
+.lcd-dl .n { width: 46px; flex-shrink: 0; text-align: right; padding: 0 8px 0 0; color: var(--text-tertiary); user-select: none; }
+.lcd-dl .s { width: 16px; flex-shrink: 0; text-align: center; user-select: none; }
+.lcd-dl .t { white-space: pre; padding-right: 12px; }
+.lcd-dl.rm { background: var(--red-bg); } .lcd-dl.rm .s { color: var(--red-mid); }
+.lcd-dl.ad { background: var(--green-bg); } .lcd-dl.ad .s { color: var(--green-dark); }
+.lcd-dl.cx { color: var(--text-tertiary); }
+.lcd-note { padding: 10px 14px; font-size: 12.5px; color: var(--text-tertiary); }
+.lcd-more { margin: 6px 12px 10px; }
+
 .lcd-pick-list { display: flex; flex-direction: column; gap: 8px; padding: 12px 16px; max-height: 60vh; overflow: auto; }
 .lcd-pick-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; text-align: left; width: 100%; padding: 10px 12px; border: 1px solid var(--border-md); border-radius: var(--radius-md); background: var(--bg); color: var(--text-primary); font: inherit; cursor: pointer; }
 .lcd-pick-item:hover:not(:disabled) { border-color: var(--blue-mid); background: var(--blue-bg); }
@@ -26505,7 +26535,7 @@ function lcdpClose() {
   _lcdp = null;
 }
 function lcdpRefreshIfOpen() { if (_lcdp) lcdpRender(); }
-function lcdpBack() { if (!_lcdp) return; _lcdp.view = 'list'; _lcdp.pick = null; lcdpRender(); }
+function lcdpBack() { if (!_lcdp) return; _lcdp.view = 'list'; _lcdp.pick = null; _lcdp.detail = null; lcdpRender(); }
 function lcdpRender() {
   if (!_lcdp) return;
   const body = document.getElementById('lcdp-body'), foot = document.getElementById('lcdp-footer'), title = document.getElementById('lcdp-title');
@@ -26527,6 +26557,7 @@ function lcdpRender() {
     foot.innerHTML = `<button type="button" class="btn" onclick="lcdpBack()">Back</button><button type="button" class="btn" onclick="lcdpClose()">Close</button>`;
     return;
   }
+  if (_lcdp.view === 'detail' && _lcdp.detail) { lcdvRender(); return; }
   if (_lcdp.view === 'unlink' && _lcdp.unlinkIdx != null && rows[_lcdp.unlinkIdx]) {
     const r = rows[_lcdp.unlinkIdx];
     if (!r.linkedRecs.length) { _lcdp.view = 'list'; _lcdp.unlinkIdx = null; lcdpRender(); return; }
@@ -26553,7 +26584,7 @@ function lcdpRender() {
       rows.map((r, i) => `<tr><td><div class="lcd-fn">${esc(r.name)}</div></td><td><span class="lcd-chip ${r.kind}">${r.kind === 'new' ? 'New' : 'Change'}</span></td>` +
         `<td><span class="lcd-chip ic ${r.linked ? 'linked' : 'unlinked'}" title="${r.linked ? 'Linked to a task' : 'Not linked to any task'}" aria-label="${r.linked ? 'Linked' : 'Unlinked'}"><i class="ti ${r.linked ? 'ti-link' : 'ti-unlink'}"></i></span>${r.labels.length ? `<div class="lcd-sub">${r.labels.map(x => esc(x)).join(' · ')}</div>` : ''}</td>` +
         `<td>${savedChip(r)}</td>` +
-        `<td style="text-align:right"><div class="lcd-acts"><button type="button" class="btn-icon lcd-ic" onclick="lcdpLink(${i})" title="${r.linked ? 'Link another task' : 'Link to task'}" aria-label="${r.linked ? 'Link another task' : 'Link to task'}"><i class="ti ti-link"></i></button>` +
+        `<td style="text-align:right"><div class="lcd-acts"><button type="button" class="btn-icon lcd-ic" onclick="lcdpView(${i})" title="View change (the file changes made on this date)" aria-label="View change"><i class="ti ti-eye"></i></button><button type="button" class="btn-icon lcd-ic" onclick="lcdpLink(${i})" title="${r.linked ? 'Link another task' : 'Link to task'}" aria-label="${r.linked ? 'Link another task' : 'Link to task'}"><i class="ti ti-link"></i></button>` +
         (r.linked ? `<button type="button" class="btn-icon lcd-ic" onclick="lcdpUnlink(${i})" title="Unlink from task (the record stays in the table)" aria-label="Unlink from task"><i class="ti ti-unlink"></i></button>` : '') +
         `<button type="button" class="btn-icon lcd-ic" ${r.saved === true ? 'disabled' : ''} onclick="lcdpSaveOnly(${i})" aria-label="Save only" title=""${r.saved === true ? 'Already saved in the table' : 'Save to the ' + esc(LAMBDA_COLUMN_STORES[r.kind === 'new' ? LCD_FN_STORE : LCD_CH_STORE].title) + ' table without linking to any task'}"><i class="ti ti-device-floppy"></i></button></div></td></tr>`).join('') +
       '</tbody></table></div>';
@@ -26561,6 +26592,118 @@ function lcdpRender() {
   body.innerHTML = html;
   foot.innerHTML = `<button type="button" class="btn" onclick="lcdpClose()">Close</button>`;
   try { lcdUpdateButton(); } catch (e) {}   // keep the linked / unlinked counts on the button in step
+}
+// ── View change: shows what changed in the function's files on the selected date (read-only) ──────────
+// The app keeps only names / times / statuses (never the diff lines). So the JSON file is read again on demand, ONLY this
+// function's entries for this date are pulled out and shown, and the parsed file is released straight away.
+// Needs the desktop where the JSON file was selected (same permission rules as the Auto Change Detect re-fetch).
+function lcdvSlice(data, iso, name) {
+  const vers = [];
+  if (!data || typeof data !== 'object') return vers;
+  Object.keys(data).forEach(rawFn => {
+    if (!lcdSameFunction(rawFn, name)) return;
+    const versions = data[rawFn];
+    if (!versions || typeof versions !== 'object') return;
+    const region = (/@([a-z0-9-]+)$/i.exec(rawFn) || [])[1] || '';
+    Object.keys(versions).forEach(ts => {
+      const m = /^(\d{2})-(\d{2})-(\d{4})(?:\s+(\d{2}:\d{2}:\d{2}))?/.exec(ts);
+      if (!m || (m[3] + '-' + m[2] + '-' + m[1]) !== iso) return;
+      const fobj = versions[ts] || {}, files = [];
+      Object.keys(fobj).forEach(f => {
+        const o = fobj[f] || {}, blocks = Array.isArray(o.change_blocks) ? o.change_blocks : [];
+        let plus = 0, minus = 0;
+        blocks.forEach(b => { plus += (b.added || []).length; minus += (b.removed || []).length; });
+        files.push({ file: f, status: o.status || 'modified', blocks, plus, minus });
+      });
+      files.sort((x, y) => x.file.localeCompare(y.file));
+      vers.push({ ts, time: m[4] || '', region, files });
+    });
+  });
+  vers.sort((x, y) => y.time.localeCompare(x.time));   // newest first
+  return vers;
+}
+async function lcdvLoad(iso, name) {
+  if (!_lcdHandle && !_lcdFile) { try { _lcdHandle = await lcdIdbGet(); } catch (e) {} }
+  if (!_lcdHandle && !_lcdFile) return { err: 'nofile' };
+  let file;
+  if (_lcdHandle) {
+    let perm = await _lcdHandle.queryPermission({ mode: 'read' });
+    if (perm !== 'granted') perm = await _lcdHandle.requestPermission({ mode: 'read' });   // runs inside the button click
+    if (perm !== 'granted') return { err: 'permission' };
+    file = await _lcdHandle.getFile();
+  } else file = _lcdFile;
+  let data = JSON.parse(await file.text());
+  const vers = lcdvSlice(data, iso, name);
+  data = null;
+  return { vers };
+}
+function lcdpView(i) {
+  if (!_lcdp) return;
+  const r = _lcdp.rows[i]; if (!r) return;
+  const token = {};
+  _lcdp.view = 'detail'; _lcdp.detail = { name: r.name, kind: r.kind, state: 'loading', token, vers: [] };
+  lcdpRender();
+  lcdvLoad(_lcdp.iso, r.name).then(res => {
+    if (!_lcdp || !_lcdp.detail || _lcdp.detail.token !== token) return;
+    if (res.err) { _lcdp.detail.state = res.err; } else { _lcdp.detail.state = 'ready'; _lcdp.detail.vers = res.vers; }
+    lcdpRender();
+  }).catch(e => {
+    if (!_lcdp || !_lcdp.detail || _lcdp.detail.token !== token) return;
+    _lcdp.detail.state = 'error'; _lcdp.detail.msg = (e && e.message) ? e.message : String(e);
+    lcdpRender();
+  });
+}
+function lcdvRender() {
+  const body = document.getElementById('lcdp-body'), foot = document.getElementById('lcdp-footer'), title = document.getElementById('lcdp-title');
+  const d = _lcdp.detail, dateTxt = fmtDate(new Date(_lcdp.iso + 'T00:00:00'));
+  title.textContent = 'Change details — ' + d.name;
+  foot.innerHTML = `<button type="button" class="btn" onclick="lcdpBack()">Back</button><button type="button" class="btn" onclick="lcdpClose()">Close</button>`;
+  if (d.state === 'loading') { body.innerHTML = `<div class="lcd-note"><i class="ti ti-loader-2" style="animation:lcd-spin .8s linear infinite"></i> Reading the change log…</div>`; return; }
+  const msgs = {
+    nofile: 'The line-by-line changes are read from the JSON file, which is only selected on a desktop (Masters → Lambda Logging Masters → Auto Change Detect). Open this on that desktop to see them.',
+    permission: 'Permission to read the JSON file was not granted. Click View change again and allow access.',
+    error: 'Could not read the JSON file' + (d.msg ? ' (' + d.msg + ')' : '') + '.'
+  };
+  if (msgs[d.state]) { body.innerHTML = `<div class="lm-hist-empty">${esc(msgs[d.state])}</div>`; return; }
+  if (!d.vers.length) { body.innerHTML = `<div class="lm-hist-empty">No changes for <b>${esc(d.name)}</b> found in the JSON for ${esc(dateTxt)}.</div>`; return; }
+  const nFiles = d.vers.reduce((a, v) => a + v.files.length, 0);
+  let html = `<div class="lcd-view-head"><span class="lcd-chip ${d.kind}">${d.kind === 'new' ? 'New' : 'Change'}</span><span class="lm-hist-sub" style="padding:0">${esc(dateTxt)} · ${d.vers.length} change${d.vers.length === 1 ? '' : 's'} · ${nFiles} file${nFiles === 1 ? '' : 's'}</span></div>`;
+  d.vers.forEach((v, vi) => {
+    html += `<details class="lcd-ver" ${vi === 0 ? 'open' : ''}><summary><i class="ti ti-chevron-right lcd-caret"></i><i class="ti ti-clock" style="color:var(--blue-mid)"></i> ${esc(v.time || v.ts)}${v.region ? `<span class="lcd-chip change">${esc(v.region)}</span>` : ''}<span class="lcd-sub" style="margin:0">${v.files.length} file${v.files.length === 1 ? '' : 's'}</span></summary>`;
+    v.files.forEach((f, fi) => {
+      html += `<details class="lcd-file" data-v="${vi}" data-f="${fi}" ${(vi === 0 && v.files.length === 1) ? 'data-auto="1"' : ''}><summary><i class="ti ti-chevron-right lcd-caret"></i><code>${esc(f.file)}</code><span class="lcd-pm"><span class="p">+${f.plus}</span><span class="m">−${f.minus}</span></span><span class="lcd-st ${esc(f.status)}">${esc(f.status)}</span></summary><div class="lcd-diff"></div></details>`;
+    });
+    html += `</details>`;
+  });
+  body.innerHTML = html;
+  body.querySelectorAll('details.lcd-file').forEach(el => {
+    el.addEventListener('toggle', () => { if (el.open) lcdvFill(el); });
+    if (el.dataset.auto) el.open = true;
+  });
+}
+const LCDV_CAP = 400;   // changed lines drawn at first; the rest on request
+function lcdvFill(el, all) {
+  if (el.dataset.done && !all) return;
+  const d = _lcdp && _lcdp.detail; if (!d) return;
+  const f = (d.vers[+el.dataset.v] || { files: [] }).files[+el.dataset.f]; if (!f) return;
+  const box = el.querySelector('.lcd-diff'); el.dataset.done = '1';
+  if (!f.blocks.length) {
+    box.innerHTML = `<div class="lcd-note">${f.status === 'added' ? 'This file was added.' : f.status === 'deleted' ? 'This file was deleted.' : 'No line details are recorded for this file.'} The log does not hold its lines.</div>`;
+    return;
+  }
+  let used = 0, html = '', cut = false;
+  const line = (cls, num, sign, text) => `<div class="lcd-dl ${cls}"><span class="n">${num == null ? '' : num}</span><span class="s">${sign}</span><span class="t">${esc(text == null ? '' : text) || ' '}</span></div>`;
+  for (const b of f.blocks) {
+    const rm = b.removed || [], ad = b.added || [], cx = b.context || [];
+    if (!all && used + rm.length + ad.length > LCDV_CAP && used > 0) { cut = true; break; }
+    html += `<div class="lcd-hunk">@@ −${b.old_start_line == null ? '?' : b.old_start_line} +${b.new_start_line == null ? '?' : b.new_start_line} @@</div>`;
+    rm.forEach(x => { html += line('rm', x.line_num, '−', x.content); });
+    ad.forEach(x => { html += line('ad', x.line_num, '+', x.content); });
+    cx.forEach(x => { html += line('cx', null, '', x); });   // surrounding lines (the log does not say whether they sit above or below)
+    used += rm.length + ad.length;
+  }
+  if (cut) html += `<button type="button" class="btn lcd-more" onclick="lcdvFill(this.closest('details'), true)">Show all changes in this file</button>`;
+  box.innerHTML = html;
 }
 function lcdpLink(i) {
   if (!_lcdp) return;
