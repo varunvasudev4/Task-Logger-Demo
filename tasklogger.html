@@ -513,11 +513,13 @@ html.is-touch .pending-card-actions { opacity: 1; }
 .lm-sel-th, .lm-sel-cell { width: 40px; text-align: center; }
 .lm-edit-th, .lm-edit-cell { width: 44px; text-align: center; white-space: nowrap; }
 .lm-edit-th.lm-has-hist, .lm-edit-cell.lm-has-hist { width: 108px; }
-.lm-edit-th.lm-has-link, .lm-edit-cell.lm-has-link { width: 76px; }
+.lm-edit-th.lm-has-link, .lm-edit-cell.lm-has-link { width: 108px; }
 .lm-row-hist { background: none; border: none; padding: 3px 4px; cursor: pointer; color: var(--text-tertiary); border-radius: var(--radius-md); line-height: 1; font-size: 15px; }
 .lm-row-hist:hover { color: var(--purple-mid); background: var(--bg-secondary); }
 .lm-row-tasks { background: none; border: none; padding: 3px 4px; cursor: pointer; color: var(--text-tertiary); border-radius: var(--radius-md); line-height: 1; font-size: 15px; }
 .lm-row-tasks:hover { color: var(--blue-mid); background: var(--bg-secondary); }
+.lm-row-view { background: none; border: none; padding: 3px 4px; cursor: pointer; color: var(--text-tertiary); border-radius: var(--radius-md); line-height: 1; font-size: 15px; }
+.lm-row-view:hover { color: var(--green-dark); background: var(--bg-secondary); }
 /* Linked tasks popup (tasks that added / changed one Lambda function) */
 #lm-tasks-modal .modal { max-width: 1100px; width: 100%; }
 #lm-tasks-modal .modal-body { padding: 0; }
@@ -20708,7 +20710,7 @@ function lmRenderTable() {
   const widths = lmWidths[k];
   const hasHist = k === 'lambdaFunctionColumns';   // the Functions tab gets a History button beside Edit
   const hasLink = k === 'lambdaChangeColumns';     // the Changes tab gets a Linked task button beside Edit
-  const colgroup = '<col data-col="__sel" style="width:40px">' + cols.map(c => `<col data-col="${esc(c.key)}" style="width:${widths[c.key] || defaultLogColumnWidth(c)}px">`).join('') + `<col data-col="__edit" style="width:${hasHist ? 108 : hasLink ? 76 : 44}px">`;
+  const colgroup = '<col data-col="__sel" style="width:40px">' + cols.map(c => `<col data-col="${esc(c.key)}" style="width:${widths[c.key] || defaultLogColumnWidth(c)}px">`).join('') + `<col data-col="__edit" style="width:${hasHist ? 108 : hasLink ? 108 : 44}px">`;
   const thead = '<th data-col="__sel" class="lm-sel-th"><input type="checkbox" id="lm-all-cb" title="Select all" aria-label="Select all rows"></th>' + cols.map(c => {
     const eS = lmEffectiveSort(k, s), arrow = eS && eS.key === c.key ? (eS.dir === 'asc' ? '▲' : '▼') : '';
     return `<th class="log-th-sortable" data-col="${esc(c.key)}">${esc(c.label)}<span class="col-sort-arrow">${arrow}</span>` +
@@ -20718,7 +20720,7 @@ function lmRenderTable() {
   const tbody = rows.map(r => `<tr data-id="${esc(r.id)}"><td data-col="__sel" class="lm-sel-cell"><input type="checkbox" class="lm-row-cb" data-id="${esc(r.id)}" aria-label="Select row"></td>` + cols.map(c => {
     const v = lmDisplayValue(c, r.values && r.values[c.key]);
     return `<td data-col="${esc(c.key)}" title="${esc(v)}">${esc(v)}</td>`;
-  }).join('') + `<td data-col="__edit" class="lm-edit-cell${hasHist ? ' lm-has-hist' : ''}${hasLink ? ' lm-has-link' : ''}">${hasHist ? `<button type="button" class="lm-row-hist" data-id="${esc(r.id)}" title="History (changes made to this function)" aria-label="History"><i class="ti ti-history"></i></button><button type="button" class="lm-row-tasks" data-id="${esc(r.id)}" title="Linked tasks (tasks that added or changed this function)" aria-label="Linked tasks"><i class="ti ti-link"></i></button>` : ''}${hasLink ? `<button type="button" class="lm-row-tasks" data-id="${esc(r.id)}" title="Linked task (the task that made this change)" aria-label="Linked task"><i class="ti ti-link"></i></button>` : ''}<button type="button" class="lm-row-edit" data-id="${esc(r.id)}" title="Edit this record" aria-label="Edit record"><i class="ti ti-pencil"></i></button></td></tr>`).join('');
+  }).join('') + `<td data-col="__edit" class="lm-edit-cell${hasHist ? ' lm-has-hist' : ''}${hasLink ? ' lm-has-link' : ''}">${hasHist ? `<button type="button" class="lm-row-hist" data-id="${esc(r.id)}" title="History (changes made to this function)" aria-label="History"><i class="ti ti-history"></i></button><button type="button" class="lm-row-tasks" data-id="${esc(r.id)}" title="Linked tasks (tasks that added or changed this function)" aria-label="Linked tasks"><i class="ti ti-link"></i></button>` : ''}${hasLink ? `<button type="button" class="lm-row-view" data-id="${esc(r.id)}" title="View change (the file changes from the change log)" aria-label="View change"><i class="ti ti-eye"></i></button><button type="button" class="lm-row-tasks" data-id="${esc(r.id)}" title="Linked task (the task that made this change)" aria-label="Linked task"><i class="ti ti-link"></i></button>` : ''}<button type="button" class="lm-row-edit" data-id="${esc(r.id)}" title="Edit this record" aria-label="Edit record"><i class="ti ti-pencil"></i></button></td></tr>`).join('');
   const msg = rows.length ? '' : `<div class="lm-empty">${total === 0
     ? 'No records yet. Import data with More → Import / Export (choose ' + esc(LAMBDA_COLUMN_STORES[k].title) + ').'
     : 'No records match the current search, filters and date range.'}</div>`;
@@ -20732,6 +20734,8 @@ function lmRenderTable() {
   if (tbl) tbl.addEventListener('click', (e) => {
     const ad = e.target.closest && e.target.closest('.lm-add-btn');
     if (ad) { e.stopPropagation(); lmAddOpen(); return; }
+    const vw = e.target.closest && e.target.closest('.lm-row-view');
+    if (vw) { e.stopPropagation(); lmViewChange(vw.dataset.id); return; }
     const lt = e.target.closest && e.target.closest('.lm-row-tasks');
     if (lt) { e.stopPropagation(); lmTasksOpen(lt.dataset.id, lmActiveTab === 'lambdaChangeColumns'); return; }
     const h = e.target.closest && e.target.closest('.lm-row-hist');
@@ -26640,10 +26644,13 @@ async function lcdvLoad(iso, name) {
 function lcdpView(i) {
   if (!_lcdp) return;
   const r = _lcdp.rows[i]; if (!r) return;
+  lcdvStart(r.name, r.kind);
+}
+function lcdvStart(name, kind) {
   const token = {};
-  _lcdp.view = 'detail'; _lcdp.detail = { name: r.name, kind: r.kind, state: 'loading', token, vers: [] };
+  _lcdp.view = 'detail'; _lcdp.detail = { name, kind, state: 'loading', token, vers: [] };
   lcdpRender();
-  lcdvLoad(_lcdp.iso, r.name).then(res => {
+  lcdvLoad(_lcdp.iso, name).then(res => {
     if (!_lcdp || !_lcdp.detail || _lcdp.detail.token !== token) return;
     if (res.err) { _lcdp.detail.state = res.err; } else { _lcdp.detail.state = 'ready'; _lcdp.detail.vers = res.vers; }
     lcdpRender();
@@ -26653,11 +26660,23 @@ function lcdpView(i) {
     lcdpRender();
   });
 }
+// View change from a row of the Lambda Change Columns table: the change's Name + Date columns pick the entries in the JSON.
+function lmViewChange(id) {
+  const rec = readLambdaStore('lambdaChangeColumns').find(r => r && r.id === id); if (!rec) return;
+  const cols = getLambdaColumns('lambdaChangeColumns'), nc = lcdNameCols().ch, dc = lcdDateCol(cols);
+  const name = lcdRecName(rec, nc);
+  const iso = dc ? lmParseDate(rec.values && rec.values[dc.key], dc) : '';
+  if (!name) { alert('This change has no Name, so it cannot be looked up in the change log.'); return; }
+  if (!iso) { alert('This change has no Date, so it cannot be looked up in the change log.'); return; }
+  _lcdp = { iso, view: 'list', rows: [], pick: null, standalone: true };
+  document.getElementById('lcd-changes-modal').classList.remove('hidden');
+  lcdvStart(name, 'change');
+}
 function lcdvRender() {
   const body = document.getElementById('lcdp-body'), foot = document.getElementById('lcdp-footer'), title = document.getElementById('lcdp-title');
   const d = _lcdp.detail, dateTxt = fmtDate(new Date(_lcdp.iso + 'T00:00:00'));
   title.textContent = 'Change details — ' + d.name;
-  foot.innerHTML = `<button type="button" class="btn" onclick="lcdpBack()">Back</button><button type="button" class="btn" onclick="lcdpClose()">Close</button>`;
+  foot.innerHTML = (_lcdp.standalone ? '' : `<button type="button" class="btn" onclick="lcdpBack()">Back</button>`) + `<button type="button" class="btn" onclick="lcdpClose()">Close</button>`;
   if (d.state === 'loading') { body.innerHTML = `<div class="lcd-note"><i class="ti ti-loader-2" style="animation:lcd-spin .8s linear infinite"></i> Reading the change log…</div>`; return; }
   const msgs = {
     nofile: 'The line-by-line changes are read from the JSON file, which is only selected on a desktop (Masters → Lambda Logging Masters → Auto Change Detect). Open this on that desktop to see them.',
