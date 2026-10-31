@@ -16033,7 +16033,6 @@ function updateLogTable() {
   const cols = getVisibleLogColumns();
   // Linked Lambda button: only on rows whose task (whole history) has Lambda functions / changes linked.
   const lamHas = isLambdaLoggingEnabled() ? elmLinkedChecker() : null;
-  const lamNamesFn = isLambdaLoggingEnabled() ? elmNamesResolver() : null;   // linked function names per row (chips under the task name)
   window._elmAnyOnPage = !!(lamHas && filtered.some(lamHas));
 
   // Render header row dynamically from configured columns (locked columns keep their
@@ -16051,8 +16050,7 @@ function updateLogTable() {
         const descVal = e.heading || (isRunning ? '— pending on completion —' : '');
         const effortDescVal = richTextToPlain(e.description || '').trim();
         const hoverVal = effortDescVal ? (descVal + '\n\n— Task progress / Effort description —\n' + effortDescVal) : descVal;
-        const lamChips = lamNamesFn ? lamFnChipsHtml(lamNamesFn(e), 3) : '';
-        return `<td class="td-desc" data-col="${c.key}" title="${esc(hoverVal)}">${esc(descVal)}${lamChips ? `<div class="lam-fn-chips lam-fn-chips-cell">${lamChips}</div>` : ''}</td>`;
+        return `<td class="td-desc" data-col="${c.key}" title="${esc(hoverVal)}">${esc(descVal)}</td>`;
       }
       if (c.key === 'remark') {
         const remarkVal = richTextToPlain(e.remark || '');
