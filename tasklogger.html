@@ -714,6 +714,8 @@ html.is-touch .pending-card-actions { opacity: 1; }
 .lcd-file > summary { display: flex; align-items: center; gap: 8px; padding: 8px 12px; cursor: pointer; list-style: none; font-size: 12.5px; }
 .lcd-file > summary::-webkit-details-marker { display: none; }
 .lcd-file > summary code { font-family: var(--font-mono); overflow-wrap: anywhere; flex: 1; min-width: 0; }
+.lcd-codebtn { flex: none; width: 26px; height: 26px; color: var(--text-secondary); }
+.lcd-codebtn:hover { color: var(--green-dark); }
 .lcd-st { border-radius: 10px; font-size: 10.5px; font-weight: 600; padding: 1px 8px; text-transform: uppercase; white-space: nowrap; }
 .lcd-st.modified { background: var(--blue-bg); color: var(--blue-dark); }
 .lcd-st.added { background: var(--green-bg); color: var(--green-dark); }
@@ -26785,6 +26787,30 @@ function lmViewChange(id) {
   document.getElementById('lcd-changes-modal').classList.remove('hidden');
   lcdvStart(name, 'change');
 }
+// "View in code" on a file of the change viewer: opens the Code Backup viewer on the backup of this change's date, on that file,
+// scrolled to its first changed line. Same-day backups are tried first; with several that day, the first one taken at/after the
+// change time; when there is no backup that day, the first later backup (it already holds the change).
+function lcdvOpenCode(vi, fi) {
+  const d = _lcdp && _lcdp.detail, v = d && d.vers[vi], f = v && v.files[fi]; if (!f) return;
+  let line = null;
+  (f.blocks || []).forEach(b => (b.added || []).forEach(x => { const n = +x.line_num; if (n > 0 && (line == null || n < line)) line = n; }));
+  cbvOpen(d.name, { chg: { iso: _lcdp.iso, time: v.time || '', file: f.file, line, status: f.status } });
+}
+function cbvSamePath(a, b) {
+  const nz = x => String(x).toLowerCase().replace(/\\/g, '/').replace(/^\.\//, '');
+  a = nz(a); b = nz(b); return a === b || a.endsWith('/' + b) || b.endsWith('/' + a);
+}
+function cbvPickDate(dates, iso, time) {
+  const day = String(iso).replace(/-/g, ''), vk = day + (time ? String(time).replace(/:/g, '').padEnd(6, '0') : '000000');
+  const ks = dates.map((d, i) => ({ i, k: d.key || '' }));
+  const same = ks.filter(x => x.k.slice(0, 8) === day);
+  if (same.length) {
+    const after = same.filter(x => x.k >= vk).sort((a, b) => a.k.localeCompare(b.k))[0];
+    return { i: (after || same.slice().sort((a, b) => b.k.localeCompare(a.k))[0]).i, exact: true };
+  }
+  const later = ks.filter(x => x.k && x.k.slice(0, 8) > day).sort((a, b) => a.k.localeCompare(b.k))[0];
+  return { i: later ? later.i : 0, exact: false };
+}
 function lcdvRender() {
   const body = document.getElementById('lcdp-body'), foot = document.getElementById('lcdp-footer'), title = document.getElementById('lcdp-title');
   const d = _lcdp.detail, dateTxt = fmtDate(new Date(_lcdp.iso + 'T00:00:00'));
@@ -26803,7 +26829,7 @@ function lcdvRender() {
   d.vers.forEach((v, vi) => {
     html += `<details class="lcd-ver" ${vi === 0 ? 'open' : ''}><summary><i class="ti ti-chevron-right lcd-caret"></i><i class="ti ti-clock" style="color:var(--blue-mid)"></i> ${esc(v.time || v.ts)}${v.region ? `<span class="lcd-chip change">${esc(v.region)}</span>` : ''}<span class="lcd-sub" style="margin:0">${v.files.length} file${v.files.length === 1 ? '' : 's'}</span></summary>`;
     v.files.forEach((f, fi) => {
-      html += `<details class="lcd-file" data-v="${vi}" data-f="${fi}" ${(vi === 0 && v.files.length === 1) ? 'data-auto="1"' : ''}><summary><i class="ti ti-chevron-right lcd-caret"></i><code>${esc(f.file)}</code><span class="lcd-pm"><span class="p">+${f.plus}</span><span class="m">−${f.minus}</span></span><span class="lcd-st ${esc(f.status)}">${esc(f.status)}</span></summary><div class="lcd-diff"></div></details>`;
+      html += `<details class="lcd-file" data-v="${vi}" data-f="${fi}" ${(vi === 0 && v.files.length === 1) ? 'data-auto="1"' : ''}><summary><i class="ti ti-chevron-right lcd-caret"></i><code>${esc(f.file)}</code><span class="lcd-pm"><span class="p">+${f.plus}</span><span class="m">−${f.minus}</span></span><span class="lcd-st ${esc(f.status)}">${esc(f.status)}</span><button type="button" class="btn-icon lcd-ic lcd-codebtn" onclick="event.preventDefault();event.stopPropagation();lcdvOpenCode(${vi},${fi})" title="View in code — opens this file in the code backup of the change date" aria-label="View in code"><i class="ti ti-code"></i></button></summary><div class="lcd-diff"></div></details>`;
     });
     html += `</details>`;
   });
@@ -27132,7 +27158,7 @@ function lmViewCode(id) {
 function cbvMsg(html) { document.getElementById('cbv-side').innerHTML = ''; document.getElementById('cbv-main').innerHTML = `<div class="cbv-msg">${html}</div>`; }
 async function cbvOpen(name, opts) {
   opts = opts || {};   // opts.fnDir = exact function folder handle, opts.hl = { kw, cs, files, order, dateName } search highlight (from Search on Code)
-  _cbv = { name, dates: [], di: 0, tree: [], sel: null, open: new Set(), tok: 0, lines: null, line: null, ltok: 0, histP: null, meta: null, hl: opts.hl || null, hlIdx: -1 };
+  _cbv = { name, dates: [], di: 0, tree: [], sel: null, open: new Set(), tok: 0, lines: null, line: null, ltok: 0, histP: null, meta: null, hl: opts.hl || null, hlIdx: -1, chg: opts.chg || null };
   document.getElementById('cbv-title').textContent = (name ? 'Code — ' + name : 'Code') + (opts.hl ? '  ·  search: ' + opts.hl.kw : '');
   document.getElementById('cbv-count').textContent = '';
   document.getElementById('cbv-date').innerHTML = '';
@@ -27154,8 +27180,13 @@ async function cbvOpen(name, opts) {
     _cbv.dates = dates;
     document.getElementById('cbv-date').innerHTML = dates.map((d, i) => `<option value="${i}">${esc(d.name)}${i === 0 ? ' (latest)' : ''}</option>`).join('');
     document.getElementById('cbv-datewrap').title = dates.length + ' backup' + (dates.length === 1 ? '' : 's') + ' available';
-    const hlDate = opts.hl ? dates.findIndex(d => d.name === opts.hl.dateName) : -1;
-    await cbvSetDate(hlDate > 0 ? hlDate : 0);
+    let startIdx = 0;
+    if (opts.hl) { const hi = dates.findIndex(d => d.name === opts.hl.dateName); if (hi > 0) startIdx = hi; }
+    else if (opts.chg) {   // from "View in code" in the change viewer: the backup of the change date
+      const pk = cbvPickDate(dates, opts.chg.iso, opts.chg.time); startIdx = pk.i;
+      document.getElementById('cbv-title').textContent = 'Code — ' + name + '  ·  change ' + formatCustomDate(opts.chg.iso, 'DD-MM-YYYY') + (opts.chg.time ? ' ' + opts.chg.time.slice(0, 5) : '') + ((!pk.exact && dates[0].key) ? ' (no backup that day — nearest later backup shown)' : '');
+    }
+    await cbvSetDate(startIdx);
   } catch (e) { cbvMsg('Could not read the backup folder: ' + esc(e.message)); }
 }
 async function cbvReadTree(dir, base, depth) {
@@ -27181,7 +27212,9 @@ async function cbvSetDate(i) {
   document.getElementById('cbv-count').textContent = files.length + ' file' + (files.length === 1 ? '' : 's');
   const fn = v.name.toLowerCase();
   const hlPick = (v.hl && !prev && v.dates[i].name === v.hl.dateName) ? files.find(f => f.path === v.hl.order[0]) : null;   // first file where the keyword occurs
-  const pick = hlPick || files.find(f => f.path === prev) || files.find(f => /^(index|main|handler|lambda_function)\.\w+$/i.test(f.name)) || files.find(f => f.name.toLowerCase().indexOf(fn) === 0) || files[0];
+  const chgPick = (v.chg && !prev) ? files.find(f => cbvSamePath(f.path, v.chg.file)) : null;   // the file whose change was clicked
+  if (chgPick) v.line = v.chg.line || null;
+  const pick = hlPick || chgPick || files.find(f => f.path === prev) || files.find(f => /^(index|main|handler|lambda_function)\.\w+$/i.test(f.name)) || files.find(f => f.name.toLowerCase().indexOf(fn) === 0) || files[0];
   v.open = new Set(); const mark = (nodes, p) => nodes.forEach(n => { if (n.dir) { if (p && (p === n.path || p.indexOf(n.path + '/') === 0)) v.open.add(n.path); mark(n.kids, p); } }); mark(tree, pick && pick.path);
   if (v.hl && v.dates[i].name === v.hl.dateName) Object.keys(v.hl.files).forEach(p => { const sg = p.split('/'); for (let q = 1; q < sg.length; q++) v.open.add(sg.slice(0, q).join('/')); });   // show every file that has a match
   v.sel = pick ? pick.path : null;
