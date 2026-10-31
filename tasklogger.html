@@ -20406,7 +20406,7 @@ function openLambdaOverlay(tab) {
   lmRenderAll();
 }
 function closeLambdaOverlay() {
-  try { lmsStop(); } catch (e) {}
+  try { lmsClear(); } catch (e) {}
   lmEntClose();
   Object.keys(lmSelected).forEach(k => lmSelected[k].clear());
   const el = document.getElementById('lambda-overlay');
@@ -20416,6 +20416,7 @@ function closeLambdaOverlay() {
 function lmRefreshIfOpen() { if (lmIsOpen() && lmActiveTab !== LMS_TAB) lmRenderAll(); }
 function lmSwitchTab(k) {
   if (!LAMBDA_COLUMN_STORES[k] && k !== LMS_TAB) return;
+  if (lmActiveTab === LMS_TAB && k !== LMS_TAB) { try { lmsClear(); } catch (e) {} }   // leaving Search on Code drops its results
   lmActiveTab = k;
   if (k === LMS_TAB) { lmRenderAll(); return; }
   const s = lmGetState(k); s.fromTouched = false; s.toTouched = false;   // date range re-defaults on every tab visit
@@ -27427,6 +27428,7 @@ function lmsRender() {
        <button type="button" class="lms-aa ${lms.cs ? 'on' : ''}" id="lms-aa" onclick="lmsToggleCase()" aria-pressed="${lms.cs ? 'true' : 'false'}" title="Match case">Aa</button></div></div>
      <button type="button" class="btn btn-primary" id="lms-run" onclick="lmsRun()"><i class="ti ti-search"></i> Search</button>
      <button type="button" class="btn btn-danger" id="lms-stop" onclick="lmsStop()" style="display:none"><i class="ti ti-player-stop"></i> Stop</button>
+     <button type="button" class="btn" id="lms-clear" onclick="lmsClear()" title="Clear the search results"><i class="ti ti-eraser"></i> Clear</button>
      <div class="lm-field lm-field-grow"><label for="lms-inc">Files to include</label>
        <input id="lms-inc" class="lm-input" type="text" autocomplete="off" spellcheck="false" placeholder="e.g. *.js, *.py, src/**" value="${esc(lms.inc)}" oninput="lmsSet('inc', this.value)" ${keyGo} /></div>
      <div class="lm-field lm-field-grow"><label for="lms-exc">Files to exclude</label>
@@ -27499,6 +27501,12 @@ function lmsFindLines(text, kw, cs) {
     if (lines.length < 10) lines.push({ n: i + 1, t: ln.trim().slice(0, 400) });
   });
   return { count, lineCount, lines };
+}
+// Clears the results, status and any running search (inputs keep their values). Runs from the Clear button,
+// when leaving the Search on Code tab, and when the Lambda Functions overlay closes.
+function lmsClear() {
+  lms.tok++; lms.running = false; lms.stopped = false; lms.results = []; lms.meta = null; lms.ran = false; lms.status = '';
+  if (lmsVisible()) { lmsPaintResults(); lmsPaintStatus(); }
 }
 function lmsStop() {
   if (!lms.running) return;
