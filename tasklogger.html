@@ -673,7 +673,12 @@ html.is-touch .pending-card-actions { opacity: 1; }
 .lcd-btn-group .lcd-refetch.busy i { animation: lcd-spin .8s linear infinite; }
 @keyframes lcd-spin { to { transform: rotate(360deg); } }
 /* Lambda changes popup (opens from the "Lambda changes" button): functions changed on the date + New/Change + Linked/Unlinked */
-#lcd-changes-modal .modal { max-width: 900px; width: 100%; }
+#lcd-changes-modal .modal { max-width: min(1280px, 96vw); width: 100%; }
+#lcd-changes-modal .lm-hist-wrap { overflow-x: auto; max-height: 68vh; }
+#lcd-changes-modal .lm-hist-table { table-layout: auto; }
+#lcd-changes-modal .lm-hist-table td:first-child { width: 34%; }
+#lcd-changes-modal .lm-hist-table td:last-child, #lcd-changes-modal .lm-hist-table th:last-child { width: 1%; white-space: nowrap; }
+#lcd-changes-modal .lm-hist-table td { min-width: 0; }
 #lcd-changes-modal .modal-body { padding: 0; }
 .lcd-chip { display: inline-flex; align-items: center; gap: 3px; border-radius: 10px; font-size: 10.5px; font-weight: 600; padding: 1px 8px; white-space: nowrap; }
 .lcd-chip.new { background: var(--green-bg); color: var(--green-dark); }
