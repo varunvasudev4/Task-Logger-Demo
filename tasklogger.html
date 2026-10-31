@@ -2070,6 +2070,38 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
 .cbv-hr { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; width: 100%; text-align: left; font: inherit; font-size: 12px; background: none; border: 0; border-left: 3px solid transparent; padding: 4px 8px; cursor: pointer; color: var(--text-secondary); }
 .cbv-hr:hover { background: var(--bg-secondary); } .cbv-hr.on { border-left-color: var(--blue-mid); color: var(--text-primary); background: var(--bg-secondary); }
 .cbv-pn { font-size: 12px; color: var(--text-tertiary); margin-top: 6px; }
+/* ── Lambda Functions → Search on Code tab + keyword highlight in the code viewer ── */
+.lms-qwrap { position: relative; display: flex; }
+.lms-qwrap .lm-input { flex: 1; min-width: 0; padding-right: 38px; }
+.lms-aa { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); border: 1px solid transparent; background: none; color: var(--text-secondary); font: 600 12px var(--font-mono, monospace); padding: 2px 5px; border-radius: 4px; cursor: pointer; line-height: 1.2; }
+.lms-aa:hover { background: var(--bg-secondary); }
+.lms-aa.on { color: var(--blue-mid); border-color: var(--blue-mid); background: color-mix(in srgb, var(--blue-mid) 14%, transparent); }
+.lm-field > label.lms-chk { display: flex; align-items: center; gap: 6px; min-height: 32px; font-family: inherit; font-size: 13px; text-transform: none; letter-spacing: 0; color: var(--text-primary); cursor: pointer; user-select: none; }
+.lms-chk input { width: 15px; height: 15px; margin: 0; cursor: pointer; }
+.lms-num { width: 96px; box-sizing: border-box; }
+.lms-status { padding: 8px 16px; font-size: 12px; color: var(--text-secondary); min-height: 20px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.lms-status .btn { padding: 3px 10px; font-size: 12px; }
+.lms-spin { animation: lmsSpin 1s linear infinite; }
+@keyframes lmsSpin { to { transform: rotate(360deg); } }
+.lms-wrap { flex: 1; min-height: 0; overflow: auto; padding: 4px 16px 24px; }
+.lms-card { border: 1px solid var(--border-md); border-radius: var(--radius-md); padding: 9px 12px; margin-bottom: 8px; cursor: pointer; background: var(--bg); box-shadow: inset 3px 0 0 var(--purple-mid); outline: none; }
+.lms-card:hover, .lms-card:focus-visible { background: var(--bg-secondary); }
+.lms-card:focus-visible { border-color: var(--blue-mid); }
+.lms-card-h { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; margin-bottom: 4px; font-size: 13px; }
+.lms-card-h > i { color: var(--blue-mid); }
+.lms-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-secondary); border: 1px solid var(--border-md); border-radius: 10px; padding: 0 8px; }
+.lms-meta { margin-left: auto; font-size: 11.5px; color: var(--text-tertiary); }
+.lms-line { display: flex; gap: 10px; font: 12px/1.55 var(--font-mono, ui-monospace, Menlo, Consolas, monospace); min-width: 0; }
+.lms-loc { flex: none; max-width: 38%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-tertiary); }
+.lms-txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); }
+.lms-more { font-size: 11.5px; color: var(--text-tertiary); margin-top: 2px; }
+.lms-card mark, mark.cbv-hl { background: color-mix(in srgb, #f5c400 50%, transparent); color: inherit; border-radius: 2px; padding: 0; }
+mark.cbv-hl.cur { background: color-mix(in srgb, #ff9632 65%, transparent); outline: 2px solid var(--blue-mid); }
+.cbv-hlbar { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; color: var(--text-secondary); }
+.cbv-hlbtn { background: none; border: 1px solid var(--border-md); border-radius: var(--radius-md); padding: 1px 4px; cursor: pointer; color: var(--text-secondary); line-height: 1; }
+.cbv-hlbtn:hover { background: var(--bg); color: var(--text-primary); }
+.cbv-badge { margin-left: auto; padding: 0 6px; border-radius: 9px; font-size: 10.5px; font-weight: 600; background: color-mix(in srgb, #f5c400 55%, transparent); color: var(--text-primary); }
+@media (max-width: 640px) { .lms-num { width: 100%; } .lms-wrap { padding: 4px 10px 20px; } .lms-status { padding: 6px 10px; } .lms-line { flex-direction: column; gap: 0; } .lms-loc { max-width: 100%; } }
 </style>
 </head>
 <body>
@@ -2538,7 +2570,7 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
   </div>
   <div class="lm-tabs" id="lm-tabs"></div>
   <div class="lm-toolbar" id="lm-toolbar"></div>
-  <div class="lm-bar">
+  <div class="lm-bar" id="lm-bar">
     <div class="lm-bar-left">
       <button type="button" class="btn lm-filter-toggle" id="lm-filter-toggle" onclick="lmToggleFilters()" aria-expanded="true" aria-controls="lm-toolbar" title="Show / hide the filters"><i class="ti ti-filter"></i> <span>Filters</span><span class="lm-filter-badge hidden" id="lm-filter-badge"></span><i class="ti ti-chevron-up lm-filter-chev"></i></button>
       <div class="log-count" id="lm-count"></div>
@@ -20341,7 +20373,10 @@ function applyDashboardMenuState() {
 // Each tab shows the master's columns as the table schema and the records imported into that
 // master (localStorage via readLambdaStore). Adding records is deliberately not here yet.
 const LM_TABS = ['lambdaFunctionColumns', 'lambdaChangeColumns'];
-const LM_TAB_ICONS = { lambdaFunctionColumns: 'ti-function', lambdaChangeColumns: 'ti-git-pull-request' };
+const LMS_TAB = 'lambdaCodeSearch';   // third tab: Search on Code (no column master, no table)
+const LM_TAB_ICONS = { lambdaFunctionColumns: 'ti-function', lambdaChangeColumns: 'ti-git-pull-request', lambdaCodeSearch: 'ti-file-search' };
+// Tab labels: the masters are called Function Columns / Change Columns, so the tabs use the short names.
+const LM_TAB_LABELS = { lambdaFunctionColumns: 'Functions', lambdaChangeColumns: 'Changes', lambdaCodeSearch: 'Search on Code' };
 let lmActiveTab = LM_TABS[0];
 const lmTabState = {};   // per tab: { by, q, from, to, fromTouched, toTouched, sortCol, sortDir }
 const lmWidths = {};     // per tab: column widths (persisted)
@@ -20371,16 +20406,18 @@ function openLambdaOverlay(tab) {
   lmRenderAll();
 }
 function closeLambdaOverlay() {
+  try { lmsStop(); } catch (e) {}
   lmEntClose();
   Object.keys(lmSelected).forEach(k => lmSelected[k].clear());
   const el = document.getElementById('lambda-overlay');
   if (el) el.classList.add('hidden');
   document.body.style.overflow = '';
 }
-function lmRefreshIfOpen() { if (lmIsOpen()) lmRenderAll(); }
+function lmRefreshIfOpen() { if (lmIsOpen() && lmActiveTab !== LMS_TAB) lmRenderAll(); }
 function lmSwitchTab(k) {
-  if (!LAMBDA_COLUMN_STORES[k]) return;
+  if (!LAMBDA_COLUMN_STORES[k] && k !== LMS_TAB) return;
   lmActiveTab = k;
+  if (k === LMS_TAB) { lmRenderAll(); return; }
   const s = lmGetState(k); s.fromTouched = false; s.toTouched = false;   // date range re-defaults on every tab visit
   lmRenderAll();
 }
@@ -20427,6 +20464,14 @@ function lmLoadRecords(k, cols) {
 
 function lmRenderAll() {
   lmRenderTabs();
+  const lmBar = document.getElementById('lm-bar');
+  if (lmActiveTab === LMS_TAB) {   // Search on Code: own form + result cards, no table bar
+    if (lmBar) lmBar.style.display = 'none';
+    const tbx = document.getElementById('lm-toolbar'); if (tbx) tbx.style.display = '';
+    lmEntClose(); lmsRender();
+    return;
+  }
+  if (lmBar) lmBar.style.display = '';
   lmRenderToolbar();
   lmRenderTable();
   lmApplyFilterCollapse();
@@ -20435,13 +20480,13 @@ function lmRenderAll() {
 function lmRenderTabs() {
   const el = document.getElementById('lm-tabs');
   if (!el) return;
-  el.innerHTML = LM_TABS.map(k =>
-    `<button type="button" class="tab-btn ${k === lmActiveTab ? 'active' : ''}" onclick="lmSwitchTab('${k}')"><i class="ti ${LM_TAB_ICONS[k]}" style="font-size:13px"></i> ${esc(LAMBDA_COLUMN_STORES[k].title)}</button>`
+  el.innerHTML = LM_TABS.concat([LMS_TAB]).map(k =>
+    `<button type="button" class="tab-btn ${k === lmActiveTab ? 'active' : ''}" onclick="lmSwitchTab('${k}')"><i class="ti ${LM_TAB_ICONS[k]}" style="font-size:13px"></i> ${esc(LM_TAB_LABELS[k])}</button>`
   ).join('');
 }
 function lmRenderToolbar() {
   const el = document.getElementById('lm-toolbar');
-  if (!el) return;
+  if (!el || lmActiveTab === LMS_TAB) return;
   lmEntClose();
   const k = lmActiveTab, s = lmGetState(k), cols = getLambdaColumns(k);
   const searchable = cols.filter(c => c.searchable === true);
@@ -20751,7 +20796,7 @@ function lmFilteredRows() {
 function lmRenderTable() {
   const body = document.getElementById('lm-body');
   const countEl = document.getElementById('lm-count');
-  if (!body) return;
+  if (!body || lmActiveTab === LMS_TAB) return;
   const k = lmActiveTab, s = lmGetState(k), cols = getLambdaColumns(k);
   lmLoadPrefs(k);
   const prevWrap = body.querySelector('.lm-table-wrap');
@@ -27084,9 +27129,10 @@ function lmViewCode(id) {
   cbvOpen(name);
 }
 function cbvMsg(html) { document.getElementById('cbv-side').innerHTML = ''; document.getElementById('cbv-main').innerHTML = `<div class="cbv-msg">${html}</div>`; }
-async function cbvOpen(name) {
-  _cbv = { name, dates: [], di: 0, tree: [], sel: null, open: new Set(), tok: 0, lines: null, line: null, ltok: 0, histP: null, meta: null };
-  document.getElementById('cbv-title').textContent = name ? 'Code — ' + name : 'Code';
+async function cbvOpen(name, opts) {
+  opts = opts || {};   // opts.fnDir = exact function folder handle, opts.hl = { kw, cs, files, order, dateName } search highlight (from Search on Code)
+  _cbv = { name, dates: [], di: 0, tree: [], sel: null, open: new Set(), tok: 0, lines: null, line: null, ltok: 0, histP: null, meta: null, hl: opts.hl || null, hlIdx: -1 };
+  document.getElementById('cbv-title').textContent = (name ? 'Code — ' + name : 'Code') + (opts.hl ? '  ·  search: ' + opts.hl.kw : '');
   document.getElementById('cbv-count').textContent = '';
   document.getElementById('cbv-date').innerHTML = '';
   document.getElementById('cbv-overlay').classList.remove('hidden');
@@ -27098,8 +27144,8 @@ async function cbvOpen(name) {
   if (!(await cbkPerm(_cbkHandle, true))) return cbvMsg('Permission to read the backup folder was not granted.' + setup);
   cbvMsg('Loading…');
   try {
-    let fnDir = null;
-    for (const d of await cbkSubdirs(_cbkHandle)) if (cbkNorm(d.name) === cbkNorm(name)) { fnDir = d; break; }
+    let fnDir = opts.fnDir || null;
+    if (!fnDir) for (const d of await cbkSubdirs(_cbkHandle)) if (cbkNorm(d.name) === cbkNorm(name)) { fnDir = d; break; }
     if (!fnDir) return cbvMsg(`No folder named <b>${esc(name)}</b> was found inside <b>${esc(_cbkHandle.name)}</b>.` + setup);
     let dates = (await cbkSubdirs(fnDir)).map(h => ({ name: h.name, h, key: cbkDateKey(h.name) }));
     dates.sort((a, b) => (b.key || '').localeCompare(a.key || '') || b.name.localeCompare(a.name, undefined, { numeric: true }));
@@ -27107,7 +27153,8 @@ async function cbvOpen(name) {
     _cbv.dates = dates;
     document.getElementById('cbv-date').innerHTML = dates.map((d, i) => `<option value="${i}">${esc(d.name)}${i === 0 ? ' (latest)' : ''}</option>`).join('');
     document.getElementById('cbv-datewrap').title = dates.length + ' backup' + (dates.length === 1 ? '' : 's') + ' available';
-    await cbvSetDate(0);
+    const hlDate = opts.hl ? dates.findIndex(d => d.name === opts.hl.dateName) : -1;
+    await cbvSetDate(hlDate > 0 ? hlDate : 0);
   } catch (e) { cbvMsg('Could not read the backup folder: ' + esc(e.message)); }
 }
 async function cbvReadTree(dir, base, depth) {
@@ -27132,17 +27179,20 @@ async function cbvSetDate(i) {
   const files = cbvFiles(tree, []);
   document.getElementById('cbv-count').textContent = files.length + ' file' + (files.length === 1 ? '' : 's');
   const fn = v.name.toLowerCase();
-  const pick = files.find(f => f.path === prev) || files.find(f => /^(index|main|handler|lambda_function)\.\w+$/i.test(f.name)) || files.find(f => f.name.toLowerCase().indexOf(fn) === 0) || files[0];
+  const hlPick = (v.hl && !prev && v.dates[i].name === v.hl.dateName) ? files.find(f => f.path === v.hl.order[0]) : null;   // first file where the keyword occurs
+  const pick = hlPick || files.find(f => f.path === prev) || files.find(f => /^(index|main|handler|lambda_function)\.\w+$/i.test(f.name)) || files.find(f => f.name.toLowerCase().indexOf(fn) === 0) || files[0];
   v.open = new Set(); const mark = (nodes, p) => nodes.forEach(n => { if (n.dir) { if (p && (p === n.path || p.indexOf(n.path + '/') === 0)) v.open.add(n.path); mark(n.kids, p); } }); mark(tree, pick && pick.path);
+  if (v.hl && v.dates[i].name === v.hl.dateName) Object.keys(v.hl.files).forEach(p => { const sg = p.split('/'); for (let q = 1; q < sg.length; q++) v.open.add(sg.slice(0, q).join('/')); });   // show every file that has a match
   v.sel = pick ? pick.path : null;
   cbvRenderTree();
   if (pick) cbvShowFile(pick); else document.getElementById('cbv-main').innerHTML = '<div class="cbv-msg">This backup has no files.</div>';
 }
 function cbvRenderTree() {
   const v = _cbv; if (!v) return;
+  const hf = (v.hl && v.dates[v.di] && v.dates[v.di].name === v.hl.dateName) ? v.hl.files : null;   // match counts per file
   const draw = (nodes, d) => nodes.map(n => n.dir
     ? `<div class="cbv-node dir" data-p="${esc(n.path)}" style="padding-left:${8 + d * 14}px"><i class="ti ti-chevron-${v.open.has(n.path) ? 'down' : 'right'}"></i><i class="ti ti-folder${v.open.has(n.path) ? '-open' : ''}"></i>${esc(n.name)}</div>${v.open.has(n.path) ? draw(n.kids, d + 1) : ''}`
-    : `<div class="cbv-node file${v.sel === n.path ? ' sel' : ''}" data-p="${esc(n.path)}" style="padding-left:${8 + d * 14 + 16}px" title="${esc(n.path)}"><i class="ti ti-file-code"></i>${esc(n.name)}</div>`).join('');
+    : `<div class="cbv-node file${v.sel === n.path ? ' sel' : ''}" data-p="${esc(n.path)}" style="padding-left:${8 + d * 14 + 16}px" title="${esc(n.path)}"><i class="ti ti-file-code"></i>${esc(n.name)}${hf && hf[n.path] ? `<span class="cbv-badge" title="${hf[n.path]} match(es)">${hf[n.path]}</span>` : ''}</div>`).join('');
   const side = document.getElementById('cbv-side');
   side.innerHTML = draw(v.tree, 0);
   side.onclick = ev => {
@@ -27195,6 +27245,7 @@ async function cbvShowFile(f) {
     const l = ev.target.closest && ev.target.closest('.cbv-l'); if (l) { cbvSelectLine(+l.dataset.l, false); box.focus({ preventScroll: true }); }
   };
   box.onkeydown = cbvKey;
+  if (v.hl) cbvApplyHl(box);   // highlight every occurrence of the searched keyword in this file
   box.onmouseover = ev => { const hn = ev.target.closest && ev.target.closest('.cbv-hint'); if (hn) cbvPopShow(hn, false); };
   box.onmouseout = ev => { if (ev.target.closest && ev.target.closest('.cbv-hint')) { clearTimeout(_cbvPopT); _cbvPopT = setTimeout(() => cbvPopHide(false), 350); } };
   if (v.line && v.line <= v.lines.length) cbvSelectLine(v.line, true); else box.focus({ preventScroll: true });
@@ -27342,10 +27393,224 @@ function cbvGo(key) {
   cbvClose(); closeLambdaOverlay(); jumpToDate(t.jumpDate, t.jumpTs);
 }
 document.addEventListener('mousedown', ev => { const p = document.getElementById('cbv-pop'); if (p && p.dataset.pin && !p.contains(ev.target) && !(ev.target.closest && ev.target.closest('.cbv-hint'))) p.remove(); }, true);
-function cbvClose() { cbvPopHide(true); const el = document.getElementById('cbv-overlay'); if (el) el.classList.add('hidden'); _cbv = null; }
+function cbvClose() {
+  cbvPopHide(true); const el = document.getElementById('cbv-overlay'); if (el) el.classList.add('hidden'); _cbv = null;
+  const sd = document.getElementById('cbv-side'), mn = document.getElementById('cbv-main'); if (sd) sd.innerHTML = ''; if (mn) mn.innerHTML = '';   // drops the keyword highlights with the code
+}
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && _cbv) { e.stopImmediatePropagation(); if (document.getElementById('cbv-pop')) cbvPopHide(true); else cbvClose(); }
 }, true);
+
+// ── Lambda Functions overlay → "Search on Code" tab ──────────────────────────────
+// Searches the Code Backup folder only (no AWS): <backup root>/<function>/<date folder>/<code files>.
+// Default = latest backup of every function; "Include all backups" searches every date folder.
+// Clicking a result card opens the code viewer on that backup with the keyword highlighted (cbvApplyHl).
+function lmsEsc(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+const lms = { q: '', cs: false, inc: '', exc: '', all: false, max: '', running: false, tok: 0, results: [], meta: null, status: '', stopped: false, ran: false };
+try { const p = JSON.parse(localStorage.getItem('ttl_lmsPrefs') || '{}'); if (p && typeof p === 'object') { lms.cs = !!p.cs; lms.inc = String(p.inc || ''); lms.exc = String(p.exc || ''); lms.all = !!p.all; lms.max = String(p.max || ''); } } catch (e) {}
+function lmsSet(k, v) {
+  lms[k] = v;
+  try { localStorage.setItem('ttl_lmsPrefs', JSON.stringify({ cs: lms.cs, inc: lms.inc, exc: lms.exc, all: lms.all, max: lms.max })); } catch (e) {}
+}
+function lmsToggleCase() {
+  lmsSet('cs', !lms.cs);
+  const b = document.getElementById('lms-aa'); if (b) { b.classList.toggle('on', lms.cs); b.setAttribute('aria-pressed', lms.cs ? 'true' : 'false'); }
+}
+function lmsVisible() { return lmIsOpen() && lmActiveTab === LMS_TAB && !!document.getElementById('lms-results'); }
+function lmsRender() {
+  const tb = document.getElementById('lm-toolbar'), body = document.getElementById('lm-body');
+  if (!tb || !body) return;
+  const keyGo = `onkeydown="if(event.key==='Enter'){event.preventDefault();lmsRun();}"`;
+  tb.innerHTML =
+    `<div class="lm-field lm-field-grow"><label for="lms-q">Search code</label>
+       <div class="lms-qwrap"><input id="lms-q" class="lm-input" type="text" autocomplete="off" spellcheck="false" placeholder="Keyword to find in the function code…" value="${esc(lms.q)}" oninput="lmsSet('q', this.value)" ${keyGo} />
+       <button type="button" class="lms-aa ${lms.cs ? 'on' : ''}" id="lms-aa" onclick="lmsToggleCase()" aria-pressed="${lms.cs ? 'true' : 'false'}" title="Match case">Aa</button></div></div>
+     <button type="button" class="btn btn-primary" id="lms-run" onclick="lmsRun()"><i class="ti ti-search"></i> Search</button>
+     <button type="button" class="btn btn-danger" id="lms-stop" onclick="lmsStop()" style="display:none"><i class="ti ti-player-stop"></i> Stop</button>
+     <div class="lm-field lm-field-grow"><label for="lms-inc">Files to include</label>
+       <input id="lms-inc" class="lm-input" type="text" autocomplete="off" spellcheck="false" placeholder="e.g. *.js, *.py, src/**" value="${esc(lms.inc)}" oninput="lmsSet('inc', this.value)" ${keyGo} /></div>
+     <div class="lm-field lm-field-grow"><label for="lms-exc">Files to exclude</label>
+       <input id="lms-exc" class="lm-input" type="text" autocomplete="off" spellcheck="false" placeholder="e.g. *.json, test*, **/dist/**" value="${esc(lms.exc)}" oninput="lmsSet('exc', this.value)" ${keyGo} /></div>
+     <div class="lm-field lms-chkfield"><label class="lms-chk" title="Off = only the latest backup (newest date folder) of each function is searched"><input type="checkbox" id="lms-all" ${lms.all ? 'checked' : ''} onchange="lmsSet('all', this.checked)" /> Include all backups</label></div>
+     <div class="lm-field"><label for="lms-max">Max results</label>
+       <input id="lms-max" class="lm-input lms-num" type="number" min="1" step="1" inputmode="numeric" placeholder="All" value="${esc(lms.max)}" title="Stop the search once this many matching functions are found. Empty = find all." oninput="lmsSet('max', this.value)" ${keyGo} /></div>`;
+  body.innerHTML = `<div class="lms-status" id="lms-status"></div><div class="lms-wrap" id="lms-results"></div>`;
+  lmsPaintResults();
+  lmsPaintStatus();
+}
+function lmsPaintResults() {
+  const box = document.getElementById('lms-results'); if (!box) return;
+  if (lms.results.length) { box.innerHTML = lms.results.map(lmsCardHtml).join(''); return; }
+  box.innerHTML = lms.ran && !lms.running
+    ? `<div class="lm-empty">No matches${lms.meta ? ' for <b>' + esc(lms.meta.kw) + '</b>' : ''}.</div>`
+    : `<div class="lm-empty">Type a keyword and press Enter.<br>Only the latest backup of each function is searched unless <b>Include all backups</b> is ticked.</div>`;
+}
+function lmsPaintStatus() {
+  const st = document.getElementById('lms-status'), run = document.getElementById('lms-run'), stop = document.getElementById('lms-stop');
+  if (st) st.innerHTML = (lms.running ? '<i class="ti ti-loader-2 lms-spin"></i> ' : '') + lms.status;
+  if (run) run.style.display = lms.running ? 'none' : '';
+  if (stop) stop.style.display = lms.running ? '' : 'none';
+}
+function lmsSetStatus(html) { lms.status = html; if (lmsVisible()) lmsPaintStatus(); }
+function lmsSnip(t, m) {
+  const re = new RegExp(lmsEsc(m.kw), m.cs ? 'g' : 'gi'), first = re.exec(t);
+  const start = first ? Math.max(0, first.index - 40) : 0, seg = t.slice(start, start + 200);
+  let out = '', last = 0, x; re.lastIndex = 0;
+  while ((x = re.exec(seg))) { out += esc(seg.slice(last, x.index)) + '<mark>' + esc(x[0]) + '</mark>'; last = x.index + x[0].length; }
+  return (start > 0 ? '…' : '') + out + esc(seg.slice(last)) + (start + 200 < t.length ? '…' : '');
+}
+function lmsCardHtml(r, i) {
+  const m = lms.meta || { kw: '', cs: false }, rows = [];
+  r.files.forEach(f => f.lines.forEach(l => { if (rows.length < 5) rows.push(`<div class="lms-line"><span class="lms-loc" title="${esc(f.path)}">${esc(f.path)}:${l.n}</span><span class="lms-txt">${lmsSnip(l.t, m)}</span></div>`); }));
+  const more = r.lineCount - rows.length;
+  return `<div class="lms-card" role="button" tabindex="0" onclick="lmsOpenCard(${i})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();lmsOpenCard(${i});}" title="Open the code with the keyword highlighted">
+    <div class="lms-card-h"><i class="ti ti-function"></i><b>${esc(r.fn)}</b><span class="lms-chip"><i class="ti ti-calendar"></i> ${esc(r.dateName)}${r.latest ? ' · latest' : ''}</span>
+      <span class="lms-meta">${r.total} match${r.total === 1 ? '' : 'es'} in ${r.files.length} file${r.files.length === 1 ? '' : 's'}</span></div>
+    ${rows.join('')}${more > 0 ? `<div class="lms-more">+ ${more} more line${more === 1 ? '' : 's'}</div>` : ''}</div>`;
+}
+function lmsAppendCard(i) {
+  if (!lmsVisible()) return;
+  const box = document.getElementById('lms-results'); if (!box) return;
+  if (i === 0) box.innerHTML = '';
+  box.insertAdjacentHTML('beforeend', lmsCardHtml(lms.results[i], i));
+}
+// Glob patterns, VS Code style: comma separated; *  **  ?  ; a pattern without "/" matches a file or folder name anywhere.
+function lmsPatterns(str) {
+  return String(str || '').split(',').map(s => s.trim()).filter(Boolean).map(p => {
+    p = p.replace(/\\/g, '/').replace(/^\.?\//, '').replace(/\/+$/, '');
+    if (!p) return null;
+    if (/^\.[\w-]+$/.test(p)) p = '*' + p;   // ".js" → "*.js"
+    const slash = p.indexOf('/') !== -1;
+    const body = p.split(/(\*\*\/?|\*|\?)/).map(t => t === '**/' ? '(?:.*/)?' : t === '**' ? '.*' : t === '*' ? '[^/]*' : t === '?' ? '[^/]' : lmsEsc(t)).join('');
+    return { slash, re: new RegExp(slash ? '^(?:.*/)?' + body + '(?:/.*)?$' : '^' + body + '$', 'i') };
+  }).filter(Boolean);
+}
+function lmsMatch(pats, path) { const segs = path.split('/'); return pats.some(p => p.slash ? p.re.test(path) : segs.some(s => p.re.test(s))); }
+// Line by line (like the Python search): occurrences per line, first lines kept for the card preview.
+function lmsFindLines(text, kw, cs) {
+  const norm = text.replace(/\r\n?/g, '\n'), re = new RegExp(lmsEsc(kw), cs ? 'g' : 'gi');
+  if (!re.test(norm)) return { count: 0, lineCount: 0, lines: [] };
+  let count = 0, lineCount = 0; const lines = [];
+  norm.split('\n').forEach((ln, i) => {
+    re.lastIndex = 0; let c = 0;
+    while (re.exec(ln)) c++;
+    if (!c) return;
+    count += c; lineCount++;
+    if (lines.length < 10) lines.push({ n: i + 1, t: ln.trim().slice(0, 400) });
+  });
+  return { count, lineCount, lines };
+}
+function lmsStop() {
+  if (!lms.running) return;
+  lms.tok++; lms.running = false; lms.stopped = true;
+  lmsSetStatus('Stopped — ' + lms.results.length + ' result' + (lms.results.length === 1 ? '' : 's') + ' so far.');
+}
+async function lmsRun() {
+  if (lms.running) return;
+  const kw = lms.q;
+  if (!kw.trim()) { lmsSetStatus('Type a keyword to search.'); const q = document.getElementById('lms-q'); if (q) q.focus(); return; }
+  const setup = ` <button type="button" class="btn" onclick="closeLambdaOverlay();openMasters();switchTab('lambdaCodeBackup')"><i class="ti ti-folder-code"></i> Open Code Backup master</button>`;
+  if (!cbkSupported()) return lmsSetStatus('Searching code needs Chrome or Edge on a desktop computer.');
+  if (!_cbkHandle) { try { _cbkHandle = await cbkIdbGet(); } catch (e) {} }
+  if (!_cbkHandle) return lmsSetStatus('No backup folder is selected yet.' + setup);
+  if (!(await cbkPerm(_cbkHandle, true))) return lmsSetStatus('Permission to read the backup folder was not granted.' + setup);
+  const tok = ++lms.tok, cs = lms.cs, all = lms.all, maxN = parseInt(lms.max, 10) > 0 ? parseInt(lms.max, 10) : 0;
+  const inc = lmsPatterns(lms.inc), exc = lmsPatterns(lms.exc);
+  lms.running = true; lms.stopped = false; lms.ran = true; lms.results = []; lms.meta = { kw, cs, all, max: maxN };
+  lmsPaintResults(); lmsSetStatus('Reading the backup folder…');
+  let searched = 0, total = 0, hitMax = false;
+  try {
+    const fnDirs = (await cbkSubdirs(_cbkHandle)).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+    total = fnDirs.length;
+    for (let fi = 0; fi < fnDirs.length && !hitMax; fi++) {
+      if (tok !== lms.tok) return;
+      const fd = fnDirs[fi];
+      lmsSetStatus(`Searching ${fi + 1} / ${total}: <b>${esc(fd.name)}</b> — ${lms.results.length} result${lms.results.length === 1 ? '' : 's'} so far`);
+      let dates;
+      try {
+        dates = (await cbkSubdirs(fd)).map(h => ({ name: h.name, h, key: cbkDateKey(h.name) }));
+        dates.sort((a, b) => (b.key || '').localeCompare(a.key || '') || b.name.localeCompare(a.name, undefined, { numeric: true }));
+      } catch (e) { continue; }
+      if (!dates.length) dates = [{ name: '(files in function folder)', h: fd, key: '' }];
+      searched++;
+      for (const d of (all ? dates : dates.slice(0, 1))) {
+        if (tok !== lms.tok) return;
+        let files;
+        try { files = cbvFiles(await cbvReadTree(d.h, '', 0), []); } catch (e) { continue; }
+        const hits = []; let totalHits = 0, lineCount = 0;
+        for (const f of files) {
+          if (tok !== lms.tok) return;
+          if (inc.length && !lmsMatch(inc, f.path)) continue;
+          if (exc.length && lmsMatch(exc, f.path)) continue;
+          let file, text;
+          try { file = await f.h.getFile(); if (file.size > 2097152) continue; text = await file.text(); } catch (e) { continue; }
+          if (text.indexOf('\u0000') !== -1) continue;
+          const r = lmsFindLines(text, kw, cs);
+          if (r.count) { hits.push({ path: f.path, count: r.count, lines: r.lines }); totalHits += r.count; lineCount += r.lineCount; }
+        }
+        if (hits.length) {
+          lms.results.push({ fn: fd.name, fnDir: fd, dateName: d.name, latest: d === dates[0], files: hits, total: totalHits, lineCount });
+          lmsAppendCard(lms.results.length - 1);
+          if (maxN && lms.results.length >= maxN) { hitMax = true; break; }
+        }
+      }
+    }
+    if (tok !== lms.tok) return;
+    const n = lms.results.length, fnSet = new Set(lms.results.map(r => r.fn)).size;
+    lmsSetStatus(hitMax
+      ? `Stopped after ${n} result${n === 1 ? '' : 's'} (max results reached).`
+      : `Done — ${n} result${n === 1 ? '' : 's'} in ${fnSet} function${fnSet === 1 ? '' : 's'}; ${searched} function${searched === 1 ? '' : 's'} searched${all ? ' (all backups)' : ' (latest backup of each)'}.`);
+  } catch (e) {
+    if (tok === lms.tok) lmsSetStatus('Search failed: ' + esc(e && e.message || String(e)));
+  } finally {
+    if (tok === lms.tok) { lms.running = false; if (lmsVisible()) { lmsPaintStatus(); if (!lms.results.length) lmsPaintResults(); } }
+  }
+}
+function lmsOpenCard(i) {
+  const r = lms.results[i], m = lms.meta; if (!r || !m) return;
+  const files = {}, order = [];
+  r.files.forEach(f => { files[f.path] = f.count; order.push(f.path); });
+  cbvOpen(r.fn, { fnDir: r.fnDir, hl: { kw: m.kw, cs: m.cs, files, order, dateName: r.dateName } });
+}
+// Highlights every occurrence of the search keyword in the code on screen (all files opened from a result card).
+// Lives only in the viewer's DOM + _cbv.hl, so closing the viewer removes it (cbvClose also clears the DOM).
+function cbvApplyHl(box) {
+  const v = _cbv; if (!v || !v.hl || !v.hl.kw) return;
+  const re = new RegExp(lmsEsc(v.hl.kw), v.hl.cs ? 'g' : 'gi');
+  box.querySelectorAll('.cbv-t').forEach(row => {
+    const nodes = [], w = document.createTreeWalker(row, NodeFilter.SHOW_TEXT); let nd;
+    while ((nd = w.nextNode())) nodes.push(nd);
+    const full = nodes.map(x => x.nodeValue).join(''), ranges = []; let m; re.lastIndex = 0;
+    while ((m = re.exec(full))) { if (!m[0].length) { re.lastIndex++; continue; } ranges.push([m.index, m.index + m[0].length]); }
+    if (!ranges.length) return;
+    let off = 0;
+    nodes.forEach(n => {
+      const t = n.nodeValue, a = off, b = off + t.length; off = b;
+      const hit = ranges.filter(r => r[0] < b && r[1] > a); if (!hit.length) return;
+      const frag = document.createDocumentFragment(); let pos = 0;
+      hit.forEach(r => {
+        const s = Math.max(r[0], a) - a, e = Math.min(r[1], b) - a;
+        if (s > pos) frag.appendChild(document.createTextNode(t.slice(pos, s)));
+        const mk = document.createElement('mark'); mk.className = 'cbv-hl'; mk.textContent = t.slice(s, e); frag.appendChild(mk); pos = e;
+      });
+      if (pos < t.length) frag.appendChild(document.createTextNode(t.slice(pos)));
+      n.parentNode.replaceChild(frag, n);
+    });
+  });
+  const n = box.querySelectorAll('mark.cbv-hl').length, tab = document.querySelector('#cbv-main .cbv-tab');
+  v.hlIdx = -1;
+  if (tab) tab.insertAdjacentHTML('beforeend', n
+    ? `<span class="cbv-hlbar"><i class="ti ti-search"></i><span id="cbv-hlpos"></span><button type="button" class="cbv-hlbtn" onclick="cbvHlStep(-1)" title="Previous match"><i class="ti ti-chevron-up"></i></button><button type="button" class="cbv-hlbtn" onclick="cbvHlStep(1)" title="Next match"><i class="ti ti-chevron-down"></i></button></span>`
+    : `<span class="cbv-hlbar">No match for “${esc(v.hl.kw)}” in this file</span>`);
+  if (n) cbvHlStep(1);
+}
+function cbvHlStep(d) {
+  const v = _cbv, marks = document.querySelectorAll('#cbv-scroll mark.cbv-hl'); if (!v || !marks.length) return;
+  if (marks[v.hlIdx]) marks[v.hlIdx].classList.remove('cur');
+  v.hlIdx = ((v.hlIdx < 0 ? (d > 0 ? -1 : 0) : v.hlIdx) + d + marks.length) % marks.length;
+  const mk = marks[v.hlIdx]; mk.classList.add('cur'); mk.scrollIntoView({ block: 'center', inline: 'nearest' });
+  const pos = document.getElementById('cbv-hlpos'); if (pos) pos.textContent = (v.hlIdx + 1) + ' / ' + marks.length;
+}
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 loadState();
