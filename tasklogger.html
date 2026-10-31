@@ -2048,13 +2048,28 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
 .cbv-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .cbv-tab { padding: 6px 14px; font-size: 12px; border-bottom: 1px solid var(--border-md); background: var(--bg-secondary); color: var(--text-secondary); display: flex; gap: 10px; align-items: center; }
 .cbv-tab b { color: var(--text-primary); }
-.cbv-scroll { flex: 1; overflow: auto; display: flex; align-items: flex-start; font: 12.5px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-.cbv-gut, .cbv-code { margin: 0; padding: 10px 0; font: inherit; white-space: pre; tab-size: 4; }
-.cbv-gut { position: sticky; left: 0; padding: 10px 10px 10px 14px; text-align: right; color: var(--text-tertiary); background: var(--bg); user-select: none; border-right: 1px solid var(--border); }
-.cbv-code { padding-left: 14px; padding-right: 30px; flex: 1; color: var(--text-primary); }
 .cbv-c { color: var(--text-tertiary); font-style: italic; } .cbv-s { color: var(--green-dark); } .cbv-n { color: var(--blue-mid); } .cbv-k { color: var(--purple-mid); font-weight: 600; }
 .cbv-msg { margin: auto; padding: 24px; text-align: center; color: var(--text-secondary); font-size: 13px; max-width: 460px; }
 @media (max-width: 700px) { .cbv-body { flex-direction: column; } .cbv-side { width: auto; max-height: 36%; border-right: 0; border-bottom: 1px solid var(--border-md); } }
+.cbv-scroll { flex: 1; overflow: auto; font: 12.5px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; outline: none; }
+.cbv-rows { display: inline-block; min-width: 100%; padding: 8px 0; }
+.cbv-l { display: flex; white-space: pre; }
+.cbv-l:hover { background: color-mix(in srgb, var(--text-primary) 5%, transparent); }
+.cbv-l.cur { background: color-mix(in srgb, var(--blue-mid) 14%, transparent); }
+.cbv-num { position: sticky; left: 0; flex: none; width: 58px; padding-right: 12px; margin-right: 14px; text-align: right; color: var(--text-tertiary); background: var(--bg); border-right: 1px solid var(--border); user-select: none; }
+.cbv-l.cur .cbv-num { color: var(--text-primary); font-weight: 700; }
+.cbv-t { padding-right: 30px; color: var(--text-primary); }
+.cbv-hint { margin-left: 26px; padding: 0 8px; border-radius: 4px; font-style: italic; cursor: pointer; color: var(--text-tertiary); background: color-mix(in srgb, var(--text-primary) 7%, transparent); }
+.cbv-hint:hover { color: var(--text-primary); }
+.cbv-hint.muted { cursor: default; }
+.cbv-pop { position: fixed; z-index: 170; width: min(540px, 94vw); max-height: 64vh; overflow: auto; background: var(--bg); color: var(--text-primary); border: 1px solid var(--border-md); border-radius: var(--radius-md); box-shadow: 0 8px 28px rgba(0,0,0,.3); font: 13px/1.45 system-ui, sans-serif; padding: 10px 12px; white-space: normal; }
+.cbv-pop[data-pin] { outline: 2px solid var(--blue-mid); }
+.cbv-pd { font-weight: 600; margin-bottom: 6px; word-break: break-word; }
+.cbv-pr { display: flex; gap: 8px; font-size: 12.5px; padding: 2px 0; } .cbv-pr > span:first-child { width: 64px; flex: none; color: var(--text-tertiary); } .cbv-pr > span:last-child { flex: 1; word-break: break-word; }
+.cbv-ph { margin: 8px 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-tertiary); }
+.cbv-hr { display: block; width: 100%; text-align: left; font: inherit; font-size: 12px; background: none; border: 0; border-left: 3px solid transparent; padding: 4px 8px; cursor: pointer; color: var(--text-secondary); }
+.cbv-hr:hover { background: var(--bg-secondary); } .cbv-hr.on { border-left-color: var(--blue-mid); color: var(--text-primary); background: var(--bg-secondary); }
+.cbv-pn { font-size: 12px; color: var(--text-tertiary); margin-top: 6px; }
 </style>
 </head>
 <body>
@@ -27070,7 +27085,7 @@ function lmViewCode(id) {
 }
 function cbvMsg(html) { document.getElementById('cbv-side').innerHTML = ''; document.getElementById('cbv-main').innerHTML = `<div class="cbv-msg">${html}</div>`; }
 async function cbvOpen(name) {
-  _cbv = { name, dates: [], di: 0, tree: [], sel: null, open: new Set(), tok: 0 };
+  _cbv = { name, dates: [], di: 0, tree: [], sel: null, open: new Set(), tok: 0, lines: null, line: null, ltok: 0, histP: null, meta: null };
   document.getElementById('cbv-title').textContent = name ? 'Code — ' + name : 'Code';
   document.getElementById('cbv-count').textContent = '';
   document.getElementById('cbv-date').innerHTML = '';
@@ -27135,7 +27150,7 @@ function cbvRenderTree() {
     const p = el.dataset.p;
     if (el.classList.contains('dir')) { v.open.has(p) ? v.open.delete(p) : v.open.add(p); cbvRenderTree(); return; }
     const f = cbvFiles(v.tree, []).find(x => x.path === p);
-    if (f) { v.sel = p; cbvRenderTree(); cbvShowFile(f); }
+    if (f) { v.sel = p; v.line = null; cbvRenderTree(); cbvShowFile(f); }
   };
 }
 const CBV_KW = /\b(?:const|let|var|function|return|if|else|for|while|do|switch|case|break|continue|new|class|extends|import|export|from|default|async|await|try|catch|finally|throw|typeof|instanceof|in|of|null|undefined|true|false|this|def|self|None|True|False|elif|lambda|with|as|pass|raise|yield|print|require|module|exports)\b/;
@@ -27154,7 +27169,7 @@ function cbvHighlight(text, name) {
     if (m[0] === '') { re.lastIndex++; continue; }
     out += e(text.slice(last, m.index));
     const cls = html ? (m[1] ? 'c' : 'k') : (m[1] ? 'c' : m[2] ? 's' : m[3] ? 'n' : 'k');
-    out += `<span class="cbv-${cls}">${e(m[0])}</span>`;
+    out += m[0].split('\n').map(p => p ? `<span class="cbv-${cls}">${e(p)}</span>` : '').join('\n');
     last = m.index + m[0].length;
   }
   return out + e(text.slice(last));
@@ -27162,6 +27177,7 @@ function cbvHighlight(text, name) {
 async function cbvShowFile(f) {
   const main = document.getElementById('cbv-main'), tok = _cbv && _cbv.tok;
   let file, text;
+  if (_cbv) _cbv.lines = null;
   try { file = await f.h.getFile(); } catch (e) { main.innerHTML = `<div class="cbv-msg">Could not open ${esc(f.name)}: ${esc(e.message)}</div>`; return; }
   const kb = file.size >= 1048576 ? (file.size / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(file.size / 1024)) + ' KB';
   const head = `<div class="cbv-tab"><b>${esc(f.name)}</b><span>${esc(f.path)}</span><span>${kb}</span></div>`;
@@ -27169,12 +27185,166 @@ async function cbvShowFile(f) {
   try { text = await file.text(); } catch (e) { main.innerHTML = head + '<div class="cbv-msg">Could not read this file.</div>'; return; }
   if (!_cbv || tok !== _cbv.tok || _cbv.sel !== f.path) return;
   if (text.indexOf('\u0000') !== -1) { main.innerHTML = head + '<div class="cbv-msg">Binary file — no preview.</div>'; return; }
-  const n = text.split('\n').length;
-  main.innerHTML = head + `<div class="cbv-scroll"><pre class="cbv-gut">${Array.from({ length: n }, (_, i) => i + 1).join('\n')}</pre><pre class="cbv-code">${cbvHighlight(text, f.name)}</pre></div>`;
+  text = text.replace(/\r\n?/g, '\n');
+  const v = _cbv; v.lines = text.split('\n'); v.sel = f.path;
+  main.innerHTML = head + `<div class="cbv-scroll" id="cbv-scroll" tabindex="0" title="Click a line (or use ↑ ↓) to see who last changed it"><div class="cbv-rows">${cbvHighlight(text, f.name).split('\n').map((h, i) => `<div class="cbv-l" data-l="${i + 1}"><span class="cbv-num">${i + 1}</span><span class="cbv-t">${h || ' '}</span></div>`).join('')}</div></div>`;
+  const box = document.getElementById('cbv-scroll');
+  box.onclick = ev => {
+    const hn = ev.target.closest && ev.target.closest('.cbv-hint');
+    if (hn) { cbvPopShow(hn, true); return; }
+    const l = ev.target.closest && ev.target.closest('.cbv-l'); if (l) { cbvSelectLine(+l.dataset.l, false); box.focus({ preventScroll: true }); }
+  };
+  box.onkeydown = cbvKey;
+  box.onmouseover = ev => { const hn = ev.target.closest && ev.target.closest('.cbv-hint'); if (hn) cbvPopShow(hn, false); };
+  box.onmouseout = ev => { if (ev.target.closest && ev.target.closest('.cbv-hint')) { clearTimeout(_cbvPopT); _cbvPopT = setTimeout(() => cbvPopHide(false), 350); } };
+  if (v.line && v.line <= v.lines.length) cbvSelectLine(v.line, true); else box.focus({ preventScroll: true });
 }
-function cbvClose() { const el = document.getElementById('cbv-overlay'); if (el) el.classList.add('hidden'); _cbv = null; }
+
+// ── Line history (GitLens style): who / when / which task / what changed on the selected line ──
+// Built from the change-log JSON (each version lists the lines it added / removed per file) walked backwards from the code
+// on screen, only through versions up to the selected backup date. Who / task / description come from the Lambda Change
+// record of the same function + date (and its linked task). The JSON is read on demand, only this function is kept.
+let _cbvPopT = null;
+async function cbvHistLoad(name) {
+  if (!_lcdHandle && !_lcdFile) { try { _lcdHandle = await lcdIdbGet(); } catch (e) {} }
+  if (!_lcdHandle && !_lcdFile) return { err: 'nofile' };
+  let file;
+  if (_lcdHandle) {
+    let p = await _lcdHandle.queryPermission({ mode: 'read' });
+    if (p !== 'granted') p = await _lcdHandle.requestPermission({ mode: 'read' });
+    if (p !== 'granted') return { err: 'permission' };
+    file = await _lcdHandle.getFile();
+  } else file = _lcdFile;
+  let data = JSON.parse(await file.text());
+  const vers = [], seen = new Set();
+  Object.keys(data).forEach(raw => {
+    if (!lcdSameFunction(raw, name)) return;
+    const region = (/@([a-z0-9-]+)$/i.exec(raw) || [])[1] || '', byTs = data[raw] || {};
+    Object.keys(byTs).forEach(ts => {
+      const m = /^(\d{2})-(\d{2})-(\d{4})(?:\s+(\d{2}):(\d{2}):(\d{2}))?/.exec(ts); if (!m) return;
+      const key = m[3] + m[2] + m[1] + (m[4] || '00') + (m[5] || '00') + (m[6] || '00'), fobj = byTs[ts] || {}, files = {};
+      Object.keys(fobj).forEach(f => {
+        const id = key + '|' + f, o = fobj[f] || {}; if (seen.has(id)) return; seen.add(id);
+        files[f] = { status: o.status || 'modified', blocks: Array.isArray(o.change_blocks) ? o.change_blocks : [] };
+      });
+      if (Object.keys(files).length) vers.push({ key, iso: m[3] + '-' + m[2] + '-' + m[1], time: m[4] ? m[4] + ':' + m[5] : '', region, files });
+    });
+  });
+  data = null;
+  vers.sort((a, b) => b.key.localeCompare(a.key));   // newest first
+  return { vers };
+}
+async function cbvChain(path, n) {
+  const v = _cbv;
+  if (!v.histP) v.histP = cbvHistLoad(v.name).catch(e => ({ err: 'error', msg: e.message }));
+  const h = await v.histP;
+  if (h.err) { if (h.err !== 'nofile') v.histP = null; return h; }
+  const ck = cbkDateKey(v.dates[v.di].name), dayOnly = !ck || /000000$/.test(ck);
+  const vers = h.vers.filter(x => !ck || (dayOnly ? x.key.slice(0, 8) <= ck.slice(0, 8) : x.key <= ck));
+  const nz = s => String(s).toLowerCase().replace(/\\/g, '/').replace(/^\.\//, '');
+  const same = (a, b) => { a = nz(a); b = nz(b); return a === b || a.endsWith('/' + b) || b.endsWith('/' + a); };
+  const chain = []; let cur = n;
+  for (const ver of vers) {
+    const fk = Object.keys(ver.files).find(f => same(f, path)); if (!fk) continue;
+    const o = ver.files[fk];
+    if (o.status === 'added' && !o.blocks.length) { chain.push({ ver, origin: true }); break; }
+    const blk = o.blocks.find(b => (b.added || []).some(x => +x.line_num === cur));
+    if (blk) {
+      const srt = l => (l || []).slice().sort((a, b) => a.line_num - b.line_num), ad = srt(blk.added), rm = srt(blk.removed);
+      const i = ad.findIndex(x => +x.line_num === cur), pr = rm[i] || null;
+      chain.push({ ver, newNum: cur, newText: ad[i].content, oldNum: pr ? +pr.line_num : null, oldText: pr ? pr.content : null });
+      if (!pr) break;   // a pure insertion: the line started here
+      cur = +pr.line_num; continue;
+    }
+    const A = new Set(), R = new Set();
+    o.blocks.forEach(b => { (b.added || []).forEach(x => A.add(+x.line_num)); (b.removed || []).forEach(x => R.add(+x.line_num)); });
+    let a = 1, b = 1;   // walk both versions together to find where this (unchanged) line sat before
+    while (true) { if (R.has(a)) { a++; continue; } if (A.has(b)) { b++; continue; } if (b === cur) break; a++; b++; }
+    cur = a;
+  }
+  chain.approx = !!(chain[0] && chain[0].newText != null && String(chain[0].newText).trim() !== String(v.lines[n - 1] || '').trim());
+  return { chain };
+}
+function cbvMeta(ver) {
+  const v = _cbv; v.meta = v.meta || {};
+  if (v.meta[ver.key]) return v.meta[ver.key];
+  const ck = 'lambdaChangeColumns', cols = getLambdaColumns(ck), nc = lcdNameCols().ch, dc = lcdDateCol(cols), lo = s => String(s || '').toLowerCase();
+  const descC = cols.find(c => c.key === 'chg_change') || cols.find(c => c !== nc && c !== dc && /change|descr|summary|detail|remark|note/.test(lo(c.label)));
+  const byC = cols.find(c => /\b(by|author|developer|user|owner|who)\b/.test(lo(c.label)));
+  const recs = (nc && dc) ? readLambdaStore(ck).filter(r => r && lcdSameFunction(lcdRecName(r, nc), v.name) && lmParseDate((r.values || {})[dc.key], dc) === ver.iso) : [];
+  const rec = recs[0] || null, val = c => (rec && c) ? lmDisplayValue(c, (rec.values || {})[c.key]).trim() : '';
+  let task = null;
+  if (rec && (rec.taskId != null || rec.taskSyncId || lamOwnerSyncId(rec))) { try { task = lmLinkedTasksCollect(rec, true).rows[0] || null; } catch (e) {} }
+  return (v.meta[ver.key] = { rec, count: recs.length, desc: val(descC), by: val(byC) || userName || 'You', task });
+}
+const cbvWhen = ver => formatCustomDate(ver.iso, 'DD-MM-YYYY') + (ver.time ? ' ' + ver.time : '') + (ver.region ? ' · ' + ver.region : '');
+function cbvSelectLine(n, scroll) {
+  const v = _cbv, box = document.getElementById('cbv-scroll'); if (!v || !v.lines || !box) return;
+  n = Math.max(1, Math.min(v.lines.length, n)); v.line = n; cbvPopHide(true);
+  box.querySelectorAll('.cbv-l.cur').forEach(x => x.classList.remove('cur'));
+  box.querySelectorAll('.cbv-hint').forEach(x => x.remove());
+  const row = box.querySelector('.cbv-l[data-l="' + n + '"]'); if (!row) return;
+  row.classList.add('cur'); if (scroll) row.scrollIntoView({ block: 'nearest' });
+  const hint = document.createElement('span'); hint.className = 'cbv-hint muted'; hint.textContent = 'Loading line history…';
+  row.querySelector('.cbv-t').appendChild(hint);
+  const tok = ++v.ltok;
+  cbvChain(v.sel, n).then(r => { if (_cbv && tok === _cbv.ltok && hint.isConnected) cbvFillHint(hint, r); });
+}
+function cbvFillHint(el, r) {
+  el._r = r; el.classList.add('muted');
+  const msg = { nofile: 'Select the change-log JSON (Masters → Auto Change Detect) to see line history', permission: 'Click this line again and allow access to the change-log JSON', error: 'Could not read the change-log JSON' + (r.msg ? ' (' + r.msg + ')' : '') }[r.err];
+  if (msg) { el.textContent = msg; return; }
+  if (!r.chain.length) { el.textContent = 'No change to this line recorded in the change log up to this backup'; return; }
+  const e = r.chain[0], m = cbvMeta(e.ver), d = m.desc || 'No description logged';
+  el.classList.remove('muted');
+  el.textContent = '● ' + m.by + ', ' + formatCustomDate(e.ver.iso, 'DD-MM-YYYY') + ' • ' + (d.length > 70 ? d.slice(0, 69) + '…' : d) + (e.origin ? ' (file added)' : '');
+}
+function cbvKey(ev) {
+  const v = _cbv; if (!v || !v.lines) return;
+  const k = ev.key, c = v.line || 0, pg = Math.max(5, Math.floor((ev.currentTarget.clientHeight || 300) / 19) - 1);
+  let n = null;
+  if (k === 'ArrowDown') n = c + 1; else if (k === 'ArrowUp') n = c - 1; else if (k === 'PageDown') n = c + pg; else if (k === 'PageUp') n = c - pg;
+  else if (k === 'Home') n = 1; else if (k === 'End') n = v.lines.length;
+  else if (k === 'Enter' || k === ' ') { const h = document.querySelector('#cbv-scroll .cbv-hint'); if (h && h._r && h._r.chain && h._r.chain.length) { ev.preventDefault(); cbvPopShow(h, true); } return; }
+  if (n == null) return;
+  ev.preventDefault(); cbvSelectLine(c ? n : 1, true);
+}
+function cbvPopHide(force) { clearTimeout(_cbvPopT); const p = document.getElementById('cbv-pop'); if (p && (force || !p.dataset.pin)) p.remove(); }
+function cbvPopShow(hint, pin) {
+  const r = hint._r; if (!r || !r.chain || !r.chain.length) return;
+  let p = document.getElementById('cbv-pop');
+  clearTimeout(_cbvPopT);
+  if (p) { if (pin) { if (p.dataset.pin) p.remove(); else p.dataset.pin = '1'; } return; }
+  p = document.createElement('div'); p.id = 'cbv-pop'; p.className = 'cbv-pop'; if (pin) p.dataset.pin = '1';
+  p._r = r; p._i = 0; document.getElementById('cbv-overlay').appendChild(p);
+  cbvPopRender(p);
+  const b = hint.getBoundingClientRect(), h = p.offsetHeight;
+  p.style.left = Math.max(8, Math.min(b.left, innerWidth - p.offsetWidth - 8)) + 'px';
+  p.style.top = Math.max(8, (b.bottom + h + 8 > innerHeight && b.top > h + 8) ? b.top - h - 6 : b.bottom + 4) + 'px';
+  p.onmouseenter = () => clearTimeout(_cbvPopT);
+  p.onmouseleave = () => { if (!p.dataset.pin) { clearTimeout(_cbvPopT); _cbvPopT = setTimeout(() => cbvPopHide(false), 300); } };
+}
+function cbvPopRender(p) {
+  const r = p._r, e = r.chain[p._i], m = cbvMeta(e.ver), t = m.task, row = (k, x) => `<div class="cbv-pr"><span>${k}</span><span>${x}</span></div>`;
+  const sub = e.origin ? '<div class="cbv-pn">The file was added in this change.</div>' :
+    `<div class="lcd-diff" style="margin-top:6px">${e.oldText != null ? `<div class="lcd-dl rm"><span class="n">${e.oldNum}</span><span class="s">−</span><span class="t">${esc(e.oldText) || ' '}</span></div>` : ''}<div class="lcd-dl ad"><span class="n">${e.newNum}</span><span class="s">+</span><span class="t">${esc(e.newText) || ' '}</span></div></div>` +
+    (e.oldText == null ? '<div class="cbv-pn">This line was inserted here (nothing was replaced).</div>' : '');
+  p.innerHTML = `<div class="cbv-pd">${esc(m.desc || (m.rec ? 'No description logged' : 'No Change record is saved for this date'))}</div>` +
+    row('By', esc(m.by)) + row('When', esc(cbvWhen(e.ver))) +
+    row('Task', t ? `${esc(t.heading || '(untitled task)')}${t.ticket ? ' · #' + esc(t.ticket) : ''}${t.project ? ' · ' + esc(t.project) : ''}${t.jumpDate ? ` <button type="button" class="lm-lt-go" onclick="cbvGo('${e.ver.key}')" title="Show in the log"><i class="ti ti-arrow-right"></i></button>` : ''}` : '<i>not linked to a task</i>') +
+    (m.count > 1 ? row('Records', m.count + ' change records on this day (the first is shown)') : '') + sub +
+    (r.chain.approx ? '<div class="cbv-pn">The backup differs from the change log here, so the line match may be approximate.</div>' : '') +
+    (r.chain.length > 1 ? `<div class="cbv-ph">History of this line (${r.chain.length})</div>` + r.chain.map((x, i) => { const mm = cbvMeta(x.ver); return `<button type="button" class="cbv-hr${i === p._i ? ' on' : ''}" onclick="cbvPopPick(${i})">${esc(cbvWhen(x.ver))} · ${esc(mm.by)} · ${esc((mm.desc || 'No description').slice(0, 60))}</button>`; }).join('') : '');
+}
+function cbvPopPick(i) { const p = document.getElementById('cbv-pop'); if (p) { p._i = i; p.dataset.pin = '1'; cbvPopRender(p); } }
+function cbvGo(key) {
+  const m = _cbv && _cbv.meta && _cbv.meta[key], t = m && m.task; if (!t || !t.jumpDate) return;
+  cbvClose(); closeLambdaOverlay(); jumpToDate(t.jumpDate, t.jumpTs);
+}
+document.addEventListener('mousedown', ev => { const p = document.getElementById('cbv-pop'); if (p && p.dataset.pin && !p.contains(ev.target) && !(ev.target.closest && ev.target.closest('.cbv-hint'))) p.remove(); }, true);
+function cbvClose() { cbvPopHide(true); const el = document.getElementById('cbv-overlay'); if (el) el.classList.add('hidden'); _cbv = null; }
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && _cbv) { e.stopImmediatePropagation(); cbvClose(); }
+  if (e.key === 'Escape' && _cbv) { e.stopImmediatePropagation(); if (document.getElementById('cbv-pop')) cbvPopHide(true); else cbvClose(); }
 }, true);
 
 // ── Init ──────────────────────────────────────────────────────────────────────
