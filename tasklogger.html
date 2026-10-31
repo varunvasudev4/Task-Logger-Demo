@@ -2027,6 +2027,34 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
     pointer-events:none;
 }
 
+/* ── Code Backup viewer (View on a Lambda function row): full-screen, VS Code style ── */
+.lm-edit-th.lm-has-hist, .lm-edit-cell.lm-has-hist { width: 144px; }
+.lm-row-code { background: none; border: none; padding: 3px 4px; cursor: pointer; color: var(--text-tertiary); border-radius: var(--radius-md); line-height: 1; font-size: 15px; }
+.lm-row-code:hover { color: var(--green-dark); background: var(--bg-secondary); }
+.cbv-overlay { position: fixed; inset: 0; z-index: 160; background: var(--bg); display: flex; flex-direction: column; }
+.cbv-overlay.hidden { display: none; }
+.cbv-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 14px; border-bottom: 1px solid var(--border-md); background: var(--bg-secondary); }
+.cbv-title { font-weight: 600; font-size: 14px; flex: 1; min-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cbv-datewrap { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); }
+.cbv-datewrap select { font: inherit; padding: 4px 8px; border: 1px solid var(--border-md); border-radius: var(--radius-md); background: var(--bg); color: var(--text-primary); }
+.cbv-count { font-size: 12px; color: var(--text-tertiary); }
+.cbv-body { flex: 1; display: flex; min-height: 0; }
+.cbv-side { width: 260px; min-width: 160px; overflow: auto; border-right: 1px solid var(--border-md); background: var(--bg-secondary); padding: 6px 0; font-size: 12.5px; }
+.cbv-node { display: flex; align-items: center; gap: 5px; padding: 3px 8px; cursor: pointer; white-space: nowrap; user-select: none; color: var(--text-primary); }
+.cbv-node:hover { background: color-mix(in srgb, var(--text-primary) 8%, transparent); }
+.cbv-node.sel { background: color-mix(in srgb, var(--blue-mid) 20%, transparent); font-weight: 600; }
+.cbv-node i { font-size: 14px; color: var(--text-tertiary); flex: none; }
+.cbv-node.dir i.ti-folder, .cbv-node.dir i.ti-folder-open { color: var(--blue-mid); }
+.cbv-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.cbv-tab { padding: 6px 14px; font-size: 12px; border-bottom: 1px solid var(--border-md); background: var(--bg-secondary); color: var(--text-secondary); display: flex; gap: 10px; align-items: center; }
+.cbv-tab b { color: var(--text-primary); }
+.cbv-scroll { flex: 1; overflow: auto; display: flex; align-items: flex-start; font: 12.5px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.cbv-gut, .cbv-code { margin: 0; padding: 10px 0; font: inherit; white-space: pre; tab-size: 4; }
+.cbv-gut { position: sticky; left: 0; padding: 10px 10px 10px 14px; text-align: right; color: var(--text-tertiary); background: var(--bg); user-select: none; border-right: 1px solid var(--border); }
+.cbv-code { padding-left: 14px; padding-right: 30px; flex: 1; color: var(--text-primary); }
+.cbv-c { color: var(--text-tertiary); font-style: italic; } .cbv-s { color: var(--green-dark); } .cbv-n { color: var(--blue-mid); } .cbv-k { color: var(--purple-mid); font-weight: 600; }
+.cbv-msg { margin: auto; padding: 24px; text-align: center; color: var(--text-secondary); font-size: 13px; max-width: 460px; }
+@media (max-width: 700px) { .cbv-body { flex-direction: column; } .cbv-side { width: auto; max-height: 36%; border-right: 0; border-bottom: 1px solid var(--border-md); } }
 </style>
 </head>
 <body>
@@ -2475,6 +2503,18 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
   </div>
 </div>
 
+<!-- Function code viewer (View on a Lambda function row): file tree + code from the Code Backup folder, with a date picker -->
+<div class="cbv-overlay hidden" id="cbv-overlay" role="dialog" aria-modal="true" aria-label="Function code">
+  <div class="cbv-head">
+    <i class="ti ti-code" style="font-size:18px;color:var(--blue-mid)"></i>
+    <div class="cbv-title" id="cbv-title">Code</div>
+    <label class="cbv-datewrap" id="cbv-datewrap"><i class="ti ti-calendar"></i> Backup date <select id="cbv-date" onchange="cbvSetDate(+this.value)"></select></label>
+    <span class="cbv-count" id="cbv-count"></span>
+    <button type="button" class="btn-icon" onclick="cbvClose()" title="Close (Esc)" aria-label="Close code viewer"><i class="ti ti-x"></i></button>
+  </div>
+  <div class="cbv-body"><div class="cbv-side" id="cbv-side"></div><div class="cbv-main" id="cbv-main"></div></div>
+</div>
+
 <!-- Lambda Functions full-page overlay (Dashboard ▾ → Lambda Functions; only reachable while the Lambda logging flag is on) -->
 <div class="lm-overlay hidden" id="lambda-overlay" role="dialog" aria-modal="true" aria-label="Lambda Functions">
   <div class="lm-head">
@@ -2763,6 +2803,7 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
         <button class="tab-btn" onclick="switchTab('lambdaFunctionColumns')"><i class="ti ti-function" style="font-size:13px"></i> Function Columns</button>
         <button class="tab-btn" onclick="switchTab('lambdaChangeColumns')"><i class="ti ti-git-pull-request" style="font-size:13px"></i> Change Columns</button>
         <button class="tab-btn" onclick="switchTab('lambdaAutoDetect')"><i class="ti ti-radar" style="font-size:13px"></i> Auto Change Detect</button>
+        <button class="tab-btn" onclick="switchTab('lambdaCodeBackup')"><i class="ti ti-folder-code" style="font-size:13px"></i> Code Backup</button>
       </nav>
       <div class="master-nav-backdrop" id="master-nav-backdrop" onclick="closeMasterNav()"></div>
       <div class="master-content-workspace">
@@ -16257,7 +16298,7 @@ function openMasters() {
   _masterNavReturnFocusEl = document.activeElement;
   if (typeof applyMastersTabFilter === 'function') applyMastersTabFilter(false); // Masters button: hides User, Colors, Wallpaper + Synchronization
   if (typeof PROFILE_ONLY_TABS !== 'undefined' && PROFILE_ONLY_TABS.includes(activeMastersTab)) switchTab('lists');
-  if (!isLambdaLoggingEnabled() && (activeMastersTab === 'lambdaFunctionColumns' || activeMastersTab === 'lambdaChangeColumns' || activeMastersTab === 'lambdaAutoDetect')) switchTab('lists');
+  if (!isLambdaLoggingEnabled() && (activeMastersTab === 'lambdaFunctionColumns' || activeMastersTab === 'lambdaChangeColumns' || activeMastersTab === 'lambdaAutoDetect' || activeMastersTab === 'lambdaCodeBackup')) switchTab('lists');
   document.getElementById('masters-modal').classList.remove('hidden');
   // Default to user tab so name is easy to set; switch to projects tab otherwise
   const addSec = document.getElementById('master-add-section');
@@ -17183,6 +17224,10 @@ function renderMastersContent() {
   }
   if (activeMastersTab === 'lambdaAutoDetect') {
     content.innerHTML = renderLambdaAutoDetectHTML();
+    return;
+  }
+  if (activeMastersTab === 'lambdaCodeBackup') {
+    content.innerHTML = renderLambdaCodeBackupHTML();
     return;
   }
   if (activeMastersTab === 'lists') {
@@ -19093,7 +19138,7 @@ function wpBindStage() {
 // Masters tabs visible when the popup is opened from the header photo (User, Colors,
 // Wallpaper and Synchronization). The Masters button shows every other tab.
 const PROFILE_ONLY_TABS = ['user', 'colors', 'wallpaper', 'sync'];
-const LAMBDA_ONLY_TABS = ['lambdaFunctionColumns', 'lambdaChangeColumns', 'lambdaAutoDetect'];
+const LAMBDA_ONLY_TABS = ['lambdaFunctionColumns', 'lambdaChangeColumns', 'lambdaAutoDetect', 'lambdaCodeBackup'];
 let _mastersProfileMode = false;
 function applyMastersTabFilter(profileOnly) {
   _mastersProfileMode = !!profileOnly;
@@ -20715,17 +20760,17 @@ function lmRenderTable() {
   const widths = lmWidths[k];
   const hasHist = k === 'lambdaFunctionColumns';   // the Functions tab gets a History button beside Edit
   const hasLink = k === 'lambdaChangeColumns';     // the Changes tab gets a Linked task button beside Edit
-  const colgroup = '<col data-col="__sel" style="width:40px">' + cols.map(c => `<col data-col="${esc(c.key)}" style="width:${widths[c.key] || defaultLogColumnWidth(c)}px">`).join('') + `<col data-col="__edit" style="width:${hasHist ? 108 : hasLink ? 108 : 44}px">`;
+  const colgroup = '<col data-col="__sel" style="width:40px">' + cols.map(c => `<col data-col="${esc(c.key)}" style="width:${widths[c.key] || defaultLogColumnWidth(c)}px">`).join('') + `<col data-col="__edit" style="width:${hasHist ? 144 : hasLink ? 108 : 44}px">`;
   const thead = '<th data-col="__sel" class="lm-sel-th"><input type="checkbox" id="lm-all-cb" title="Select all" aria-label="Select all rows"></th>' + cols.map(c => {
     const eS = lmEffectiveSort(k, s), arrow = eS && eS.key === c.key ? (eS.dir === 'asc' ? '▲' : '▼') : '';
     return `<th class="log-th-sortable" data-col="${esc(c.key)}">${esc(c.label)}<span class="col-sort-arrow">${arrow}</span>` +
       `<button type="button" class="col-pin-icon" data-col="${esc(c.key)}" title="Pin column">${LOG_TABLE_PIN_ICON_SVG}</button>` +
       `<span class="col-resize-handle"></span></th>`;
-  }).join('') + `<th data-col="__edit" class="lm-edit-th${hasHist ? ' lm-has-hist' : ''}${hasLink ? ' lm-has-link' : ''}" aria-label="${hasHist ? 'Add entry, linked tasks, history and edit' : hasLink ? 'Add entry, linked task and edit' : 'Add entry and edit'}"><button type="button" class="lm-add-btn" title="Add entry" aria-label="Add entry"><i class="ti ti-plus"></i></button></th>`;
+  }).join('') + `<th data-col="__edit" class="lm-edit-th${hasHist ? ' lm-has-hist' : ''}${hasLink ? ' lm-has-link' : ''}" aria-label="${hasHist ? 'Add entry, view code, linked tasks, history and edit' : hasLink ? 'Add entry, linked task and edit' : 'Add entry and edit'}"><button type="button" class="lm-add-btn" title="Add entry" aria-label="Add entry"><i class="ti ti-plus"></i></button></th>`;
   const tbody = rows.map(r => `<tr data-id="${esc(r.id)}"><td data-col="__sel" class="lm-sel-cell"><input type="checkbox" class="lm-row-cb" data-id="${esc(r.id)}" aria-label="Select row"></td>` + cols.map(c => {
     const v = lmDisplayValue(c, r.values && r.values[c.key]);
     return `<td data-col="${esc(c.key)}" title="${esc(v)}">${esc(v)}</td>`;
-  }).join('') + `<td data-col="__edit" class="lm-edit-cell${hasHist ? ' lm-has-hist' : ''}${hasLink ? ' lm-has-link' : ''}">${hasHist ? `<button type="button" class="lm-row-hist" data-id="${esc(r.id)}" title="History (changes made to this function)" aria-label="History"><i class="ti ti-history"></i></button><button type="button" class="lm-row-tasks" data-id="${esc(r.id)}" title="Linked tasks (tasks that added or changed this function)" aria-label="Linked tasks"><i class="ti ti-link"></i></button>` : ''}${hasLink ? `<button type="button" class="lm-row-view" data-id="${esc(r.id)}" title="View change (the file changes from the change log)" aria-label="View change"><i class="ti ti-eye"></i></button><button type="button" class="lm-row-tasks" data-id="${esc(r.id)}" title="Linked task (the task that made this change)" aria-label="Linked task"><i class="ti ti-link"></i></button>` : ''}<button type="button" class="lm-row-edit" data-id="${esc(r.id)}" title="Edit this record" aria-label="Edit record"><i class="ti ti-pencil"></i></button></td></tr>`).join('');
+  }).join('') + `<td data-col="__edit" class="lm-edit-cell${hasHist ? ' lm-has-hist' : ''}${hasLink ? ' lm-has-link' : ''}">${hasHist ? `<button type="button" class="lm-row-code" data-id="${esc(r.id)}" title="View code (latest backup, with older backup dates)" aria-label="View code"><i class="ti ti-eye"></i></button><button type="button" class="lm-row-hist" data-id="${esc(r.id)}" title="History (changes made to this function)" aria-label="History"><i class="ti ti-history"></i></button><button type="button" class="lm-row-tasks" data-id="${esc(r.id)}" title="Linked tasks (tasks that added or changed this function)" aria-label="Linked tasks"><i class="ti ti-link"></i></button>` : ''}${hasLink ? `<button type="button" class="lm-row-view" data-id="${esc(r.id)}" title="View change (the file changes from the change log)" aria-label="View change"><i class="ti ti-eye"></i></button><button type="button" class="lm-row-tasks" data-id="${esc(r.id)}" title="Linked task (the task that made this change)" aria-label="Linked task"><i class="ti ti-link"></i></button>` : ''}<button type="button" class="lm-row-edit" data-id="${esc(r.id)}" title="Edit this record" aria-label="Edit record"><i class="ti ti-pencil"></i></button></td></tr>`).join('');
   const msg = rows.length ? '' : `<div class="lm-empty">${total === 0
     ? 'No records yet. Import data with More → Import / Export (choose ' + esc(LAMBDA_COLUMN_STORES[k].title) + ').'
     : 'No records match the current search, filters and date range.'}</div>`;
@@ -20741,6 +20786,8 @@ function lmRenderTable() {
     if (ad) { e.stopPropagation(); lmAddOpen(); return; }
     const vw = e.target.closest && e.target.closest('.lm-row-view');
     if (vw) { e.stopPropagation(); lmViewChange(vw.dataset.id); return; }
+    const cv = e.target.closest && e.target.closest('.lm-row-code');
+    if (cv) { e.stopPropagation(); lmViewCode(cv.dataset.id); return; }
     const lt = e.target.closest && e.target.closest('.lm-row-tasks');
     if (lt) { e.stopPropagation(); lmTasksOpen(lt.dataset.id, lmActiveTab === 'lambdaChangeColumns'); return; }
     const h = e.target.closest && e.target.closest('.lm-row-hist');
@@ -26933,6 +26980,203 @@ function lcdInit() {
 // Called after a task is completed.
 function lcdOnTaskComplete() { if (lcdSupported()) lcdCheck({ interactive: true }); }
 
+// ── Code Backup master + function code viewer ─────────────────────────────────
+// Masters → Lambda Logging Masters → Code Backup: pick the backup root folder on this computer (desktop Chrome / Edge).
+// Layout expected:  <root>/<function name>/<date folder>/<files…>. The folder is only READ, never written; its handle lives
+// in IndexedDB on this device (not part of Drive sync / backup). View (eye) on a Functions row opens the viewer.
+const CBK_META_KEY = 'ttl_cbk_meta', CBK_IDB_KEY = 'codeBackupDir';
+let _cbkHandle = null, _cbv = null;
+function cbkSupported() { try { return typeof window.showDirectoryPicker === 'function'; } catch (e) { return false; } }
+function cbkLoadMeta() { try { const p = JSON.parse(localStorage.getItem(CBK_META_KEY) || 'null'); if (p && typeof p === 'object') return p; } catch (e) {} return {}; }
+function cbkSaveMeta(m) { try { localStorage.setItem(CBK_META_KEY, JSON.stringify(m)); } catch (e) {} }
+function cbkIdb(mode, fn) { return lcdDb().then(db => new Promise((res, rej) => { const t = db.transaction('h', mode), q = fn(t.objectStore('h')); t.oncomplete = () => res(q && q.result); t.onerror = () => rej(t.error); })); }
+function cbkIdbGet() { return cbkIdb('readonly', s => s.get(CBK_IDB_KEY)).then(h => h || null); }
+function cbkIdbPut(h) { return cbkIdb('readwrite', s => s.put(h, CBK_IDB_KEY)); }
+function cbkIdbDel() { return cbkIdb('readwrite', s => s.delete(CBK_IDB_KEY)); }
+async function cbkPerm(h, ask) {
+  try {
+    if ((await h.queryPermission({ mode: 'read' })) === 'granted') return true;
+    return ask ? (await h.requestPermission({ mode: 'read' })) === 'granted' : false;
+  } catch (e) { return false; }
+}
+function cbkNorm(n) { return lcdBaseName(n).toLowerCase().replace(/[^a-z0-9]/g, ''); }
+// Sortable key from a date-named folder: 2026-10-31, 2026-10-31_14-30, 31-10-2026, 20261031 …
+function cbkDateKey(name) {
+  const t = (a, b, c) => (a || '00') + (b || '00') + (c || '00');
+  let m = /(\d{4})[-_.](\d{2})[-_.](\d{2})(?:[T _-]+(\d{2})[-_.:]?(\d{2})(?:[-_.:]?(\d{2}))?)?/.exec(name);
+  if (m) return m[1] + m[2] + m[3] + t(m[4], m[5], m[6]);
+  m = /(\d{2})[-_.](\d{2})[-_.](\d{4})(?:[T _-]+(\d{2})[-_.:]?(\d{2})(?:[-_.:]?(\d{2}))?)?/.exec(name);
+  if (m) return m[3] + m[2] + m[1] + t(m[4], m[5], m[6]);
+  m = /(\d{4})(\d{2})(\d{2})/.exec(name);
+  return m ? m[1] + m[2] + m[3] + '000000' : '';
+}
+async function cbkSubdirs(h) { const out = []; for await (const e of h.values()) if (e.kind === 'directory') out.push(e); return out; }
+async function cbkScan() {
+  const m = cbkLoadMeta();
+  if (!_cbkHandle) return;
+  m.dirName = _cbkHandle.name;
+  if (await cbkPerm(_cbkHandle, false)) {
+    try { m.fnCount = (await cbkSubdirs(_cbkHandle)).length; m.lastStatus = 'Folder is readable'; m.lastChecked = Date.now(); }
+    catch (e) { m.lastStatus = 'Could not read the folder: ' + e.message; }
+  } else m.lastStatus = 'Permission needed — click Check now to allow read access';
+  cbkSaveMeta(m);
+  cbkRefreshMaster();
+}
+function cbkRefreshMaster() {
+  const modal = document.getElementById('masters-modal');
+  if (typeof activeMastersTab !== 'undefined' && activeMastersTab === 'lambdaCodeBackup' && modal && !modal.classList.contains('hidden')) renderMastersContent();
+}
+async function cbkPick() {
+  if (!cbkSupported()) return;
+  try {
+    const h = await window.showDirectoryPicker({ id: 'ttl-code-backup', mode: 'read' });
+    _cbkHandle = h; await cbkIdbPut(h);
+    cbkSaveMeta({ dirName: h.name });
+    await cbkScan();
+  } catch (e) { if (!e || e.name !== 'AbortError') console.warn('Code backup folder pick failed', e); }
+}
+async function cbkCheck() { if (_cbkHandle) { await cbkPerm(_cbkHandle, true); await cbkScan(); } }
+function cbkClear() { _cbkHandle = null; cbkIdbDel().catch(() => {}); try { localStorage.removeItem(CBK_META_KEY); } catch (e) {} cbkRefreshMaster(); }
+function cbkInit() {
+  if (!cbkSupported()) return;
+  cbkIdbGet().then(h => { _cbkHandle = h; if (h) cbkScan(); }).catch(() => {});
+}
+function renderLambdaCodeBackupHTML() {
+  const m = cbkLoadMeta(), has = !!m.dirName;
+  const fmt = ts => ts ? new Date(ts).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+  const row = (k, v) => `<div style="display:flex;gap:8px;font-size:12.5px;padding:3px 0"><span style="width:130px;color:var(--text-tertiary)">${k}</span><span style="flex:1;color:var(--text-primary);word-break:break-word">${v}</span></div>`;
+  return `<div style="padding:4px 2px;max-width:640px">
+    <div style="font-size:15px;font-weight:600;margin-bottom:4px"><i class="ti ti-folder-code" style="color:var(--blue-mid)"></i> Code Backup</div>
+    <div style="font-size:12.5px;color:var(--text-secondary);margin-bottom:12px">Pick the folder on this computer that holds your Lambda code backups. Inside it, each function has a folder named after the function, and inside that one folder per backup date holding the code files (js, json, html …). The <b>View</b> button on a function in Lambda Functions opens the latest backup, with a date list to switch between older ones. The folder is only read, never changed.</div>
+    ${cbkSupported() ? '' : `<div style="font-size:12px;color:var(--text-tertiary);margin-bottom:10px">This browser cannot pick a folder. Use Chrome or Edge on a desktop computer.</div>`}
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+      <button class="btn btn-primary" onclick="cbkPick()" ${cbkSupported() ? '' : 'disabled'}><i class="ti ti-folder-search"></i> ${has ? 'Change folder' : 'Select folder'}</button>
+      ${has ? `<button class="btn" onclick="cbkCheck()"><i class="ti ti-refresh"></i> Check now</button><button class="btn" onclick="cbkClear()"><i class="ti ti-x"></i> Remove</button>` : ''}
+    </div>
+    ${has ? `<div style="border:1px solid var(--border-md);border-radius:var(--radius-md);padding:8px 12px">
+      ${row('Folder', esc(m.dirName))}${row('Function folders', m.fnCount == null ? '—' : String(m.fnCount))}${row('Last checked', fmt(m.lastChecked))}${row('Status', esc(m.lastStatus || '—'))}
+    </div>` : `<div style="font-size:12.5px;color:var(--text-tertiary)">No folder selected yet.</div>`}
+  </div>`;
+}
+
+// View (eye) on a Functions row
+function lmViewCode(id) {
+  const fk = 'lambdaFunctionColumns', rec = readLambdaStore(fk).find(r => r && r.id === id);
+  if (!rec) return;
+  const cols = getLambdaColumns(fk), norm = v => String(v == null ? '' : v).trim().toLowerCase();
+  const nc = cols.find(c => c.key === 'fn_name') || cols.find(c => norm(c.label) === 'name') || cols[0];
+  const name = nc ? String((rec.values || {})[nc.key] || '').trim() : '';
+  cbvOpen(name);
+}
+function cbvMsg(html) { document.getElementById('cbv-side').innerHTML = ''; document.getElementById('cbv-main').innerHTML = `<div class="cbv-msg">${html}</div>`; }
+async function cbvOpen(name) {
+  _cbv = { name, dates: [], di: 0, tree: [], sel: null, open: new Set(), tok: 0 };
+  document.getElementById('cbv-title').textContent = name ? 'Code — ' + name : 'Code';
+  document.getElementById('cbv-count').textContent = '';
+  document.getElementById('cbv-date').innerHTML = '';
+  document.getElementById('cbv-overlay').classList.remove('hidden');
+  const setup = `<br><br><button type="button" class="btn" onclick="cbvClose();openMasters();switchTab('lambdaCodeBackup')"><i class="ti ti-folder-code"></i> Open Code Backup master</button>`;
+  if (!name) return cbvMsg('This function has no Name yet, so its backup folder cannot be found.');
+  if (!cbkSupported()) return cbvMsg('Viewing code needs Chrome or Edge on a desktop computer.');
+  if (!_cbkHandle) { try { _cbkHandle = await cbkIdbGet(); } catch (e) {} }
+  if (!_cbkHandle) return cbvMsg('No backup folder is selected yet.' + setup);
+  if (!(await cbkPerm(_cbkHandle, true))) return cbvMsg('Permission to read the backup folder was not granted.' + setup);
+  cbvMsg('Loading…');
+  try {
+    let fnDir = null;
+    for (const d of await cbkSubdirs(_cbkHandle)) if (cbkNorm(d.name) === cbkNorm(name)) { fnDir = d; break; }
+    if (!fnDir) return cbvMsg(`No folder named <b>${esc(name)}</b> was found inside <b>${esc(_cbkHandle.name)}</b>.` + setup);
+    let dates = (await cbkSubdirs(fnDir)).map(h => ({ name: h.name, h, key: cbkDateKey(h.name) }));
+    dates.sort((a, b) => (b.key || '').localeCompare(a.key || '') || b.name.localeCompare(a.name, undefined, { numeric: true }));
+    if (!dates.length) dates = [{ name: '(files in function folder)', h: fnDir, key: '' }];
+    _cbv.dates = dates;
+    document.getElementById('cbv-date').innerHTML = dates.map((d, i) => `<option value="${i}">${esc(d.name)}${i === 0 ? ' (latest)' : ''}</option>`).join('');
+    document.getElementById('cbv-datewrap').title = dates.length + ' backup' + (dates.length === 1 ? '' : 's') + ' available';
+    await cbvSetDate(0);
+  } catch (e) { cbvMsg('Could not read the backup folder: ' + esc(e.message)); }
+}
+async function cbvReadTree(dir, base, depth) {
+  const out = [];
+  for await (const e of dir.values()) {
+    if (e.kind === 'directory') { if (depth < 8 && e.name !== 'node_modules' && e.name !== '.git') out.push({ name: e.name, path: base + e.name, dir: true, kids: await cbvReadTree(e, base + e.name + '/', depth + 1) }); }
+    else out.push({ name: e.name, path: base + e.name, dir: false, h: e });
+  }
+  out.sort((a, b) => (a.dir === b.dir ? a.name.localeCompare(b.name, undefined, { numeric: true }) : a.dir ? -1 : 1));
+  return out;
+}
+function cbvFiles(nodes, acc) { nodes.forEach(n => n.dir ? cbvFiles(n.kids, acc) : acc.push(n)); return acc; }
+async function cbvSetDate(i) {
+  const v = _cbv; if (!v || !v.dates[i]) return;
+  const tok = ++v.tok, prev = v.sel;
+  v.di = i; document.getElementById('cbv-date').value = String(i);
+  cbvMsg('Loading…');
+  let tree;
+  try { tree = await cbvReadTree(v.dates[i].h, '', 0); } catch (e) { return cbvMsg('Could not read this backup: ' + esc(e.message)); }
+  if (tok !== v.tok) return;
+  v.tree = tree;
+  const files = cbvFiles(tree, []);
+  document.getElementById('cbv-count').textContent = files.length + ' file' + (files.length === 1 ? '' : 's');
+  const fn = v.name.toLowerCase();
+  const pick = files.find(f => f.path === prev) || files.find(f => /^(index|main|handler|lambda_function)\.\w+$/i.test(f.name)) || files.find(f => f.name.toLowerCase().indexOf(fn) === 0) || files[0];
+  v.open = new Set(); const mark = (nodes, p) => nodes.forEach(n => { if (n.dir) { if (p && (p === n.path || p.indexOf(n.path + '/') === 0)) v.open.add(n.path); mark(n.kids, p); } }); mark(tree, pick && pick.path);
+  v.sel = pick ? pick.path : null;
+  cbvRenderTree();
+  if (pick) cbvShowFile(pick); else document.getElementById('cbv-main').innerHTML = '<div class="cbv-msg">This backup has no files.</div>';
+}
+function cbvRenderTree() {
+  const v = _cbv; if (!v) return;
+  const draw = (nodes, d) => nodes.map(n => n.dir
+    ? `<div class="cbv-node dir" data-p="${esc(n.path)}" style="padding-left:${8 + d * 14}px"><i class="ti ti-chevron-${v.open.has(n.path) ? 'down' : 'right'}"></i><i class="ti ti-folder${v.open.has(n.path) ? '-open' : ''}"></i>${esc(n.name)}</div>${v.open.has(n.path) ? draw(n.kids, d + 1) : ''}`
+    : `<div class="cbv-node file${v.sel === n.path ? ' sel' : ''}" data-p="${esc(n.path)}" style="padding-left:${8 + d * 14 + 16}px" title="${esc(n.path)}"><i class="ti ti-file-code"></i>${esc(n.name)}</div>`).join('');
+  const side = document.getElementById('cbv-side');
+  side.innerHTML = draw(v.tree, 0);
+  side.onclick = ev => {
+    const el = ev.target.closest && ev.target.closest('.cbv-node'); if (!el) return;
+    const p = el.dataset.p;
+    if (el.classList.contains('dir')) { v.open.has(p) ? v.open.delete(p) : v.open.add(p); cbvRenderTree(); return; }
+    const f = cbvFiles(v.tree, []).find(x => x.path === p);
+    if (f) { v.sel = p; cbvRenderTree(); cbvShowFile(f); }
+  };
+}
+const CBV_KW = /\b(?:const|let|var|function|return|if|else|for|while|do|switch|case|break|continue|new|class|extends|import|export|from|default|async|await|try|catch|finally|throw|typeof|instanceof|in|of|null|undefined|true|false|this|def|self|None|True|False|elif|lambda|with|as|pass|raise|yield|print|require|module|exports)\b/;
+function cbvHighlight(text, name) {
+  const ext = (name.split('.').pop() || '').toLowerCase(), e = s => esc(s);
+  if (text.length > 300000 || /^(md|txt|log|csv)$/.test(ext)) return e(text);
+  let re;
+  if (/^(html|htm|xml|svg|vue)$/.test(ext)) re = /(<!--[\s\S]*?-->)|(<\/?[a-zA-Z][^>]*>)|()()/g;
+  else {
+    const hash = /^(py|sh|yml|yaml|rb|toml)$/.test(ext) ? '|#[^\n]*' : '';
+    re = new RegExp('(\\/\\*[\\s\\S]*?\\*\\/|\\/\\/[^\\n]*' + hash + ')|("(?:\\\\.|[^"\\\\\\n])*"|\'(?:\\\\.|[^\'\\\\\\n])*\'|`(?:\\\\.|[^`\\\\])*`)|(\\b\\d+(?:\\.\\d+)?\\b)|(' + CBV_KW.source + ')', 'g');
+  }
+  const html = /^(html|htm|xml|svg|vue)$/.test(ext);
+  let out = '', last = 0, m;
+  while ((m = re.exec(text))) {
+    if (m[0] === '') { re.lastIndex++; continue; }
+    out += e(text.slice(last, m.index));
+    const cls = html ? (m[1] ? 'c' : 'k') : (m[1] ? 'c' : m[2] ? 's' : m[3] ? 'n' : 'k');
+    out += `<span class="cbv-${cls}">${e(m[0])}</span>`;
+    last = m.index + m[0].length;
+  }
+  return out + e(text.slice(last));
+}
+async function cbvShowFile(f) {
+  const main = document.getElementById('cbv-main'), tok = _cbv && _cbv.tok;
+  let file, text;
+  try { file = await f.h.getFile(); } catch (e) { main.innerHTML = `<div class="cbv-msg">Could not open ${esc(f.name)}: ${esc(e.message)}</div>`; return; }
+  const kb = file.size >= 1048576 ? (file.size / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(file.size / 1024)) + ' KB';
+  const head = `<div class="cbv-tab"><b>${esc(f.name)}</b><span>${esc(f.path)}</span><span>${kb}</span></div>`;
+  if (file.size > 2097152) { main.innerHTML = head + '<div class="cbv-msg">This file is larger than 2 MB, so it is not shown.</div>'; return; }
+  try { text = await file.text(); } catch (e) { main.innerHTML = head + '<div class="cbv-msg">Could not read this file.</div>'; return; }
+  if (!_cbv || tok !== _cbv.tok || _cbv.sel !== f.path) return;
+  if (text.indexOf('\u0000') !== -1) { main.innerHTML = head + '<div class="cbv-msg">Binary file — no preview.</div>'; return; }
+  const n = text.split('\n').length;
+  main.innerHTML = head + `<div class="cbv-scroll"><pre class="cbv-gut">${Array.from({ length: n }, (_, i) => i + 1).join('\n')}</pre><pre class="cbv-code">${cbvHighlight(text, f.name)}</pre></div>`;
+}
+function cbvClose() { const el = document.getElementById('cbv-overlay'); if (el) el.classList.add('hidden'); _cbv = null; }
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && _cbv) { e.stopImmediatePropagation(); cbvClose(); }
+}, true);
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 loadState();
 try { renderHeaderAvatar(); } catch (e) {}
@@ -26955,6 +27199,7 @@ updateSummaryButtonVisibility();
 initBreakTimer();
 initAutoBackup();
 lcdInit();
+cbkInit();
 if (!tasks.some(t => !isTaskDeleted(t))) addTask();
 
 // Scheduled recurring tasks (plan.startTime) are hidden until their exact
