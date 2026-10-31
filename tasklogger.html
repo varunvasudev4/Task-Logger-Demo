@@ -4529,6 +4529,7 @@ function applyRemoteLogEntriesIfNewer(remoteParsed) {
   // is false, i.e. there is no such pending local edit in the first place.
   logEntries = remoteParsed.logEntries;
   adoptRemoteDomainMeta('logEntries', remoteMeta);
+  try { if (typeof reconcileLogEntryTaskLinkage === 'function') reconcileLogEntryTaskLinkage(); } catch (e) {}   // re-point taskId at this device's own task ids right away
   return true;
 }
 
@@ -7510,6 +7511,11 @@ const SingleTaskMerge = (function () {
     const lv = (localTask._sync && typeof localTask._sync.version === 'number') ? localTask._sync.version : 0;
     const rv = (remoteTask._sync && typeof remoteTask._sync.version === 'number') ? remoteTask._sync.version : 0;
     if (rv !== lv) return rv > lv;
+    // Duplicate/zombie-task fix: on an exact Version tie (two devices each made one edit since the last
+    // sync) a COMPLETED task must win over a running/paused/idle copy, otherwise the device clock decides
+    // and a stop done on one device can be overwritten by the other device's still-running copy.
+    const lDone = localTask.status === 'done', rDone = remoteTask.status === 'done';
+    if (lDone !== rDone) return rDone;
     const lm = (localTask._sync && localTask._sync.modifiedAt) || 0;
     const rm = (remoteTask._sync && remoteTask._sync.modifiedAt) || 0;
     return rm > lm;
@@ -12207,11 +12213,46 @@ LockSyncTrigger.register();
 // ── End Hidden-State Lock Sync Trigger (Phase 27) ─────────────────────────────────
 
 // ── Persistence ───────────────────────────────────────────────────────────────
+function ttlScheduleStaleReload(immediate) {
+  try {
+    const last = parseInt(sessionStorage.getItem('ttl_stale_reload_at') || '0', 10);
+    if (Date.now() - last < 15000) return false;   // just reloaded: never loop
+  } catch (e) {}
+  if (window._ttlStaleTimer) return true;          // already scheduled
+  const attempt = () => {
+    const a = document.activeElement;
+    const editing = !!(a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT' || a.isContentEditable));
+    if (!immediate && !document.hidden && editing) { window._ttlStaleTimer = setTimeout(attempt, 2000); return; }   // let the user finish typing
+    try { sessionStorage.setItem('ttl_stale_reload_at', String(Date.now())); } catch (e) {}
+    location.reload();
+  };
+  window._ttlStaleTimer = setTimeout(attempt, immediate ? 50 : 1200);
+  return true;
+}
+// Another window of the app saved tasks / log: this window is now stale, so bring it up to date before the
+// user acts on out-of-date data. (The 'storage' event never fires in the window that made the change.)
+window.addEventListener('storage', ev => {
+  if (!ev || (ev.key !== 'ttl_tasks' && ev.key !== 'ttl_log')) return;
+  if (window._ttlResetting) return;
+  const mine = ev.key === 'ttl_tasks' ? window._ttlSeenTasksRaw : window._ttlSeenLogRaw;
+  if (ev.newValue === mine) return;
+  ttlScheduleStaleReload(false);
+});
 function saveState() {
   if (window._ttlResetting) return; // Reset in progress — never re-write what was just wiped
   try {
-    localStorage.setItem('ttl_tasks',    JSON.stringify(tasks));
-    localStorage.setItem('ttl_log',      JSON.stringify(logEntries));
+    const _tasksJson = JSON.stringify(tasks), _logJson = JSON.stringify(logEntries);
+    // Stale-window guard: this window holds its own in-memory copy of tasks/log and writes it back WHOLE.
+    // If another tab/window of the app saved since this one last loaded/saved, writing now would silently
+    // undo that window's work (a stop or complete coming back as "running", duplicated rows). Reload to the
+    // fresh data instead; ttlScheduleStaleReload() refuses when it already reloaded in the last 15 s, in which
+    // case this falls back to the old behaviour rather than ever looping.
+    if (window._ttlSeenReady && (localStorage.getItem('ttl_tasks') !== window._ttlSeenTasksRaw || localStorage.getItem('ttl_log') !== window._ttlSeenLogRaw)) {
+      if (ttlScheduleStaleReload(true)) return;
+    }
+    localStorage.setItem('ttl_tasks',    _tasksJson);
+    localStorage.setItem('ttl_log',      _logJson);
+    window._ttlSeenTasksRaw = _tasksJson; window._ttlSeenLogRaw = _logJson; window._ttlSeenReady = true;
     localStorage.setItem('ttl_todo_items',   JSON.stringify(todoItems));
     localStorage.setItem('ttl_todo_counter', String(todoIdCounter));
     localStorage.setItem('ttl_todo_tombstones', JSON.stringify(todoTombstones));
@@ -12263,6 +12304,7 @@ function loadState() {
   try {
     const t = localStorage.getItem('ttl_tasks');
     const l = localStorage.getItem('ttl_log');
+    window._ttlSeenTasksRaw = t; window._ttlSeenLogRaw = l; window._ttlSeenReady = true;   // baseline for the stale-window guard in saveState()
     const td = localStorage.getItem('ttl_todo_items');
     const tdCounter = localStorage.getItem('ttl_todo_counter');
     const counter = localStorage.getItem('ttl_counter');
@@ -12567,7 +12609,7 @@ document.addEventListener('visibilitychange', () => {
           // Phase 1: auto-pause is a business-data edit — update sync metadata only.
           touchSyncMetadata(task);
           // Sync any open log entry
-          const openEntry = logEntries.find(e => e.taskId === task.id && e.endTs === null);
+          const openEntry = logEntries.find(e => ttlEntryMatchesTask(e, task.id) && e.endTs === null);
           if (openEntry) { /* will be finalized on completion */ }
         }
       });
@@ -13242,7 +13284,7 @@ function openCompleteModal(id) {
   // one actually being edited. Falling back to "most recent completed" then "any" preserves
   // the original reopen-repopulation behavior for edge cases with no open entry.
   const lastEntry =
-    [...logEntries].reverse().find(e => e.taskId === id && e.endTs === null) ||
+    [...logEntries].reverse().find(e => ttlEntryMatchesTask(e, id) && e.endTs === null) ||
     [...logEntries].reverse().find(e => e.taskId === id && e.endTs !== null) ||
     [...logEntries].reverse().find(e => e.taskId === id);
 
@@ -13772,7 +13814,7 @@ function submitComplete() {
   // only fall back to the entry's/task's already-saved value (customFields for custom
   // columns) when no popup element exists at all — i.e. a custom multi-select column
   // configured to appear on the Task Card only (showInCompletePopup:false).
-  const openEntry = [...logEntries].reverse().find(e => e.taskId===id && e.endTs===null);
+  const openEntry = [...logEntries].reverse().find(e => ttlEntryMatchesTask(e, id) && e.endTs===null);
   const multiFieldsToSplit = getConfigurableColumns()
     .filter(c => c.type === 'multilist')
     .map(c => {
@@ -14223,7 +14265,7 @@ function reopenTask(taskId) {
 
   // Sync accumulatedMs from the log entry's saved durationSecs (respects any manual adjustment)
   // so the timer resumes from the edited/adjusted time, not the raw tracked time.
-  const entry = [...logEntries].reverse().find(e => e.taskId === taskId && e.endTs !== null);
+  const entry = [...logEntries].reverse().find(e => ttlEntryMatchesTask(e, taskId) && e.endTs !== null);
   // Phase 22L (BUG 2): capture the entity key BEFORE any mutation below could change
   // startTs, same "capture first" idiom finalizeMarkComplete()/editLogEntry() already
   // use for their own recordSyncChange() calls — taskId + startTs is the closest
@@ -14527,7 +14569,7 @@ function toggleTaskLambda(id, on) {
   const lblEl = () => document.querySelector('#row-' + id + ' .task-lambda-chk');
   const apply = (val) => {
     task.includesLambda = !!val;
-    const oe = [...logEntries].reverse().find(e => e.taskId === id && e.endTs === null);   // keep the running log row in step
+    const oe = [...logEntries].reverse().find(e => ttlEntryMatchesTask(e, id) && e.endTs === null);   // keep the running log row in step
     if (oe) { if (val) oe.includesLambda = true; else delete oe.includesLambda; }
     if (!val) lambdaClearEntryFlags(id, null);
     touchSyncMetadata(task);
@@ -14553,7 +14595,7 @@ function updateTaskField(id, field, val) {
   if (el && el.type === 'hidden') el = document.getElementById(`meta-${field}-${id}-trigger`) || el;
   if (el && val && val.trim()) el.classList.remove('invalid');
   // Sync open (in-progress) log entry so table reflects instantly
-  const openEntry = [...logEntries].reverse().find(e => e.taskId === id && e.endTs === null);
+  const openEntry = [...logEntries].reverse().find(e => ttlEntryMatchesTask(e, id) && e.endTs === null);
   if (openEntry && field in openEntry) openEntry[field] = val;
   // Phase 1: field edit is a business-data change — update sync metadata only.
   touchSyncMetadata(task);
@@ -14580,7 +14622,7 @@ function updateTaskCustomField(id, colKey, val) {
   if (!task) return;
   if (!task.customFields) task.customFields = {};
   task.customFields[colKey] = val;
-  const openEntry = [...logEntries].reverse().find(e => e.taskId === id && e.endTs === null);
+  const openEntry = [...logEntries].reverse().find(e => ttlEntryMatchesTask(e, id) && e.endTs === null);
   if (openEntry) {
     if (ENTRY_TOPLEVEL_MIRROR_KEYS.includes(colKey)) {
       openEntry[colKey] = val;
@@ -24564,6 +24606,44 @@ function getRunningTaskState() {
 // dirty: this only corrects a device-LOCAL numeric convenience value, and
 // every other device reconciles its own local copy the same way from the
 // same `taskSyncId`, so there is nothing here that needs re-uploading.
+// ttlEntryMatchesTask(): a log entry belongs to a task when its (device-local) taskId equals the task's id
+// OR its stable taskSyncId equals the task's syncId. The second test is what keeps Complete / Reopen /
+// Lambda lookups working when a synced log array carries another device's taskId (duplicate-task fix).
+// Purely additive: everything that matched by taskId before still matches.
+let _ttlMsKey = null, _ttlMsSid = null, _ttlMsAt = 0;   // one-slot cache: a lookup loops this over every log entry
+function ttlEntryMatchesTask(e, taskId) {
+  if (!e) return false;
+  if (e.taskId === taskId) return true;
+  if (!e.taskSyncId || !Array.isArray(tasks)) return false;
+  const now = Date.now();
+  if (_ttlMsKey !== taskId || now - _ttlMsAt > 50) {
+    const tk = tasks.find(t => t && t.id === taskId);
+    _ttlMsKey = taskId; _ttlMsSid = (tk && tk._sync && tk._sync.syncId) || null; _ttlMsAt = now;
+  }
+  return !!_ttlMsSid && _ttlMsSid === e.taskSyncId;
+}
+
+// repairStaleOpenEntries(): a task that is DONE (e.g. completed on another device and merged here) can still
+// have its log row open on this device when the whole-array log download was skipped or is still pending.
+// Left alone, the next upload would push that open row back and make the finished task look running again.
+// Only entries that carry the stable taskSyncId are touched (a legacy entry cannot be verified), and only when
+// the task that owns that syncId is done: the row is closed with the task's own accumulated time.
+function repairStaleOpenEntries() {
+  let changed = false;
+  logEntries.forEach(e => {
+    if (!e || e.endTs !== null || !e.taskSyncId) return;
+    const tk = tasks.find(t => t && t._sync && t._sync.syncId === e.taskSyncId && !isTaskDeleted(t));
+    if (!tk || tk.status !== 'done') return;
+    const modAt = (tk._sync && tk._sync.modifiedAt) || Date.now();
+    e.endTs = Math.max(e.startTs || 0, Math.min(modAt, Date.now()));
+    e.durationSecs = Math.round((tk.accumulatedMs || 0) / 1000);
+    if (typeof recordSyncChange === 'function') recordSyncChange('logEntries', e.taskId + '@' + e.startTs, 'update');
+    console.log('[SYNC-LOG-REPAIR] closed stale open entry of a completed task', { taskSyncId: e.taskSyncId, startTs: e.startTs });
+    changed = true;
+  });
+  return changed;
+}
+
 function reconcileLogEntryTaskLinkage() {
   if (!Array.isArray(logEntries) || logEntries.length === 0) return false;
   let changed = false;
@@ -24576,6 +24656,7 @@ function reconcileLogEntryTaskLinkage() {
       changed = true;
     }
   });
+  try { if (repairStaleOpenEntries()) changed = true; } catch (err) { console.warn('[SYNC-LOG-REPAIR] failed', err); }
   return changed;
 }
 
@@ -24597,7 +24678,7 @@ function reconcileLogEntryTaskLinkage() {
 // synthesizing an actual duplicate.
 function ensureOpenLogEntryForRunningTask(task) {
   if (!task || task.status !== 'running') return;
-  const openEntries = logEntries.filter(e => e.taskId === task.id && e.endTs === null);
+  const openEntries = logEntries.filter(e => ttlEntryMatchesTask(e, task.id) && e.endTs === null);
   if (openEntries.length === 1) return; // already correct — nothing to repair
 
   if (openEntries.length > 1) {
@@ -24610,7 +24691,7 @@ function ensureOpenLogEntryForRunningTask(task) {
     const authoritativeStart = task.segmentStart || task.startedAt || Date.now();
     openEntries.sort((a, b) => Math.abs(a.startTs - authoritativeStart) - Math.abs(b.startTs - authoritativeStart));
     const keep = openEntries[0];
-    logEntries = logEntries.filter(e => e === keep || e.taskId !== task.id || e.endTs !== null);
+    logEntries = logEntries.filter(e => e === keep || !ttlEntryMatchesTask(e, task.id) || e.endTs !== null);
     console.log('[SYNC-RUNNING] repaired duplicate open log entries', { taskId: task.id, kept: keep.startTs, removed: openEntries.slice(1).map(e => e.startTs) });
     if (typeof recordSyncChange === 'function') recordSyncChange('logEntries', task.id + '@' + keep.startTs, 'update');
     return;
@@ -24621,6 +24702,17 @@ function ensureOpenLogEntryForRunningTask(task) {
   // itself writes (same fields, same defaults), so the log table and every
   // other logEntries consumer treat it identically to a locally-started run.
   const startTs = task.segmentStart || task.startedAt || Date.now();
+  // Duplicate-row fix: if this run's log row already exists but was closed (e.g. by a log download from the
+  // device that completed it) re-open THAT row instead of inventing a second one for the same run.
+  const sameRun = logEntries.find(e => ttlEntryMatchesTask(e, task.id) && e.endTs !== null &&
+    (e.startTs === task.startedAt || e.startTs === task.segmentStart));
+  if (sameRun) {
+    sameRun.endTs = null; sameRun.durationSecs = null;
+    if (!sameRun.taskSyncId && task._sync && task._sync.syncId) sameRun.taskSyncId = task._sync.syncId;
+    console.log('[SYNC-RUNNING] re-opened the existing log row of the running task (no duplicate created)', { taskId: task.id, startTs: sameRun.startTs });
+    if (typeof recordSyncChange === 'function') recordSyncChange('logEntries', sameRun.taskId + '@' + sameRun.startTs, 'update');
+    return;
+  }
   logEntries.push({
     taskId: task.id, heading: (task.heading || '').trim(),
     project: task.project, module: task.module,
