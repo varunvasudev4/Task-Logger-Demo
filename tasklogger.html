@@ -526,6 +526,28 @@ html.is-touch .pending-card-actions { opacity: 1; }
 .lm-lt-go:hover { color: var(--blue-mid); background: var(--bg-secondary); }
 .lm-lt-missing { color: var(--text-tertiary); font-style: italic; }
 @media (max-width: 600px) { #lm-tasks-modal { padding: 0.5rem; } }
+/* Linked-function chips (task card, Complete / Edit popup, log table) */
+.lam-fn-chips { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; min-width: 0; }
+.lam-fn-chip { max-width: 190px; overflow: hidden; text-overflow: ellipsis; }
+.lam-fn-chip.change { background: color-mix(in srgb, var(--blue-mid) 14%, transparent); border-color: var(--blue-mid); color: var(--blue-dark); }
+.lam-fn-chips-cell { display: flex; margin-top: 3px; }
+.cm-lambda-fns { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 8px 20px 0; font-size: 12px; color: var(--text-secondary); }
+.cm-lambda-fns.hidden { display: none; }
+#lambda-log-modal { z-index: 130; }
+/* "Link to a task" popup opened by Add in the Linked tasks popup: date switcher + task cards */
+#lm-addtask-modal .modal { max-width: 720px; width: 100%; }
+#lm-addtask-modal .modal-body { padding: 0; }
+.lat-datebar { display: flex; align-items: center; gap: 6px; padding: 10px 16px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.lat-datebar .date-picker-input { flex: 1 1 140px; min-width: 130px; }
+.lat-cards { display: flex; flex-direction: column; gap: 10px; padding: 12px 16px; max-height: 58vh; overflow: auto; }
+.lat-card { border: 1px solid var(--border-md); border-radius: var(--radius-md); background: var(--bg); padding: 10px 12px; display: flex; gap: 10px; align-items: flex-start; justify-content: space-between; }
+.lat-card.lambda { box-shadow: inset 3px 0 0 var(--purple-mid); }
+.lat-card-main { min-width: 0; flex: 1; }
+.lat-card-title { font-size: 13.5px; font-weight: 600; overflow-wrap: anywhere; }
+.lat-card-meta { font-size: 11.5px; color: var(--text-tertiary); margin-top: 2px; overflow-wrap: anywhere; }
+.lat-card-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.lat-card-act { flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+@media (max-width: 600px) { #lm-addtask-modal { padding: 0.5rem; } .lat-card { flex-direction: column; } .lat-card-act { align-items: stretch; width: 100%; } .lat-card-act .btn { justify-content: center; } }
 /* Linked Lambda popup opened from a log table row */
 #entry-lambda-modal .modal { max-width: 1100px; width: 100%; }
 #entry-lambda-modal .modal-body { padding: 0; }
@@ -586,7 +608,7 @@ html.is-touch .pending-card-actions { opacity: 1; }
 .pending-card.lambda-hl, .search-result-item.lambda-hl { box-shadow: inset 3px 0 0 var(--purple-mid); background: color-mix(in srgb, var(--purple-mid) 7%, var(--bg)); }
 
 /* ── Task card: "Includes Lambda" tick (bottom-right) ──────────────────────── */
-.task-lambda-row { display: flex; justify-content: flex-end; margin-top: 8px; }
+.task-lambda-row { display: flex; justify-content: flex-end; align-items: center; flex-wrap: wrap; gap: 4px 8px; margin-top: 8px; }
 .task-lambda-chk { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); cursor: pointer; user-select: none; padding: 3px 6px; border-radius: var(--radius-md); }
 .task-lambda-chk:hover { background: var(--bg-secondary); }
 .task-lambda-chk input { width: 15px; height: 15px; margin: 0; cursor: pointer; }
@@ -2247,6 +2269,7 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
       </div>
       <div id="cm-custom-fields"></div>
     </div>
+    <div class="cm-lambda-fns hidden" id="cm-lambda-fns"></div>
     <div class="modal-footer">
       <div class="cm-lambda-group hidden" id="cm-lambda-group">
         <label class="task-lambda-chk" id="cm-lambda-chk" title="Tick if this task involves Lambda functions. You will be asked to log them when you save."><input type="checkbox" id="cm-lambda-cb" aria-label="Includes Lambda" onchange="cmLambdaToggle(this.checked)" /><i class="ti ti-function"></i><span class="cm-lambda-txt"> Includes Lambda</span></label>
@@ -2398,7 +2421,19 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
       <button class="btn-icon" onclick="lmTasksClose()" title="Close" aria-label="Close"><i class="ti ti-x"></i></button>
     </div>
     <div class="modal-body" id="lmt-body"></div>
-    <div class="modal-footer"><button type="button" class="btn" onclick="lmTasksClose()">Close</button></div>
+    <div class="modal-footer"><button type="button" class="btn btn-primary" id="lmt-add-btn" onclick="lmTasksAdd()" style="margin-right:auto" title="Link this function to another task"><i class="ti ti-plus"></i> Add</button><button type="button" class="btn" onclick="lmTasksClose()">Close</button></div>
+  </div>
+</div>
+
+<!-- Link a Lambda function / change record to a task: pick a day, then a task card (opens from Add in the Linked tasks popup) -->
+<div class="modal-overlay hidden" id="lm-addtask-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title"><i class="ti ti-link" style="vertical-align:-2px;margin-right:6px;color:var(--blue-mid)"></i><span id="lat-title">Link to a task</span></div>
+      <button class="btn-icon" onclick="latClose()" title="Close" aria-label="Close"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="modal-body" id="lat-body"></div>
+    <div class="modal-footer"><button type="button" class="btn" onclick="latClose()">Close</button></div>
   </div>
 </div>
 
@@ -15326,7 +15361,7 @@ function renderRow(id) {
     <div class="task-meta">
       ${renderTaskCardFields(task, id, dis)}
     </div>
-    ${isLambdaLoggingEnabled() ? `<div class="task-lambda-row"><label class="task-lambda-chk${task.includesLambda ? ' on' : ''}${isDone ? ' disabled' : ''}" title="Tick if this task involves Lambda functions. You will be asked to log them when you complete the task."><input type="checkbox" ${task.includesLambda ? 'checked' : ''} ${dis} onchange="toggleTaskLambda(${id}, this.checked)" /><i class="ti ti-function"></i> Includes Lambda</label></div>` : ''}
+    ${isLambdaLoggingEnabled() ? `<div class="task-lambda-row"><span class="lam-fn-chips task-lambda-fns" data-task-id="${id}">${lamTaskChipsHtml(task)}</span><label class="task-lambda-chk${task.includesLambda ? ' on' : ''}${isDone ? ' disabled' : ''}" title="Tick if this task involves Lambda functions. You will be asked to log them when you complete the task."><input type="checkbox" ${task.includesLambda ? 'checked' : ''} ${dis} onchange="toggleTaskLambda(${id}, this.checked)" /><i class="ti ti-function"></i> Includes Lambda</label></div>` : ''}
     <div class="validation-msg" id="val-msg-${id}">
       <i class="ti ti-alert-circle"></i> Enter a task name.
     </div>
@@ -15998,6 +16033,7 @@ function updateLogTable() {
   const cols = getVisibleLogColumns();
   // Linked Lambda button: only on rows whose task (whole history) has Lambda functions / changes linked.
   const lamHas = isLambdaLoggingEnabled() ? elmLinkedChecker() : null;
+  const lamNamesFn = isLambdaLoggingEnabled() ? elmNamesResolver() : null;   // linked function names per row (chips under the task name)
   window._elmAnyOnPage = !!(lamHas && filtered.some(lamHas));
 
   // Render header row dynamically from configured columns (locked columns keep their
@@ -16015,7 +16051,8 @@ function updateLogTable() {
         const descVal = e.heading || (isRunning ? '— pending on completion —' : '');
         const effortDescVal = richTextToPlain(e.description || '').trim();
         const hoverVal = effortDescVal ? (descVal + '\n\n— Task progress / Effort description —\n' + effortDescVal) : descVal;
-        return `<td class="td-desc" data-col="${c.key}" title="${esc(hoverVal)}">${esc(descVal)}</td>`;
+        const lamChips = lamNamesFn ? lamFnChipsHtml(lamNamesFn(e), 3) : '';
+        return `<td class="td-desc" data-col="${c.key}" title="${esc(hoverVal)}">${esc(descVal)}${lamChips ? `<div class="lam-fn-chips lam-fn-chips-cell">${lamChips}</div>` : ''}</td>`;
       }
       if (c.key === 'remark') {
         const remarkVal = richTextToPlain(e.remark || '');
@@ -19816,6 +19853,7 @@ function cmLambdaInit(taskId, entryIdx) {
   const grp = document.getElementById('cm-lambda-group');
   if (!grp) return;
   _cmLambda = null;
+  { const fl0 = document.getElementById('cm-lambda-fns'); if (fl0) { fl0.innerHTML = ''; fl0.classList.add('hidden'); } }
   if (!isLambdaLoggingEnabled()) { grp.classList.add('hidden'); return; }
   let linkId, on, tId;
   if (entryIdx != null) {
@@ -19841,6 +19879,13 @@ function cmLambdaRefresh() {
   const n = lambdaLinkedCount(_cmLambda.linkId);
   if (btn) { btn.classList.toggle('hidden', n === 0); btn.title = 'Edit linked functions' + (n ? ' (' + n + ')' : ''); btn.setAttribute('aria-label', btn.title); }
   if (cnt) cnt.textContent = n ? ' (' + n + ')' : '';
+  const fl = document.getElementById('cm-lambda-fns');
+  if (fl) {
+    const tk = _cmLambda.taskId != null ? tasks.find(t => t && t.id === _cmLambda.taskId) : null;
+    const names = lamFnNamesFor(_cmLambda.linkId, (tk && tk._sync && tk._sync.syncId) || null);
+    fl.innerHTML = names.length ? '<i class="ti ti-function" style="color:var(--purple-mid)"></i> Linked functions: ' + lamFnChipsHtml(names, 8) : '';
+    fl.classList.toggle('hidden', !names.length);
+  }
 }
 function cmLambdaToggle(on) {
   if (!_cmLambda) return;
@@ -20738,7 +20783,7 @@ function lmTasksOpen(id, isChange) {
   const rec = readLambdaStore(isChange ? 'lambdaChangeColumns' : 'lambdaFunctionColumns').find(r => r && r.id === id);
   if (!rec) return;
   const res = lmLinkedTasksCollect(rec, !!isChange);
-  _lmt = { id, rows: res.rows };
+  _lmt = { id, rows: res.rows, isChange: !!isChange };
   document.getElementById('lmt-title').textContent = (isChange ? 'Linked task' : 'Linked tasks') + (res.fnName ? ' — ' + res.fnName : '');
   const chip = (txt) => `<span class="lambda-chip">${esc(txt)}</span>`;
   let html;
@@ -20758,6 +20803,7 @@ function lmTasksOpen(id, isChange) {
       }).join('') + '</tbody></table></div>';
   }
   document.getElementById('lmt-body').innerHTML = html;
+  { const ab = document.getElementById('lmt-add-btn'); if (ab) ab.title = 'Link ' + (res.fnName ? '“' + res.fnName + '”' : 'this function') + ' to a task'; }
   document.getElementById('lm-tasks-modal').classList.remove('hidden');
 }
 function lmTasksClose() {
@@ -20774,7 +20820,184 @@ function lmTasksGo(i) {
   jumpToDate(r.jumpDate, r.jumpTs);
 }
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && _lmt) { e.stopImmediatePropagation(); lmTasksClose(); }
+  if (e.key === 'Escape' && _lmt && !_lat) { e.stopImmediatePropagation(); lmTasksClose(); }
+}, true);
+
+// ── Linked functions shown on tasks (task card, Complete / Edit popup, log table) ──
+// Names come from the Name column of the Function / Change masters. A task counts as linked when a
+// record's taskId (device) or taskSyncId (stable across devices) points at it.
+function lamFnNamesFor(linkId, syncId) {
+  const nc = lcdNameCols(), out = [], seen = new Set();
+  [['lambdaFunctionColumns', 'fn', 'New function'], ['lambdaChangeColumns', 'ch', 'Change']].forEach(a => {
+    const col = nc[a[1]]; if (!col) return;
+    readLambdaStore(a[0]).forEach(r => {
+      if (!r) return;
+      const hit = (linkId != null && r.taskId != null && String(r.taskId) === String(linkId)) || (syncId && (r.taskSyncId === syncId || lamOwnerSyncId(r) === syncId));
+      if (!hit) return;
+      const n = lcdRecName(r, col); if (!n) return;
+      const k = n.toLowerCase(); if (seen.has(k)) return;
+      seen.add(k); out.push({ name: n, label: a[2], type: a[1] === 'fn' ? 'new' : 'change' });
+    });
+  });
+  return out;
+}
+function lamFnChipsHtml(list, max) {
+  if (!list || !list.length) return '';
+  max = max || 3;
+  const one = x => `<span class="lambda-chip lam-fn-chip ${x.type === 'change' ? 'change' : ''}" title="${esc(x.label + ': ' + x.name)}"><i class="ti ti-function" style="font-size:11px"></i>${esc(x.name)}</span>`;
+  const more = list.length > max ? `<span class="lambda-chip lam-fn-chip" title="${esc(list.slice(max).map(x => x.name).join(', '))}">+${list.length - max}</span>` : '';
+  return list.slice(0, max).map(one).join('') + more;
+}
+function lamTaskChipsHtml(task) {
+  if (!task || !isLambdaLoggingEnabled()) return '';
+  return lamFnChipsHtml(lamFnNamesFor(task.id, (task._sync && task._sync.syncId) || null), 3);
+}
+// Task cards already on screen: redraw only their chip strip after a link / unlink / edit.
+function lamRefreshTaskChips() {
+  document.querySelectorAll('.task-lambda-fns[data-task-id]').forEach(el => {
+    const t = tasks.find(x => x && String(x.id) === el.getAttribute('data-task-id'));
+    el.innerHTML = t ? lamTaskChipsHtml(t) : '';
+  });
+}
+// Log table: names per row over the task's whole history (same grouping / matching as elmLinkedChecker). Built once per render.
+function elmNamesResolver() {
+  const nc = lcdNameCols();
+  const keyOf = v => /^e/.test(String(v)) ? String(v) : 't' + String(v);
+  const byKey = new Map();
+  const add = (m, k, x) => { if (!k) return; let g = m.get(k); if (!g) { g = new Map(); m.set(k, g); } const l = x.name.toLowerCase(); if (!g.has(l)) g.set(l, x); };
+  [['lambdaFunctionColumns', 'fn', 'New function', 'new'], ['lambdaChangeColumns', 'ch', 'Change', 'change']].forEach(a => {
+    const col = nc[a[1]]; if (!col) return;
+    readLambdaStore(a[0]).forEach(r => {
+      if (!r) return;
+      const n = lcdRecName(r, col); if (!n) return;
+      const x = { name: n, label: a[2], type: a[3] };
+      if (r.taskId != null) add(byKey, keyOf(r.taskId), x);
+      if (r.taskSyncId) add(byKey, 's' + r.taskSyncId, x);
+      const o = lamOwnerSyncId(r); if (o) add(byKey, 's' + o, x);
+    });
+  });
+  if (!byKey.size) return () => [];
+  const byGroup = new Map();
+  logEntries.forEach(le => { if (!le) return; const k = pendingTaskGroupKey(le); if (!byGroup.has(k)) byGroup.set(k, []); byGroup.get(k).push(le); });
+  const cache = new Map();
+  return entry => {
+    const gk = pendingTaskGroupKey(entry);
+    if (cache.has(gk)) return cache.get(gk);
+    const merged = new Map();
+    (byGroup.get(gk) || [entry]).forEach(le => {
+      const keys = ['e' + le.startTs];
+      if (le.taskId != null) keys.push(keyOf(le.taskId));
+      if (le.taskSyncId) keys.push('s' + le.taskSyncId);
+      const tk = le.taskId != null ? tasks.find(t => t && String(t.id) === String(le.taskId)) : null;
+      if (tk && tk._sync && tk._sync.syncId) keys.push('s' + tk._sync.syncId);
+      keys.forEach(k => { const g = byKey.get(k); if (g) g.forEach((x, l) => { if (!merged.has(l)) merged.set(l, x); }); });
+    });
+    const out = Array.from(merged.values());
+    cache.set(gk, out);
+    return out;
+  };
+}
+
+// ── Add (Linked tasks popup) → pick a day → pick a task card → link ───────────────────
+// Opened from the Add button of the Linked tasks popup (the history / link icon on a Function or Change row).
+//   • The row's record has NO task yet  → that very record is linked to the chosen task.
+//   • The record is already linked      → the function is used by another task, so a new Change record for the same
+//                                         function is linked to the chosen task (same flow as Lambda changes → Link another task:
+//                                         completed task = full Change form, other task = linked at once, rest asked on completion).
+// The linked task becomes an "Includes Lambda" task (tick on the card, highlight in the log).
+let _lat = null;   // { id, isChange, iso }
+function latRec() { return _lat ? readLambdaStore(_lat.isChange ? 'lambdaChangeColumns' : 'lambdaFunctionColumns').find(r => r && r.id === _lat.id) : null; }
+function lmTasksAdd() {
+  if (!_lmt) return;
+  _lat = { id: _lmt.id, isChange: !!_lmt.isChange, iso: todayStr() };
+  const rec = latRec();
+  if (!rec) { _lat = null; return; }
+  document.getElementById('lm-addtask-modal').classList.remove('hidden');
+  latRender();
+}
+function latClose() {
+  const m = document.getElementById('lm-addtask-modal');
+  if (m) m.classList.add('hidden');
+  _lat = null;
+}
+function latSetDate(iso) { if (!_lat || !/^\d{4}-\d{2}-\d{2}$/.test(iso || '')) return; _lat.iso = iso; latRender(); }
+function latShift(n) { if (_lat) latSetDate(addDaysStr(_lat.iso, n)); }
+function latFnName(rec) {
+  const col = lcdNameCols()[_lat.isChange ? 'ch' : 'fn'];
+  return col ? lcdRecName(rec, col) : '';
+}
+function latRender() {
+  if (!_lat) return;
+  const rec = latRec(), body = document.getElementById('lat-body'), title = document.getElementById('lat-title');
+  if (!rec || !body) return;
+  const fnName = latFnName(rec), iso = _lat.iso, dateTxt = fmtDate(new Date(iso + 'T00:00:00'));
+  const unlinked = !(rec.taskId != null || rec.taskSyncId || lamOwnerSyncId(rec));
+  title.textContent = 'Link to a task' + (fnName ? ' — ' + fnName : '');
+  const cands = lcdCandidates(iso);
+  const stMap = { idle: 'Not started', running: 'Running', paused: 'Paused' };
+  const cards = cands.map((c, j) => {
+    const already = lcdRecLinksTo(rec, c);
+    const meta = [c.ticket ? '#' + c.ticket : '', c.project, c.src.module || ''].filter(Boolean).join(' · ');
+    const st = c.completed ? 'Completed' : ((c.task && stMap[c.task.status]) || 'Open');
+    const names = lamFnNamesFor(c.linkId, c.syncId);
+    const hasLam = names.length > 0 || (c.task && c.task.includesLambda === true) || c.entries.some(e => e && e.includesLambda === true);
+    const mins = c.entries.reduce((a, e) => a + (e.durationSecs ? Math.ceil(e.durationSecs / 60) : 0), 0);
+    return `<div class="lat-card${hasLam ? ' lambda' : ''}"><div class="lat-card-main"><div class="lat-card-title">${esc(c.heading)}</div>` +
+      `${meta ? `<div class="lat-card-meta">${esc(meta)}</div>` : ''}` +
+      `<div class="lat-card-chips"><span class="lcd-chip ${c.completed ? 'new' : 'change'}">${esc(st)}</span>${mins ? `<span class="lcd-chip unk">${mins} min</span>` : ''}${hasLam ? LAMBDA_CHIP_HTML : ''}${lamFnChipsHtml(names, 4)}</div></div>` +
+      `<div class="lat-card-act">${already ? '<span class="lcd-chip linked"><i class="ti ti-link"></i> Linked</span>' : `<button type="button" class="btn btn-primary lcd-link-btn" onclick="latLink(${j})"><i class="ti ti-link"></i> Link</button>`}</div></div>`;
+  }).join('');
+  _lat.cands = cands;
+  body.innerHTML = `<div class="lat-datebar"><button type="button" class="btn-icon" onclick="latShift(-1)" title="Previous day" aria-label="Previous day"><i class="ti ti-chevron-left"></i></button>` +
+    `<input type="date" class="date-picker-input" value="${esc(iso)}" onchange="latSetDate(this.value)" aria-label="Date" />` +
+    `<button type="button" class="btn-icon" onclick="latShift(1)" title="Next day" aria-label="Next day"><i class="ti ti-chevron-right"></i></button>` +
+    `<button type="button" class="btn" onclick="latSetDate(todayStr())">Today</button></div>` +
+    `<div class="lm-hist-sub">${cands.length} task${cands.length === 1 ? '' : 's'} on ${esc(dateTxt)}. ` +
+    (unlinked ? `Linking attaches this ${_lat.isChange ? 'change record' : 'function record'} to the task.` : 'This record already has a task, so linking another task adds a new Change record for the same function.') + `</div>` +
+    (cands.length ? `<div class="lat-cards">${cards}</div>` : `<div class="lm-hist-empty">No tasks found on ${esc(dateTxt)}.<br>Use the arrows or the date box to pick another day.</div>`);
+}
+function latLink(j) {
+  if (!_lat) return;
+  const rec = latRec(), c = _lat.cands && _lat.cands[j];
+  if (!rec || !c) return;
+  const st = _lat.isChange ? 'lambdaChangeColumns' : 'lambdaFunctionColumns';
+  const unlinked = !(rec.taskId != null || rec.taskSyncId || lamOwnerSyncId(rec));
+  const after = () => {
+    lcdMarkIncludesLambda(c);   // ticks "Includes Lambda" on the task card and flags its log rows
+    elmRefreshLogTable();
+    if (typeof lmRefreshIfOpen === 'function') lmRefreshIfOpen();
+    if (_lmt) lmTasksOpen(_lat ? _lat.id : _lmt.id, _lmt.isChange);   // the Linked tasks list now shows the new task
+    if (_lat) latRender();
+  };
+  if (unlinked) {
+    try {
+      const store = readLambdaStore(st), r = store.find(x => x && x.id === rec.id);
+      if (!r) throw new Error('the record was not found');
+      r.taskId = c.linkId;
+      if (c.syncId) r.taskSyncId = c.syncId; else delete r.taskSyncId;
+      r.updatedAt = Date.now();
+      writeLambdaStore(st, store);
+    } catch (err) { alert('Could not link the function (' + err.message + ').'); return; }
+    after();
+    return;
+  }
+  // Already linked: add a Change record for the same function and link it to the chosen task.
+  const iso = _lat.iso, ck = 'lambdaChangeColumns', cols = getLambdaColumns(ck), fnName = latFnName(rec);
+  if (!cols.length) { alert('No columns are configured in the ' + LAMBDA_COLUMN_STORES[ck].title + ' master yet, so a change cannot be linked.'); return; }
+  const nc = lcdNameCols().ch, ctx = lcdTaskCtx(c, iso), seed = {};
+  if (nc) seed[nc.key] = fnName;
+  const dc = lcdDateCol(cols); if (dc) seed[dc.key] = iso;
+  if (c.completed) {
+    llmOpen(c.linkId, after, { mode: 'link', ctx, confirmLabel: 'Save' });
+    if (_llm) { _llm.lcd = true; _llm.lcdName = fnName; _llm.seed = seed; _llm.formType = 'change'; _llm.editIdx = null; _llm.view = 'form'; llmRender(); }
+  } else {
+    try { lcdLinkNow(c, ck, Object.assign(llmPrefill(ck, ctx), seed)); }
+    catch (err) { alert('Could not link the function (' + err.message + ').'); return; }
+    after();
+  }
+}
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && _lat && !document.querySelector('#lambda-log-modal:not(.hidden), #confirm-overlay:not(.hidden)')) { e.stopImmediatePropagation(); latClose(); }
 }, true);
 
 // ── Linked Lambda for a log row (button in the log table's actions) ──────────────
@@ -20838,6 +21061,7 @@ function elmLinkedChecker() {
 }
 // Lambda links changed (saved / deleted / synced): redraw the log table so the button appears or disappears.
 function elmRefreshLogTable() {
+  try { lamRefreshTaskChips(); } catch (e) {}   // linked-function chips on the task cards
   try { if (typeof updateLogTable === 'function') updateLogTable(); } catch (e) {}
   try { if (typeof lcdUpdateButton === 'function') lcdUpdateButton(); } catch (e) {}   // linked / unlinked counts (also after a sync brings in changes)
   try { if (typeof lcdpRefreshIfOpen === 'function') lcdpRefreshIfOpen(); } catch (e) {}   // Linked / Unlinked labels in the Lambda changes popup
