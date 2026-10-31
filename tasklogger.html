@@ -2059,7 +2059,7 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
 .cbv-num { position: sticky; left: 0; flex: none; width: 58px; padding-right: 12px; margin-right: 14px; text-align: right; color: var(--text-tertiary); background: var(--bg); border-right: 1px solid var(--border); user-select: none; }
 .cbv-l.cur .cbv-num { color: var(--text-primary); font-weight: 700; }
 .cbv-t { padding-right: 30px; color: var(--text-primary); }
-.cbv-hint { margin-left: 26px; padding: 0 8px; border-radius: 4px; font-style: italic; cursor: pointer; color: var(--text-tertiary); background: color-mix(in srgb, var(--text-primary) 7%, transparent); }
+.cbv-hint { display: inline-block; vertical-align: bottom; max-width: 90ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-left: 26px; padding: 0 8px; border-radius: 4px; font-style: italic; cursor: pointer; color: var(--text-tertiary); background: color-mix(in srgb, var(--text-primary) 7%, transparent); }
 .cbv-hint:hover { color: var(--text-primary); }
 .cbv-hint.muted { cursor: default; }
 .cbv-pop { position: fixed; z-index: 170; width: min(540px, 94vw); max-height: 64vh; overflow: auto; background: var(--bg); color: var(--text-primary); border: 1px solid var(--border-md); border-radius: var(--radius-md); box-shadow: 0 8px 28px rgba(0,0,0,.3); font: 13px/1.45 system-ui, sans-serif; padding: 10px 12px; white-space: normal; }
@@ -2067,7 +2067,7 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
 .cbv-pd { font-weight: 600; margin-bottom: 6px; word-break: break-word; }
 .cbv-pr { display: flex; gap: 8px; font-size: 12.5px; padding: 2px 0; } .cbv-pr > span:first-child { width: 64px; flex: none; color: var(--text-tertiary); } .cbv-pr > span:last-child { flex: 1; word-break: break-word; }
 .cbv-ph { margin: 8px 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-tertiary); }
-.cbv-hr { display: block; width: 100%; text-align: left; font: inherit; font-size: 12px; background: none; border: 0; border-left: 3px solid transparent; padding: 4px 8px; cursor: pointer; color: var(--text-secondary); }
+.cbv-hr { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; width: 100%; text-align: left; font: inherit; font-size: 12px; background: none; border: 0; border-left: 3px solid transparent; padding: 4px 8px; cursor: pointer; color: var(--text-secondary); }
 .cbv-hr:hover { background: var(--bg-secondary); } .cbv-hr.on { border-left-color: var(--blue-mid); color: var(--text-primary); background: var(--bg-secondary); }
 .cbv-pn { font-size: 12px; color: var(--text-tertiary); margin-top: 6px; }
 </style>
@@ -27295,7 +27295,7 @@ function cbvFillHint(el, r) {
   const msg = { nofile: 'Select the change-log JSON (Masters → Auto Change Detect) to see line history', permission: 'Click this line again and allow access to the change-log JSON', error: 'Could not read the change-log JSON' + (r.msg ? ' (' + r.msg + ')' : '') }[r.err];
   if (msg) { el.textContent = msg; return; }
   if (!r.chain.length) { el.textContent = 'No change to this line recorded in the change log up to this backup'; return; }
-  const e = r.chain[0], m = cbvMeta(e.ver), d = m.desc || 'No description logged';
+  const e = r.chain[0], m = cbvMeta(e.ver), d = (m.desc || 'No description logged').replace(/\s+/g, ' ').trim();
   el.classList.remove('muted');
   el.textContent = '● ' + m.by + ', ' + formatCustomDate(e.ver.iso, 'DD-MM-YYYY') + ' • ' + (d.length > 70 ? d.slice(0, 69) + '…' : d) + (e.origin ? ' (file added)' : '');
 }
@@ -27334,7 +27334,7 @@ function cbvPopRender(p) {
     row('Task', t ? `${esc(t.heading || '(untitled task)')}${t.ticket ? ' · #' + esc(t.ticket) : ''}${t.project ? ' · ' + esc(t.project) : ''}${t.jumpDate ? ` <button type="button" class="lm-lt-go" onclick="cbvGo('${e.ver.key}')" title="Show in the log"><i class="ti ti-arrow-right"></i></button>` : ''}` : '<i>not linked to a task</i>') +
     (m.count > 1 ? row('Records', m.count + ' change records on this day (the first is shown)') : '') + sub +
     (r.chain.approx ? '<div class="cbv-pn">The backup differs from the change log here, so the line match may be approximate.</div>' : '') +
-    (r.chain.length > 1 ? `<div class="cbv-ph">History of this line (${r.chain.length})</div>` + r.chain.map((x, i) => { const mm = cbvMeta(x.ver); return `<button type="button" class="cbv-hr${i === p._i ? ' on' : ''}" onclick="cbvPopPick(${i})">${esc(cbvWhen(x.ver))} · ${esc(mm.by)} · ${esc((mm.desc || 'No description').slice(0, 60))}</button>`; }).join('') : '');
+    (r.chain.length > 1 ? `<div class="cbv-ph">History of this line (${r.chain.length})</div>` + r.chain.map((x, i) => { const mm = cbvMeta(x.ver); return `<button type="button" class="cbv-hr${i === p._i ? ' on' : ''}" onclick="cbvPopPick(${i})">${esc(cbvWhen(x.ver))} · ${esc(mm.by)} · ${esc((mm.desc || 'No description').replace(/\s+/g, ' ').trim().slice(0, 60))}</button>`; }).join('') : '');
 }
 function cbvPopPick(i) { const p = document.getElementById('cbv-pop'); if (p) { p._i = i; p.dataset.pin = '1'; cbvPopRender(p); } }
 function cbvGo(key) {
