@@ -15607,7 +15607,7 @@ function renderRow(id) {
       ${task.carriedOver ? `<span class="status-badge" style="background:var(--amber-bg);color:var(--amber-dark);font-size:10px" title="Carried over from previous day's In Progress task"><i class="ti ti-arrow-forward-up" style="font-size:11px;vertical-align:-1px"></i> Carried</span>` : ''}
       <div class="actions">
         ${actionBtns}
-        <button class="btn-icon" onclick="openTaskHistoryForTask(${id})" title="History — every day this task has been logged or carried over" style="border-color:var(--blue-mid);color:var(--blue-dark)"><i class="ti ti-history"></i></button>
+        ${taskCardHasHistory(task) ? `<button class="btn-icon" onclick="openTaskHistoryForTask(${id})" title="History — every day this task has been logged or carried over" style="border-color:var(--blue-mid);color:var(--blue-dark)"><i class="ti ti-history"></i></button>` : ''}
         <button class="btn-icon btn-delete" onclick="confirmDeleteTask(${id})" title="Remove"><i class="ti ti-trash"></i></button>
       </div>
     </div>
@@ -16287,6 +16287,8 @@ function updateLogTable() {
   // Linked Lambda button: only on rows whose task (whole history) has Lambda functions / changes linked.
   const lamHas = isLambdaLoggingEnabled() ? elmLinkedChecker() : null;
   window._elmAnyOnPage = !!(lamHas && filtered.some(lamHas));
+  // History button: only on rows whose task has more than this one entry (logged / carried over on other days).
+  const histCounts = taskHistoryCountMap();
 
   // Render header row dynamically from configured columns (locked columns keep their
   // fixed labels; configurable columns use the user's renamed label if set).
@@ -16346,7 +16348,9 @@ function updateLogTable() {
     const btnLambda = (!isFutureDay && lamHas && lamHas(e))
       ? '<button class="btn-icon" onclick="elmOpen('+rowIdx+')" title="Linked Lambda functions and changes (whole task history)" style="border-color:var(--purple-mid);color:var(--purple-dark)"><i class="ti ti-function"></i></button>'
       : '';
-    const btnHistory = '<button class="btn-icon" onclick="openTaskHistoryForRow('+rowIdx+')" title="History — every day this task has been logged or carried over" style="border-color:var(--blue-mid);color:var(--blue-dark)"><i class="ti ti-history"></i></button>';
+    const btnHistory = ((histCounts.get(pendingTaskGroupKey(e)) || 0) > 1)
+      ? '<button class="btn-icon" onclick="openTaskHistoryForRow('+rowIdx+')" title="History — every day this task has been logged or carried over" style="border-color:var(--blue-mid);color:var(--blue-dark)"><i class="ti ti-history"></i></button>'
+      : '';
     const btnDelete = isPresentDay ? '<button class="btn-icon btn-delete" onclick="confirmDeleteLogEntry('+rowIdx+')" title="Delete entry"><i class="ti ti-trash"></i></button>' : '';
 
     const inlineButtonsHtml = btnEdit + btnCarry + btnReopen + btnDelete;
@@ -23259,6 +23263,19 @@ function showTaskHistoryPopup(item, currentTs) {
   modal.classList.remove('hidden');
 }
 
+// Whether a task has a history worth showing: log entries of the same task (same grouping the History
+// popup uses) beyond the one the row / card itself stands for. The History buttons are hidden otherwise.
+function taskHistoryCountMap() {
+  const m = new Map();
+  logEntries.forEach(le => { const k = pendingTaskGroupKey(le); m.set(k, (m.get(k) || 0) + 1); });
+  return m;
+}
+function taskCardHasHistory(task) {
+  if (!task) return false;
+  const key = pendingTaskGroupKey(task);
+  const list = logEntries.filter(le => pendingTaskGroupKey(le) === key);
+  return list.length > 1 || (list.length === 1 && list[0].taskId !== task.id);   // a lone entry of this very task is no history
+}
 // History button on a task card: history of the task the card represents.
 function openTaskHistoryForTask(taskId) {
   const task = tasks.find(t => t.id === taskId);
