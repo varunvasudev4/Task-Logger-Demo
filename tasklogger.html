@@ -500,6 +500,15 @@ html.is-touch .pending-card-actions { opacity: 1; }
 .lmm-opt:hover, .lmm-opt.active { background: var(--bg-secondary); }
 .lmm-opt.selected { font-weight: 600; color: var(--blue-mid); }
 .lmm-opt-empty { padding: 10px; font-size: 12px; color: var(--text-tertiary); }
+.lmm-subtabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; }
+.lmm-subtab { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; background: var(--bg); border: 1px solid var(--border-md); border-radius: 999px; font: inherit; font-size: 12.5px; color: var(--text-secondary); cursor: pointer; }
+.lmm-subtab:hover { background: var(--bg-secondary); }
+.lmm-subtab.active { background: var(--bg-secondary); color: var(--text-primary); font-weight: 600; border-color: var(--blue-mid); }
+.lmm-subtab .lmm-n { font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); }
+.lmm-table td.lmm-act { width: 1%; white-space: nowrap; text-align: right; }
+.lmm-act-btn { display: inline-flex; align-items: center; gap: 4px; padding: 5px 10px; background: var(--bg); border: 1px solid var(--border-md); border-radius: var(--radius-md); font: inherit; font-size: 12px; color: var(--text-primary); cursor: pointer; }
+.lmm-act-btn:hover { background: var(--bg-secondary); border-color: var(--blue-mid); }
+.lmm-red, .lmm-table td.lmm-red, .lmm-in.lmm-red, .lmm-opt.lmm-red { color: var(--red-mid) !important; }
 .lm-toolbar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; padding: 10px 16px; }
 .lm-field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .lm-field-grow { flex: 1 1 200px; }
@@ -4344,7 +4353,7 @@ function lambdaDigestShape(p) {
   });
   o.tomb = Object.keys((p && p.lambdaTombstones && typeof p.lambdaTombstones === 'object') ? p.lambdaTombstones : {}).sort();
   const ld = lamLdNorm(p && p.lambdaLiveDemo), ldo = {};
-  Object.keys(ld).forEach(k => { ldo[k] = ld[k].live + '@' + ld[k].at; });
+  Object.keys(ld).forEach(k => { ldo[k] = ld[k].live + '@' + ld[k].at + (ld[k].na ? '#na' : ''); });
   o.ld = ldo;   // empty on both sides when nobody uses the Live / Demo mapping, so old files still compare equal
   return o;
 }
@@ -4488,14 +4497,14 @@ function lamLdNorm(o) {
   Object.keys(o).forEach(k => {
     const v = o[k]; if (!k) return;
     if (typeof v === 'string') out[k] = { live: v, at: 0 };   // earlier plain { demo: live } shape
-    else if (v && typeof v === 'object') out[k] = { live: String(v.live == null ? '' : v.live), at: Number(v.at) || 0 };
+    else if (v && typeof v === 'object') { const e = { live: String(v.live == null ? '' : v.live), at: Number(v.at) || 0 }; if (v.na) e.na = 1; out[k] = e; }   // na = "No mapping available" (only stored when set, so old files stay identical)
   });
   return out;
 }
 function lamLdRead() { try { return lamLdNorm(JSON.parse(localStorage.getItem(LAMBDA_LIVEDEMO_KEY) || '{}')); } catch (e) { return {}; } }
 function lamLdPrune(m) {
   const cut = Date.now() - LAMBDA_TOMBSTONE_TTL_MS;
-  Object.keys(m).forEach(k => { if (!m[k].live && m[k].at > 0 && m[k].at < cut) delete m[k]; });
+  Object.keys(m).forEach(k => { if (!m[k].live && !m[k].na && m[k].at > 0 && m[k].at < cut) delete m[k]; });
   return m;
 }
 // silent = remote-originated / restore write: not re-recorded as a local edit.
@@ -4510,7 +4519,7 @@ function lamLdMerge(local, remote) {
   const out = Object.assign({}, local); let changed = false;
   Object.keys(remote).forEach(k => {
     const r = remote[k], l = out[k];
-    if (!l || r.at > l.at || (r.at === l.at && r.live > l.live)) { if (!l || l.live !== r.live || l.at !== r.at) changed = true; out[k] = r; }
+    if (!l || r.at > l.at || (r.at === l.at && (r.live > l.live || (r.live === l.live && r.na && !l.na)))) { if (!l || l.live !== r.live || l.at !== r.at || !!l.na !== !!r.na) changed = true; out[k] = r; }
   });
   return { map: out, changed: changed };
 }
@@ -20616,9 +20625,27 @@ function lmmCollect() {
   });
   const cmp = (a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
   demo.sort(cmp); live.sort(cmp);
-  return { demo, live, hasFlagCol: !!flagCol };
+  // Red = the function is in the Functions table but its Status column does not say Available.
+  const red = new Set(), stCol = lmmStatusCol();
+  if (nameCol && stCol) {
+    const present = new Set(), avail = new Set();
+    readLambdaStore('lambdaFunctionColumns').forEach(r => {
+      const name = lcdRecName(r, nameCol); if (!name) return;
+      const low = name.toLowerCase(); present.add(low);
+      const st = r.values && r.values[stCol.key] != null ? String(r.values[stCol.key]).trim().toLowerCase() : '';
+      if (st === 'available') avail.add(low);
+    });
+    present.forEach(low => { if (!avail.has(low)) red.add(low); });
+  }
+  return { demo, live, red, hasFlagCol: !!flagCol };
 }
-let _lmmData = null;   // { demo, live, map (effective: demo lower → live name) } of the table on screen
+function lmmStatusCol() {
+  const cols = getLambdaColumns('lambdaFunctionColumns');
+  const n = v => String(v == null ? '' : v).toLowerCase().replace(/[^a-z]/g, '');
+  return cols.find(c => n(c.label) === 'status') || cols.find(c => n(c.key) === 'status' || n(c.key) === 'fnstatus') || cols.find(c => n(c.label).indexOf('status') !== -1) || null;
+}
+let lmmSub = 'mapped';   // sub tab: 'mapped' | 'tobe' | 'na'
+let _lmmData = null;   // { demo, live, red, map (effective: demo lower → live name) } of the table on screen
 function lmmEffectiveMap(info) {
   const raw = lamLdRead(), liveByLower = new Map(info.live.map(n => [n.toLowerCase(), n]));
   const map = {}, used = new Set();
@@ -20631,22 +20658,41 @@ function lmmEffectiveMap(info) {
   return map;
 }
 function lmmRenderLiveDemo(body) {
-  const info = lmmCollect(), map = lmmEffectiveMap(info);
-  _lmmData = { demo: info.demo, live: info.live, map };
-  const mapped = Object.keys(map).length;
+  const info = lmmCollect(), map = lmmEffectiveMap(info), raw = lamLdRead();
+  _lmmData = { demo: info.demo, live: info.live, red: info.red, map };
+  const isNa = d => { const k = d.toLowerCase(); return !map[k] && !!(raw[k] && raw[k].na); };
+  const idx = info.demo.map((d, i) => i);
+  const mappedIdx = idx.filter(i => !!map[info.demo[i].toLowerCase()]);
+  const naIdx = idx.filter(i => isNa(info.demo[i]));
+  const toBeIdx = idx.filter(i => !map[info.demo[i].toLowerCase()] && !isNa(info.demo[i]));
+  if (lmmSub !== 'mapped' && lmmSub !== 'tobe' && lmmSub !== 'na') lmmSub = 'mapped';
+  const nm = d => `<td class="lmm-demo${info.red.has(d.toLowerCase()) ? ' lmm-red' : ''}" title="${esc(d)}">${esc(d)}</td>`;
+  const combo = i => {
+    const d = info.demo[i], cur = map[d.toLowerCase()] || '', redCls = cur && info.red.has(cur.toLowerCase()) ? ' lmm-red' : '';
+    return `<td class="lmm-live"><div class="lmm-combo">` +
+      `<input class="lm-input lmm-in${redCls}" type="text" data-i="${i}" data-cur="${esc(cur)}" value="${esc(cur)}" placeholder="${info.live.length ? 'Search live function…' : 'No live functions yet'}" autocomplete="off" spellcheck="false" role="combobox" aria-autocomplete="list" ${info.live.length ? '' : 'disabled'} />` +
+      (cur ? `<button type="button" class="lmm-clear" data-i="${i}" title="Remove the link" aria-label="Remove the link">&times;</button>` : '') + `</div></td>`;
+  };
+  const tbl = (head, rows) => `<table class="lmm-table"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>`;
+  let content = '';
+  if (lmmSub === 'mapped') {
+    content = mappedIdx.length ? tbl('<th>Demo</th><th>Live</th>', mappedIdx.map(i => `<tr>${nm(info.demo[i])}${combo(i)}</tr>`).join(''))
+      : `<div class="lm-empty">Nothing is mapped yet.<br>Link a Demo function to a Live function in <b>To be mapped</b> and it shows up here.</div>`;
+  } else if (lmmSub === 'tobe') {
+    content = toBeIdx.length ? tbl('<th>Demo</th><th>Live</th><th></th>', toBeIdx.map(i => `<tr>${nm(info.demo[i])}${combo(i)}` +
+        `<td class="lmm-act"><button type="button" class="lmm-act-btn" data-act="na" data-i="${i}" title="This Demo has no Live function — move it to No mapping available"><i class="ti ti-ban"></i> No mapping</button></td></tr>`).join(''))
+      : `<div class="lm-empty">${info.demo.length ? 'Nothing left to map.' : 'No Demo functions yet.<br>A function shows up here as soon as its Live/Demo column says Demo, or its name contains “demo”.'}</div>`;
+  } else {
+    content = naIdx.length ? tbl('<th>Demo</th><th></th>', naIdx.map(i => `<tr>${nm(info.demo[i])}` +
+        `<td class="lmm-act"><button type="button" class="lmm-act-btn" data-act="restore" data-i="${i}" title="Move back to To be mapped"><i class="ti ti-arrow-back-up"></i> Restore</button></td></tr>`).join(''))
+      : `<div class="lm-empty">No Demo function is marked as having no Live mapping.<br>Use <b>No mapping</b> in the To be mapped table to move one here.</div>`;
+  }
   const hint = info.hasFlagCol ? '' : `<p class="lmm-hint">No “Live/Demo” column found in the Function Columns master, so only function names containing “demo” / “live” are used.</p>`;
-  const rows = info.demo.map((d, i) => {
-    const cur = map[d.toLowerCase()] || '';
-    return `<tr><td class="lmm-demo" title="${esc(d)}">${esc(d)}</td><td class="lmm-live"><div class="lmm-combo">` +
-      `<input class="lm-input lmm-in" type="text" data-i="${i}" data-cur="${esc(cur)}" value="${esc(cur)}" placeholder="${info.live.length ? 'Search live function…' : 'No live functions yet'}" autocomplete="off" spellcheck="false" role="combobox" aria-autocomplete="list" ${info.live.length ? '' : 'disabled'} />` +
-      (cur ? `<button type="button" class="lmm-clear" data-i="${i}" title="Remove the link" aria-label="Remove the link">&times;</button>` : '') + `</div></td></tr>`;
-  }).join('');
+  const sub = (id, label, n) => `<button type="button" class="lmm-subtab${lmmSub === id ? ' active' : ''}" data-sub="${id}">${label} <span class="lmm-n">${n}</span></button>`;
   body.innerHTML = `<div class="lmm-wrap"><div class="lmm-head"><span class="lmm-title">Live / Demo Mapping</span>` +
-    `<span class="lmm-count">${info.demo.length} demo · ${info.live.length} live · ${mapped} linked</span></div>${hint}` +
-    (info.demo.length
-      ? `<table class="lmm-table"><thead><tr><th>Demo</th><th>Live</th></tr></thead><tbody>${rows}</tbody></table>`
-      : `<div class="lm-empty">No Demo functions yet.<br>A function shows up here as soon as its Live/Demo column says Demo, or its name contains “demo”.</div>`) +
-    `</div>`;
+    `<span class="lmm-count">${info.demo.length} demo · ${info.live.length} live · ${mappedIdx.length} linked</span></div>${hint}` +
+    `<div class="lmm-subtabs" role="tablist">${sub('mapped', 'Mapped', mappedIdx.length)}${sub('tobe', 'To be mapped', toBeIdx.length)}${sub('na', 'No mapping available', naIdx.length)}</div>` +
+    content + `</div>`;
   const wrap = body.querySelector('.lmm-wrap');
   if (!wrap) return;
   wrap.addEventListener('scroll', lmmOptsClose, { passive: true });
@@ -20660,6 +20706,12 @@ function lmmRenderLiveDemo(body) {
   });
   wrap.addEventListener('mousedown', (e) => {
     const c = e.target.closest && e.target.closest('.lmm-clear'); if (c) { e.preventDefault(); lmmPickLive(+c.dataset.i, ''); }
+  });
+  wrap.addEventListener('click', (e) => {
+    const t = e.target.closest && e.target.closest('.lmm-subtab');
+    if (t) { lmmSub = t.dataset.sub; lmmOptsClose(); lmmRender(); return; }
+    const b = e.target.closest && e.target.closest('.lmm-act-btn');
+    if (b) lmmSetNa(+b.dataset.i, b.dataset.act === 'na');
   });
 }
 let _lmm = null;   // open options panel: { i, inp, q, act, all, shown }
@@ -20698,7 +20750,7 @@ function lmmOptsFill() {
   _lmm.shown = _lmm.all.filter(n => !q || n.toLowerCase().indexOf(q) !== -1).slice(0, 300);
   if (_lmm.act >= _lmm.shown.length) _lmm.act = 0;
   p.innerHTML = _lmm.shown.length
-    ? _lmm.shown.map((n, j) => `<div class="lmm-opt${j === _lmm.act ? ' active' : ''}${n.toLowerCase() === cur ? ' selected' : ''}" role="option" data-v="${esc(n)}">${esc(n)}</div>`).join('')
+    ? _lmm.shown.map((n, j) => `<div class="lmm-opt${j === _lmm.act ? ' active' : ''}${n.toLowerCase() === cur ? ' selected' : ''}${_lmmData && _lmmData.red && _lmmData.red.has(n.toLowerCase()) ? ' lmm-red' : ''}" role="option" data-v="${esc(n)}">${esc(n)}</div>`).join('')
     : `<div class="lmm-opt-empty">${_lmm.all.length ? 'No matching live function' : 'No unlinked live function left'}</div>`;
   const a = p.querySelector('.lmm-opt.active'); if (a && a.scrollIntoView) a.scrollIntoView({ block: 'nearest' });
 }
@@ -20716,6 +20768,17 @@ function lmmPickLive(i, name) {
   lamLdWrite(raw);
   lmmOptsClose();
   if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  lmmRender();
+}
+// Moves a Demo row to “No mapping available” (na = true) or back to “To be mapped” (na = false).
+// Stored as an empty link with na:1 and a fresh timestamp, so it syncs / backs up like any other link change.
+function lmmSetNa(i, na) {
+  if (!_lmmData) return;
+  const d = _lmmData.demo[i]; if (d == null) return;
+  const raw = lamLdRead(), key = d.toLowerCase(), now = Date.now();
+  raw[key] = na ? { live: '', at: now, na: 1 } : { live: '', at: now };
+  lamLdWrite(raw);
+  lmmOptsClose();
   lmmRender();
 }
 // For later use of the link: live name of a demo function and demo name of a live function ('' when not linked).
