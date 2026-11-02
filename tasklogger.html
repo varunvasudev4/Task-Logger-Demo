@@ -694,8 +694,8 @@ html.is-touch .pending-card-actions { opacity: 1; }
 }
 
 /* ── Lambda log: optional side-by-side (split) view, desktop only ─────────────── */
-#llm-split-btn { display: none; }
-@media (min-width: 900px) { #llm-split-btn { display: inline-flex; } }
+#llm-split-btn { display: none; width: auto; padding: 0 9px; gap: 5px; font-size: 12px; margin-right: 6px; }
+@media (min-width: 800px) { #llm-split-btn { display: inline-flex !important; } }
 #llm-split-btn.on { color: var(--blue-mid); }
 .llm-resizer { display: none; }
 body.llm-split { padding-right: calc(var(--llm-w, 560px) + 1rem); }
@@ -2536,7 +2536,7 @@ mark.cbv-hl.cur { background: color-mix(in srgb, #ff9632 65%, transparent); outl
     <div class="llm-resizer" id="llm-resizer" title="Drag to resize"></div>
     <div class="modal-header">
       <div class="modal-title"><i class="ti ti-function" style="vertical-align:-2px;margin-right:6px;color:var(--blue-mid)"></i><span id="llm-title">Lambda log</span></div>
-      <div style="display:flex;gap:2px;align-items:center"><button class="btn-icon" id="llm-split-btn" onclick="llmToggleSplit()" title="Show side by side with the task view" aria-label="Toggle side-by-side view"><i class="ti ti-layout-sidebar-right"></i></button>
+      <div style="display:flex;gap:2px;align-items:center"><button class="btn-icon" id="llm-split-btn" onclick="llmToggleSplit()" title="Show side by side with the task view" aria-label="Toggle side-by-side view"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="14" y1="4" x2="14" y2="20"/></svg><span class="llm-split-txt">Split</span></button>
       <button class="btn-icon" onclick="llmCancel()" title="Close" aria-label="Close"><i class="ti ti-x"></i></button></div>
     </div>
     <div class="modal-body" id="llm-body"></div>
@@ -20260,7 +20260,7 @@ function lamFormCollect(storeKey, prefix) {
 }
 
 // ── Lambda log: optional side-by-side (split) view; width is drag-adjustable, both remembered on this device ──
-const LLM_SPLIT_MIN_VIEWPORT = 900;
+const LLM_SPLIT_MIN_VIEWPORT = 800;
 function llmSplitPref() { try { return localStorage.getItem('ttl_llm_split') === '1'; } catch (e) { return false; } }
 function llmSplitWidth() { let w = 560; try { w = parseInt(localStorage.getItem('ttl_llm_split_w'), 10) || 560; } catch (e) {} return Math.max(340, Math.min(w, Math.floor(window.innerWidth * 0.7))); }
 function llmSplitApply() {
