@@ -693,18 +693,6 @@ html.is-touch .pending-card-actions { opacity: 1; }
   #lm-edit-modal .modal-body { padding: 12px 14px; }
 }
 
-/* ── Lambda log: optional side-by-side (split) view, desktop only ─────────────── */
-#llm-split-btn { display: none; width: auto; padding: 0 9px; gap: 5px; font-size: 12px; margin-right: 6px; }
-@media (min-width: 800px) { #llm-split-btn { display: inline-flex !important; } }
-#llm-split-btn.on { color: var(--blue-mid); }
-.llm-resizer { display: none; }
-body.llm-split { padding-right: calc(var(--llm-w, 560px) + 1rem); }
-body.llm-split #complete-modal { padding-right: calc(var(--llm-w, 560px) + 1rem); }
-body.llm-split #lambda-log-modal { inset: 0 0 0 auto; width: var(--llm-w, 560px); padding: 0; background: transparent; align-items: stretch; justify-content: stretch; }
-body.llm-split #lambda-log-modal .modal { max-width: none; width: 100%; height: 100%; max-height: none; border-radius: 0; border-width: 0 0 0 1px; box-shadow: -6px 0 24px rgba(0,0,0,0.25); position: relative; }
-body.llm-split .llm-resizer { display: block; position: absolute; left: -5px; top: 0; bottom: 0; width: 10px; cursor: col-resize; z-index: 3; touch-action: none; }
-body.llm-split .llm-resizer:hover, body.llm-resizing .llm-resizer { background: color-mix(in srgb, var(--blue-mid) 35%, transparent); }
-body.llm-resizing { user-select: none; cursor: col-resize; }
 /* ── "Includes Lambda" tick in the Complete / Edit popup footer (left aligned) ── */
 #complete-modal .modal-footer { flex-wrap: wrap; align-items: center; }
 .cm-lambda-group { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-right: auto; min-width: 0; }
@@ -1737,6 +1725,44 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
 }
 .work-time.working { color: var(--green-dark); }
 
+/* ── Header TTL widget (Lambda Functions / Lambda changes / Code viewer) + consolidated view ── */
+.ttl-hdr-widget {
+  display: inline-flex; align-items: center; gap: 7px; flex-shrink: 0;
+  margin-left: auto; margin-right: 8px; padding: 4px 11px;
+  border: 1px solid var(--border-md); border-radius: 999px;
+  background: var(--bg); color: var(--text-secondary); cursor: pointer;
+  font-family: var(--font-mono); font-size: 13px; font-weight: 700; line-height: 1.2;
+  font-variant-numeric: tabular-nums; transition: border-color 0.3s, color 0.3s, background 0.3s;
+}
+.ttl-hdr-widget:hover { background: var(--bg-secondary); }
+.ttl-hw-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-tertiary); flex-shrink: 0; transition: background 0.3s; }
+.ttl-hw-lbl { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.85; }
+.ttl-hdr-widget.working  { border-color: var(--green-mid); color: var(--green-dark); background: var(--green-bg); }
+.ttl-hdr-widget.working .ttl-hw-dot  { background: var(--green-mid); }
+.ttl-hdr-widget.on-break { border-color: var(--amber-mid); color: var(--amber-dark); background: var(--amber-bg); }
+.ttl-hdr-widget.on-break .ttl-hw-dot { background: var(--amber-mid); }
+@media (max-width: 560px) { .ttl-hw-lbl { display: none; } .ttl-hdr-widget { padding: 4px 9px; font-size: 12px; } }
+.ttl-cons-overlay { position: fixed; inset: 0; z-index: 400; background: rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center; padding: 1rem; }
+.ttl-cons-overlay.hidden { display: none; }
+.ttl-cons { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: 0 10px 30px rgba(0,0,0,0.35); width: 100%; max-width: 460px; max-height: 85vh; display: flex; flex-direction: column; }
+.ttl-cons-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--border); }
+.ttl-cons-sum { display: flex; gap: 10px; padding: 12px 18px; border-bottom: 1px solid var(--border); }
+.ttl-cons-box { flex: 1; border: 1px solid var(--border-md); border-radius: var(--radius-md); padding: 8px 10px; transition: border-color 0.3s; }
+.ttl-cons-box .k { font-family: var(--font-mono); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-tertiary); }
+.ttl-cons-box .v { font-family: var(--font-mono); font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text-primary); line-height: 1.2; }
+.ttl-cons-box.worked.live { border-color: var(--green-mid); } .ttl-cons-box.worked.live .v { color: var(--green-dark); }
+.ttl-cons-box.brk.live { border-color: var(--amber-mid); } .ttl-cons-box.brk.live .v { color: var(--amber-dark); }
+.ttl-cons-list { overflow-y: auto; padding: 6px 10px 12px; }
+.ttl-cons-row { display: flex; align-items: center; gap: 10px; padding: 9px 8px; }
+.ttl-cons-row + .ttl-cons-row { border-top: 1px solid var(--border); }
+.ttl-cons-row .info { flex: 1; min-width: 0; }
+.ttl-cons-row .nm { font-size: 13.5px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ttl-cons-row .pj { font-size: 11px; color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ttl-cons-row .tm { font-family: var(--font-mono); font-size: 13px; font-variant-numeric: tabular-nums; color: var(--text-secondary); }
+.ttl-cons-row.running .tm { color: var(--green-dark); font-weight: 600; }
+.ttl-cons-row.paused  .tm { color: var(--amber-dark); }
+.ttl-cons-empty { padding: 22px 12px; text-align: center; color: var(--text-tertiary); font-size: 13px; }
+
 /* ── Break timer ── */
 .break-widget {
   position: fixed; bottom: 20px; right: 20px;
@@ -2523,6 +2549,7 @@ mark.cbv-hl.cur { background: color-mix(in srgb, #ff9632 65%, transparent); outl
   <div class="modal">
     <div class="modal-header">
       <div class="modal-title"><i class="ti ti-function" style="vertical-align:-2px;margin-right:6px;color:var(--blue-mid)"></i><span id="lcdp-title">Lambda changes</span></div>
+      <button type="button" class="ttl-hdr-widget idle" onclick="ttlConsOpen(event)" title="Time tracker — click to start / pause tasks" aria-label="Open time tracker"><span class="ttl-hw-dot"></span><span class="ttl-hw-lbl">Worked</span><span class="ttl-hw-time">00:00:00</span></button>
       <button class="btn-icon" onclick="lcdpClose()" title="Close" aria-label="Close"><i class="ti ti-x"></i></button>
     </div>
     <div class="modal-body" id="lcdp-body"></div>
@@ -2533,11 +2560,9 @@ mark.cbv-hl.cur { background: color-mix(in srgb, #ff9632 65%, transparent); outl
 <!-- Lambda log step (opens from Complete Task when the task has "Includes Lambda" ticked) -->
 <div class="modal-overlay hidden" id="lambda-log-modal">
   <div class="modal">
-    <div class="llm-resizer" id="llm-resizer" title="Drag to resize"></div>
     <div class="modal-header">
       <div class="modal-title"><i class="ti ti-function" style="vertical-align:-2px;margin-right:6px;color:var(--blue-mid)"></i><span id="llm-title">Lambda log</span></div>
-      <div style="display:flex;gap:2px;align-items:center"><button class="btn-icon" id="llm-split-btn" onclick="llmToggleSplit()" title="Show side by side with the task view" aria-label="Toggle side-by-side view"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="14" y1="4" x2="14" y2="20"/></svg><span class="llm-split-txt">Split</span></button>
-      <button class="btn-icon" onclick="llmCancel()" title="Close" aria-label="Close"><i class="ti ti-x"></i></button></div>
+      <button class="btn-icon" onclick="llmCancel()" title="Close" aria-label="Close"><i class="ti ti-x"></i></button>
     </div>
     <div class="modal-body" id="llm-body"></div>
     <div class="modal-footer" id="llm-footer"></div>
@@ -2607,6 +2632,18 @@ mark.cbv-hl.cur { background: color-mix(in srgb, #ff9632 65%, transparent); outl
   </div>
 </div>
 
+<!-- Consolidated TTL view (opens from the header TTL widget in the Lambda / Code popups): today's tasks with Start / Pause / Resume -->
+<div class="ttl-cons-overlay hidden" id="ttl-cons-overlay" onclick="if(event.target===this)ttlConsClose()">
+  <div class="ttl-cons" role="dialog" aria-modal="true" aria-label="Time tracker">
+    <div class="ttl-cons-head">
+      <div class="modal-title"><i class="ti ti-clock" style="vertical-align:-2px;margin-right:6px;color:var(--green-mid)"></i>Time tracker</div>
+      <button type="button" class="btn-icon" onclick="ttlConsClose()" title="Close (Esc)" aria-label="Close time tracker"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="ttl-cons-sum" id="ttl-cons-sum"></div>
+    <div class="ttl-cons-list" id="ttl-cons-list"></div>
+  </div>
+</div>
+
 <!-- Function code viewer (View on a Lambda function row): file tree + code from the Code Backup folder, with a date picker -->
 <div class="cbv-overlay hidden" id="cbv-overlay" role="dialog" aria-modal="true" aria-label="Function code">
   <div class="cbv-head">
@@ -2614,7 +2651,8 @@ mark.cbv-hl.cur { background: color-mix(in srgb, #ff9632 65%, transparent); outl
     <div class="cbv-title" id="cbv-title">Code</div>
     <label class="cbv-datewrap" id="cbv-datewrap"><i class="ti ti-calendar"></i> Backup date <select id="cbv-date" onchange="cbvSetDate(+this.value)"></select></label>
     <span class="cbv-count" id="cbv-count"></span>
-    <button type="button" class="btn-icon" onclick="cbvClose()" title="Close (Esc)" aria-label="Close code viewer"><i class="ti ti-x"></i></button>
+    <button type="button" class="ttl-hdr-widget idle" onclick="ttlConsOpen(event)" title="Time tracker — click to start / pause tasks" aria-label="Open time tracker"><span class="ttl-hw-dot"></span><span class="ttl-hw-lbl">Worked</span><span class="ttl-hw-time">00:00:00</span></button>
+      <button type="button" class="btn-icon" onclick="cbvClose()" title="Close (Esc)" aria-label="Close code viewer"><i class="ti ti-x"></i></button>
   </div>
   <div class="cbv-body"><div class="cbv-side" id="cbv-side"></div><div class="cbv-main" id="cbv-main"></div></div>
 </div>
@@ -2623,7 +2661,8 @@ mark.cbv-hl.cur { background: color-mix(in srgb, #ff9632 65%, transparent); outl
 <div class="lm-overlay hidden" id="lambda-overlay" role="dialog" aria-modal="true" aria-label="Lambda Functions">
   <div class="lm-head">
     <div class="lm-title"><i class="ti ti-function" style="font-size:18px;color:var(--blue-mid)"></i>Lambda Functions</div>
-    <button type="button" class="btn-icon" onclick="closeLambdaOverlay()" title="Close (Esc)" aria-label="Close Lambda Functions"><i class="ti ti-x"></i></button>
+    <button type="button" class="ttl-hdr-widget idle" onclick="ttlConsOpen(event)" title="Time tracker — click to start / pause tasks" aria-label="Open time tracker"><span class="ttl-hw-dot"></span><span class="ttl-hw-lbl">Worked</span><span class="ttl-hw-time">00:00:00</span></button>
+      <button type="button" class="btn-icon" onclick="closeLambdaOverlay()" title="Close (Esc)" aria-label="Close Lambda Functions"><i class="ti ti-x"></i></button>
   </div>
   <div class="lm-tabs" id="lm-tabs"></div>
   <div class="lm-toolbar" id="lm-toolbar"></div>
@@ -15941,6 +15980,9 @@ const FS_PORTAL_IDS = [
   'complete-modal',
   'lcd-changes-modal',
   'lambda-log-modal',
+  'lambda-overlay',        // Lambda Functions full-page overlay
+  'cbv-overlay',           // function code viewer
+  'ttl-cons-overlay',      // consolidated TTL view (header widget)
   'carry-forward-modal',
   'pending-tasks-modal',
   'todo-modal',
@@ -20259,36 +20301,6 @@ function lamFormCollect(storeKey, prefix) {
   return { values, bad };
 }
 
-// ── Lambda log: optional side-by-side (split) view; width is drag-adjustable, both remembered on this device ──
-const LLM_SPLIT_MIN_VIEWPORT = 800;
-function llmSplitPref() { try { return localStorage.getItem('ttl_llm_split') === '1'; } catch (e) { return false; } }
-function llmSplitWidth() { let w = 560; try { w = parseInt(localStorage.getItem('ttl_llm_split_w'), 10) || 560; } catch (e) {} return Math.max(340, Math.min(w, Math.floor(window.innerWidth * 0.7))); }
-function llmSplitApply() {
-  const m = document.getElementById('lambda-log-modal'), btn = document.getElementById('llm-split-btn');
-  const open = !!m && !m.classList.contains('hidden');
-  const on = open && llmSplitPref() && window.innerWidth >= LLM_SPLIT_MIN_VIEWPORT;
-  document.documentElement.style.setProperty('--llm-w', llmSplitWidth() + 'px');
-  document.body.classList.toggle('llm-split', on);
-  if (btn) { btn.classList.toggle('on', llmSplitPref()); btn.title = llmSplitPref() ? 'Back to popup view' : 'Show side by side with the task view'; }
-}
-function llmToggleSplit() { try { localStorage.setItem('ttl_llm_split', llmSplitPref() ? '0' : '1'); } catch (e) {} llmSplitApply(); }
-(function llmSplitInit() {
-  const h = document.getElementById('llm-resizer');
-  if (!h) return;
-  h.addEventListener('pointerdown', ev => {
-    ev.preventDefault();
-    h.setPointerCapture(ev.pointerId);
-    document.body.classList.add('llm-resizing');
-    const move = e => {
-      const w = Math.max(340, Math.min(window.innerWidth - e.clientX, Math.floor(window.innerWidth * 0.7)));
-      document.documentElement.style.setProperty('--llm-w', w + 'px');
-      try { localStorage.setItem('ttl_llm_split_w', String(w)); } catch (x) {}
-    };
-    const up = () => { h.removeEventListener('pointermove', move); h.removeEventListener('pointerup', up); h.removeEventListener('pointercancel', up); document.body.classList.remove('llm-resizing'); };
-    h.addEventListener('pointermove', move); h.addEventListener('pointerup', up); h.addEventListener('pointercancel', up);
-  });
-  window.addEventListener('resize', () => llmSplitApply());
-})();
 function llmOpen(linkId, onDone, opts) {
   opts = opts || {};
   const ex = lambdaLinked(linkId), entries = [];
@@ -20296,14 +20308,12 @@ function llmOpen(linkId, onDone, opts) {
   _llm = { taskId: linkId, onDone, mode: opts.mode || 'complete', ctx: opts.ctx || {}, confirmLabel: opts.confirmLabel || 'Save & Complete',
            entries, dirty: false, view: 'list', formType: null, editIdx: null };
   document.getElementById('lambda-log-modal').classList.remove('hidden');
-  llmSplitApply();
   llmRender();
 }
 function llmClose() {
   const m = document.getElementById('lambda-log-modal');
   if (m) m.classList.add('hidden');
   _llm = null;
-  llmSplitApply();
 }
 function llmCancel() {
   if (!_llm) return;
@@ -24857,7 +24867,122 @@ function renderWorkWidget() {
   widget.className  = 'work-widget' + (isWorking ? ' working' : '');
   label.textContent = isWorking ? 'Working' : 'Worked';
   sub.textContent   = isToday ? 'Total logged today' : 'Total logged on ' + selDate;
+  // Header TTL widgets (Lambda / Code popups) ride this same 1-second render — no extra timer.
+  try { renderTtlHdrWidgets(); } catch (e) {}
 }
+
+// ── Header TTL widget + consolidated view ─────────────────────────────────────
+// Shown in the header of the Lambda Functions overlay, the Lambda changes popup and the code
+// viewer, just before their Close button, so the timer stays visible and usable while those
+// full-page popups cover the bottom Work / Break widgets. Working → Worked total in the worked
+// colour; on break → Break total in the break colour. Reads the existing totals only.
+function ttlHdrMode() {
+  const today = todayStr();
+  if (hasRunningTask()) return { mode: 'working', label: 'Worked', secs: workTotalSecsForDate(today) };
+  if (isWithinWorkHours()) return { mode: 'on-break', label: 'Break', secs: breakTotalSecsForDisplay(today) };
+  return { mode: 'idle', label: 'Worked', secs: workTotalSecsForDate(today) };
+}
+function ttlHms(secs) {
+  secs = Math.max(0, Math.floor(secs || 0));
+  return pad(Math.floor(secs / 3600)) + ':' + pad(Math.floor((secs % 3600) / 60)) + ':' + pad(secs % 60);
+}
+function renderTtlHdrWidgets() {
+  const m = ttlHdrMode();
+  const txt = ttlHms(m.secs);
+  document.querySelectorAll('.ttl-hdr-widget').forEach(w => {
+    w.className = 'ttl-hdr-widget ' + m.mode;
+    const l = w.querySelector('.ttl-hw-lbl'), t = w.querySelector('.ttl-hw-time');
+    if (l) l.textContent = m.label;
+    if (t) t.textContent = txt;
+  });
+  if (ttlConsIsOpen()) ttlConsTick();
+}
+function ttlConsIsOpen() {
+  const el = document.getElementById('ttl-cons-overlay');
+  return !!(el && !el.classList.contains('hidden'));
+}
+// Today's open tasks: running first, then paused, then not started (original order kept inside each group).
+function ttlConsTasks() {
+  const today = todayStr();
+  const rank = { running: 0, paused: 1 };
+  return tasks
+    .filter(t => t && !isTaskDeleted(t) && t.status !== 'done' && taskDateStr(t) === today &&
+      !(typeof isRecurringTaskStillHidden === 'function' && isRecurringTaskStillHidden(t)))
+    .map((t, i) => ({ t, i }))
+    .sort((a, b) => ((rank[a.t.status] ?? 2) - (rank[b.t.status] ?? 2)) || (a.i - b.i))
+    .map(x => x.t);
+}
+function ttlConsSig(list) { return list.map(t => t.id + ':' + t.status).join('|'); }
+function ttlConsSummary() {
+  const box = document.getElementById('ttl-cons-sum');
+  if (!box) return;
+  const today = todayStr();
+  const working = hasRunningTask();
+  const onBreak = !working && isWithinWorkHours();
+  const dayOff = isTodayWeekend() && !isWorkingDay();
+  box.innerHTML =
+    '<div class="ttl-cons-box worked' + (working ? ' live' : '') + '"><div class="k">' + (working ? 'Working' : 'Worked') + '</div><div class="v">' + ttlHms(workTotalSecsForDate(today)) + '</div></div>' +
+    '<div class="ttl-cons-box brk' + (onBreak ? ' live' : '') + '"><div class="k">' + (onBreak ? 'On break' : 'Break') + '</div><div class="v">' + (dayOff ? '—' : ttlHms(breakTotalSecsForDisplay(today))) + '</div></div>';
+}
+function ttlConsRender() {
+  const listEl = document.getElementById('ttl-cons-list');
+  if (!listEl) return;
+  ttlConsSummary();
+  const list = ttlConsTasks();
+  window.__ttlConsSig = ttlConsSig(list);
+  if (!list.length) { listEl.innerHTML = '<div class="ttl-cons-empty">No open tasks for today.</div>'; return; }
+  listEl.innerHTML = list.map(t => {
+    const st = t.status;
+    const named = !!String(t.heading || '').trim();
+    let btn;
+    if (st === 'running')
+      btn = '<button type="button" class="btn-icon btn-pause" onclick="ttlConsAct(' + t.id + ',\'pause\')" title="Pause"><i class="ti ti-player-pause"></i></button>';
+    else if (st === 'paused')
+      btn = '<button type="button" class="btn-icon btn-start" onclick="ttlConsAct(' + t.id + ',\'resume\')" title="Resume"><i class="ti ti-player-play"></i></button>';
+    else
+      btn = '<button type="button" class="btn-icon btn-start" ' + (named ? '' : 'disabled ') + 'onclick="ttlConsAct(' + t.id + ',\'start\')" title="' + (named ? 'Start timer' : 'Enter a task name first') + '"><i class="ti ti-player-play"></i></button>';
+    return '<div class="ttl-cons-row ' + esc(st) + '" data-tid="' + t.id + '">' +
+      '<div class="info"><div class="nm">' + esc(named ? t.heading : '(untitled task)') + '</div>' +
+      (t.project ? '<div class="pj">' + esc(Array.isArray(t.project) ? t.project.join(', ') : t.project) + '</div>' : '') + '</div>' +
+      '<div class="tm">' + fmt(liveElapsedSecs(t)) + '</div>' + btn + '</div>';
+  }).join('');
+}
+// Once a second: refresh the totals and each row's timer in place; rebuild only if a status changed.
+function ttlConsTick() {
+  const list = ttlConsTasks();
+  if (ttlConsSig(list) !== window.__ttlConsSig) { ttlConsRender(); return; }
+  ttlConsSummary();
+  document.querySelectorAll('#ttl-cons-list [data-tid]').forEach(row => {
+    const t = tasks.find(x => String(x.id) === row.getAttribute('data-tid'));
+    const tm = row.querySelector('.tm');
+    if (t && tm) tm.textContent = fmt(liveElapsedSecs(t));
+  });
+}
+function ttlConsOpen(ev) {
+  if (ev) { ev.stopPropagation(); ev.preventDefault(); }
+  const el = document.getElementById('ttl-cons-overlay');
+  if (!el) return;
+  el.classList.remove('hidden');
+  ttlConsRender();
+}
+function ttlConsClose() {
+  const el = document.getElementById('ttl-cons-overlay');
+  if (el) el.classList.add('hidden');
+}
+function ttlConsAct(id, act) {
+  try {
+    if (act === 'pause') pauseTask(id);
+    else if (act === 'resume') resumeTask(id);
+    else startTask(id);
+  } catch (e) { console.error('TTL consolidated action failed', e); }
+  ttlConsRender();
+  renderTtlHdrWidgets();
+  try { renderWorkWidget(); } catch (e) {}
+}
+// One Escape closes only this view (capture phase), not the Lambda / Code popup under it.
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && ttlConsIsOpen()) { e.stopImmediatePropagation(); e.preventDefault(); ttlConsClose(); }
+}, true);
 
 // ── Break timer ───────────────────────────────────────────────────────────────
 
