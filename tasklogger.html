@@ -578,6 +578,7 @@ html.is-touch .pending-card-actions { opacity: 1; }
 .cm-lambda-fns { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 8px 20px 0; font-size: 12px; color: var(--text-secondary); }
 .cm-lambda-fns.hidden { display: none; }
 #lambda-log-modal { z-index: 130; }
+#lcd-changes-modal.lcd-over { z-index: 140; }   /* change viewer opened from the Lambda log / Linked Lambda entries popup sits above it (code viewer is 160) */
 /* "Link to a task" popup opened by Add in the Linked tasks popup: date switcher + task cards */
 #lm-addtask-modal .modal { max-width: 720px; width: 100%; }
 #lm-addtask-modal .modal-body { padding: 0; }
@@ -20371,7 +20372,7 @@ function llmRender() {
   } else {
     const link = _llm.mode === 'link';
     title.textContent = link ? 'Linked Lambda entries' : 'Lambda log';
-    const list = _llm.entries.map((e, i) => `<div class="llm-item"><span class="llm-badge ${e.type}">${e.type === 'new' ? 'NEW' : 'CHANGE'}</span><div class="llm-item-body">${llmSummary(e)}${lamMissingRequired(LLM_TYPES[e.type].store, e.values).length ? '<span class="llm-miss">Details needed</span>' : ''}</div><div class="llm-item-actions"><button type="button" class="btn-icon" title="Edit" onclick="llmEdit(${i})"><i class="ti ti-pencil"></i></button><button type="button" class="btn-icon btn-delete" title="Remove" onclick="llmRemove(${i})"><i class="ti ti-trash"></i></button></div></div>`).join('');
+    const list = _llm.entries.map((e, i) => `<div class="llm-item"><span class="llm-badge ${e.type}">${e.type === 'new' ? 'NEW' : 'CHANGE'}</span><div class="llm-item-body">${llmSummary(e)}${lamMissingRequired(LLM_TYPES[e.type].store, e.values).length ? '<span class="llm-miss">Details needed</span>' : ''}</div><div class="llm-item-actions"><button type="button" class="btn-icon" title="View change (file changes from the change log, with View in code)" aria-label="View change" onclick="llmViewChange(${i})"><i class="ti ti-eye"></i></button><button type="button" class="btn-icon" title="Edit" onclick="llmEdit(${i})"><i class="ti ti-pencil"></i></button><button type="button" class="btn-icon btn-delete" title="Remove" onclick="llmRemove(${i})"><i class="ti ti-trash"></i></button></div></div>`).join('');
     body.innerHTML = `<div class="llm-hint">${link ? 'These Lambda entries are linked to this task. Edit, remove or add entries, then press Save.' : 'This task includes Lambda. Add an entry for each Lambda function used. Nothing is saved until you confirm.'}</div>` +
       (_llm.entries.length ? `<div class="llm-list">${list}</div>` : `<div class="llm-empty">No entries yet. Tap “Add entry” to log a Lambda.</div>`) +
       `<div class="llm-error hidden" id="llm-error">Add at least one entry (or untick “Includes Lambda” in the popup).</div>` +
@@ -20393,6 +20394,19 @@ function llmPickFn(i) {
 }
 function llmPick(type) { if (!_llm || !LLM_TYPES[type]) return; _llm.seed = null; _llm.formType = type; _llm.editIdx = null; _llm.view = 'form'; llmRender(); }
 function llmEdit(i) { if (!_llm || !_llm.entries[i]) return; _llm.formType = _llm.entries[i].type; _llm.editIdx = i; _llm.view = 'form'; llmRender(); }
+// View change for one entry of the Lambda log / Linked Lambda entries popup: the entry's Name + Date pick the file changes in the
+// change-log JSON (same viewer as the Lambda tables; each file there has View in code). Works on unsaved entries too.
+function llmViewChange(i) {
+  if (!_llm || !_llm.entries[i]) return;
+  const e = _llm.entries[i], st = LLM_TYPES[e.type].store, cols = getLambdaColumns(st);
+  const nc = lcdNameCols()[e.type === 'new' ? 'fn' : 'ch'], dc = lcdDateCol(cols);
+  const name = nc && e.values[nc.key] != null ? String(e.values[nc.key]).trim() : '';
+  let iso = dc ? (lmParseDate(e.values[dc.key], dc) || '') : '';
+  if (!iso) iso = (_llm.ctx && _llm.ctx.date) || '';
+  if (!name) { alert('This entry has no Name yet, so it cannot be looked up in the change log. Edit the entry and fill in its Name.'); return; }
+  if (!iso) { alert('This entry has no Date, so it cannot be looked up in the change log.'); return; }
+  lcdvOpenStandalone(name, iso, e.type === 'new' ? 'new' : 'change', true);
+}
 function llmRemove(i) { if (!_llm) return; _llm.entries.splice(i, 1); _llm.dirty = true; llmRender(); }
 function llmSaveEntry() {
   if (!_llm) return;
@@ -20932,7 +20946,7 @@ function lmRenderToolbar() {
          ${none ? '<option value="">No searchable columns</option>' : searchable.map(c => `<option value="${esc(c.key)}" ${c.key === s.by ? 'selected' : ''}>${esc(c.label)}</option>`).join('')}
        </select></div>
      <div class="lm-field lm-field-grow"><label for="lm-q">Search</label>
-       <input id="lm-q" class="lm-input" type="search" autocomplete="off" placeholder="${none ? 'Mark a column Searchable first' : 'Type to search…'}" value="${esc(s.q)}" oninput="lmOnQuery(this.value)" ${none ? 'disabled' : ''} /></div>
+       <input id="lm-q" class="lm-input" type="search" autocomplete="off" placeholder="${none ? 'Mark a column Searchable first' : 'Type keywords to search (all must match)…'}" title="Several keywords: a row must contain all of them, in any order. Use &quot;double quotes&quot; for an exact phrase." value="${esc(s.q)}" oninput="lmOnQuery(this.value)" ${none ? 'disabled' : ''} /></div>
      ${entFields}
      <div class="lm-daterange">
        <div class="lm-field"><label for="lm-from">From</label>
@@ -21184,9 +21198,17 @@ function lmDefaultSort(k) {
 function lmEffectiveSort(k, s) {
   return s.sortCol ? { key: s.sortCol, dir: s.sortDir === 'desc' ? 'desc' : 'asc' } : lmDefaultSort(k);
 }
+// "alpha beta", "alpha, beta" -> ['alpha','beta'];  '"get user" beta' -> ['get user','beta'].
+function lmSearchTokens(q) {
+  const out = [], re = /"([^"]+)"|([^\s,;]+)/g;
+  let m;
+  while ((m = re.exec(String(q || '').toLowerCase()))) { const t = (m[1] != null ? m[1] : m[2]).trim(); if (t) out.push(t); }
+  return out;
+}
 function lmFilteredRows() {
   const k = lmActiveTab, s = lmGetState(k), cols = getLambdaColumns(k);
   const q = String(s.q || '').trim().toLowerCase();
+  const qTokens = lmSearchTokens(q);   // several keywords: every one must be found (any order); "quoted words" stay one phrase
   // Entity filters only restrict once the user has changed them from the default "all selected".
   const ents = lmEntityCols(k).filter(c => Array.isArray(s.ent[c.key])).map(c => ({
     col: c, known: lmKnownItems(c), sel: new Set(s.ent[c.key].map(x => String(x).toLowerCase()))
@@ -21199,7 +21221,7 @@ function lmFilteredRows() {
       const byCol = cols.find(c => c.key === s.by);
       const raw = String((r.values && r.values[s.by]) == null ? '' : r.values[s.by]).toLowerCase();
       const shown = lmDisplayValue(byCol, raw).toLowerCase();
-      if (raw.indexOf(q) === -1 && shown.indexOf(q) === -1) return false;
+      for (const tk of qTokens) if (raw.indexOf(tk) === -1 && shown.indexOf(tk) === -1) return false;
     }
     return true;
   });
@@ -24901,16 +24923,13 @@ function ttlConsIsOpen() {
   const el = document.getElementById('ttl-cons-overlay');
   return !!(el && !el.classList.contains('hidden'));
 }
-// Today's open tasks: running first, then paused, then not started (original order kept inside each group).
+// Today's open tasks in a FIXED order (the order of the task list). Starting / pausing / resuming a task never moves it:
+// only its button and timer colour change, so the row you just pressed stays under your finger.
 function ttlConsTasks() {
   const today = todayStr();
-  const rank = { running: 0, paused: 1 };
   return tasks
     .filter(t => t && !isTaskDeleted(t) && t.status !== 'done' && taskDateStr(t) === today &&
-      !(typeof isRecurringTaskStillHidden === 'function' && isRecurringTaskStillHidden(t)))
-    .map((t, i) => ({ t, i }))
-    .sort((a, b) => ((rank[a.t.status] ?? 2) - (rank[b.t.status] ?? 2)) || (a.i - b.i))
-    .map(x => x.t);
+      !(typeof isRecurringTaskStillHidden === 'function' && isRecurringTaskStillHidden(t)));
 }
 function ttlConsSig(list) { return list.map(t => t.id + ':' + t.status).join('|'); }
 function ttlConsSummary() {
@@ -24930,6 +24949,7 @@ function ttlConsRender() {
   ttlConsSummary();
   const list = ttlConsTasks();
   window.__ttlConsSig = ttlConsSig(list);
+  const keepTop = listEl.scrollTop;   // a rebuild (status change) must not jump the list
   if (!list.length) { listEl.innerHTML = '<div class="ttl-cons-empty">No open tasks for today.</div>'; return; }
   listEl.innerHTML = list.map(t => {
     const st = t.status;
@@ -24946,6 +24966,7 @@ function ttlConsRender() {
       (t.project ? '<div class="pj">' + esc(Array.isArray(t.project) ? t.project.join(', ') : t.project) + '</div>' : '') + '</div>' +
       '<div class="tm">' + fmt(liveElapsedSecs(t)) + '</div>' + btn + '</div>';
   }).join('');
+  listEl.scrollTop = keepTop;
 }
 // Once a second: refresh the totals and each row's timer in place; rebuild only if a status changed.
 function ttlConsTick() {
@@ -27219,8 +27240,16 @@ function lcdpOpen() {
 }
 function lcdpClose() {
   const m = document.getElementById('lcd-changes-modal');
-  if (m) m.classList.add('hidden');
+  if (m) { m.classList.add('hidden'); m.classList.remove('lcd-over'); }
   _lcdp = null;
+}
+// Opens the change viewer on its own (no Back button) for one function + date. over = true when it is opened above the Lambda log popup.
+function lcdvOpenStandalone(name, iso, kind, over) {
+  _lcdp = { iso, view: 'list', rows: [], pick: null, standalone: true, over: !!over };
+  const m = document.getElementById('lcd-changes-modal');
+  m.classList.toggle('lcd-over', !!over);
+  m.classList.remove('hidden');
+  lcdvStart(name, kind);
 }
 function lcdpRefreshIfOpen() { if (_lcdp) lcdpRender(); }
 function lcdpBack() { if (!_lcdp) return; _lcdp.view = 'list'; _lcdp.pick = null; _lcdp.detail = null; lcdpRender(); }
@@ -27352,9 +27381,7 @@ function lmViewChange(id) {
   const iso = dc ? lmParseDate(rec.values && rec.values[dc.key], dc) : '';
   if (!name) { alert('This change has no Name, so it cannot be looked up in the change log.'); return; }
   if (!iso) { alert('This change has no Date, so it cannot be looked up in the change log.'); return; }
-  _lcdp = { iso, view: 'list', rows: [], pick: null, standalone: true };
-  document.getElementById('lcd-changes-modal').classList.remove('hidden');
-  lcdvStart(name, 'change');
+  lcdvOpenStandalone(name, iso, 'change', false);
 }
 // "View in code" on a file of the change viewer: opens the Code Backup viewer on the backup of this change's date, on that file,
 // scrolled to its first changed line. Same-day backups are tried first; with several that day, the first one taken at/after the
@@ -27554,7 +27581,7 @@ function lcdpPick(j) {
   }
 }
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && _lcdp && !document.querySelector('#lambda-log-modal:not(.hidden), #lm-edit-modal:not(.hidden), #confirm-overlay:not(.hidden)')) { e.stopImmediatePropagation(); lcdpClose(); }
+  if (e.key === 'Escape' && _lcdp && !document.querySelector((_lcdp.over ? '' : '#lambda-log-modal:not(.hidden), ') + '#lm-edit-modal:not(.hidden), #confirm-overlay:not(.hidden)')) { e.stopImmediatePropagation(); lcdpClose(); }
 }, true);
 
 function lcdRefetch() {
