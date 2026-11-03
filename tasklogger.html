@@ -1742,10 +1742,10 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
 .ttl-hdr-widget.on-break { border-color: var(--amber-mid); color: var(--amber-dark); background: var(--amber-bg); }
 .ttl-hdr-widget.on-break .ttl-hw-dot { background: var(--amber-mid); }
 @media (max-width: 560px) { .ttl-hw-lbl { display: none; } .ttl-hdr-widget { padding: 4px 9px; font-size: 12px; } }
-.ttl-cons-overlay { position: fixed; inset: 0; z-index: 400; background: rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center; padding: 1rem; }
+.ttl-cons-overlay { position: fixed; inset: 0; z-index: 400; background: transparent; }   /* click-catcher only; the panel is anchored under the header widget */
 .ttl-cons-overlay.hidden { display: none; }
-.ttl-cons { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: 0 10px 30px rgba(0,0,0,0.35); width: 100%; max-width: 460px; max-height: 85vh; display: flex; flex-direction: column; }
-.ttl-cons-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--border); }
+.ttl-cons { position: absolute; top: 60px; right: 8px; background: var(--bg); border: 1px solid var(--border-md); border-radius: var(--radius-lg); box-shadow: 0 10px 30px rgba(0,0,0,0.35); width: min(380px, calc(100vw - 16px)); max-height: 70vh; display: flex; flex-direction: column; overflow: hidden; }
+.ttl-cons-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid var(--border); }
 .ttl-cons-sum { display: flex; gap: 10px; padding: 12px 18px; border-bottom: 1px solid var(--border); }
 .ttl-cons-box { flex: 1; border: 1px solid var(--border-md); border-radius: var(--radius-md); padding: 8px 10px; transition: border-color 0.3s; }
 .ttl-cons-box .k { font-family: var(--font-mono); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-tertiary); }
@@ -24962,9 +24962,26 @@ function ttlConsOpen(ev) {
   if (ev) { ev.stopPropagation(); ev.preventDefault(); }
   const el = document.getElementById('ttl-cons-overlay');
   if (!el) return;
+  window.__ttlConsAnchor = (ev && ev.currentTarget) || null;   // the header widget that was clicked
   el.classList.remove('hidden');
   ttlConsRender();
+  ttlConsPosition();
 }
+// Anchors the panel just under the clicked header widget, right-aligned to it and kept inside the viewport.
+function ttlConsPosition() {
+  const box = document.querySelector('#ttl-cons-overlay .ttl-cons');
+  if (!box) return;
+  const a = window.__ttlConsAnchor, vw = window.innerWidth, vh = window.innerHeight, m = 8;
+  const w = box.offsetWidth;
+  let left, top;
+  if (a && a.isConnected) { const r = a.getBoundingClientRect(); left = r.right - w; top = r.bottom + 6; }
+  else { left = vw - w - m; top = 60; }
+  left = Math.max(m, Math.min(left, vw - w - m));
+  top = Math.max(m, Math.min(top, vh - 120));
+  box.style.left = left + 'px'; box.style.right = 'auto'; box.style.top = top + 'px';
+  box.style.maxHeight = Math.min(vh - top - m, vh * 0.7) + 'px';
+}
+window.addEventListener('resize', () => { if (ttlConsIsOpen()) ttlConsPosition(); });
 function ttlConsClose() {
   const el = document.getElementById('ttl-cons-overlay');
   if (el) el.classList.add('hidden');
