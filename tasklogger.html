@@ -369,6 +369,67 @@ html.is-touch .search-btn { display: inline-flex; }
 @media (max-width: 640px) {
   .more-menu-dropdown { right: 0; left: auto; }
 }
+.more-menu-section {
+  margin-top: 4px; padding: 8px 8px 2px; border-top: 1px solid var(--border);
+  font-family: var(--font-mono); font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-tertiary);
+}
+
+/* ── Utilities → JWT Decoder: full-screen, split view (token in / decoded out) ── */
+.jwt-overlay { position: fixed; inset: 0; z-index: 110; background: var(--bg); display: flex; flex-direction: column; }
+.jwt-overlay.hidden { display: none; }
+.jwt-body { flex: 1; display: flex; min-height: 0; }
+.jwt-pane { flex: 1 1 50%; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+.jwt-pane + .jwt-pane { border-left: 1px solid var(--border-md); }
+.jwt-pane-head {
+  display: flex; align-items: center; gap: 8px; padding: 8px 14px; min-height: 46px; box-sizing: border-box;
+  border-bottom: 1px solid var(--border); background: var(--bg-secondary);
+}
+.jwt-pane-title { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-secondary); }
+.jwt-pane-head .btn { padding: 5px 10px; font-size: 12px; }
+.jwt-in {
+  flex: 1; min-height: 120px; resize: none; border: 0; outline: none; padding: 14px; box-sizing: border-box;
+  background: var(--bg); color: var(--text-primary); font: 13px/1.6 var(--font-mono); word-break: break-all; white-space: pre-wrap;
+}
+.jwt-in::placeholder { color: var(--text-tertiary); }
+.jwt-parts { border-top: 1px solid var(--border); background: var(--bg-secondary); padding: 10px 14px; max-height: 34%; overflow: auto; }
+.jwt-parts.hidden { display: none; }
+.jwt-parts-k { font-family: var(--font-mono); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-tertiary); margin-bottom: 4px; }
+.jwt-parts-v { font: 12px/1.6 var(--font-mono); word-break: break-all; }
+.jwt-p-h { color: var(--purple-dark); } .jwt-p-p { color: var(--blue-dark); } .jwt-p-s { color: var(--green-dark); } .jwt-p-dot { color: var(--text-tertiary); }
+.jwt-out { flex: 1; overflow: auto; padding: 12px 14px 18px; }
+.jwt-status {
+  display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; margin-bottom: 12px;
+  font-family: var(--font-mono); font-size: 11px; font-weight: 700; border: 1px solid var(--border-md); color: var(--text-secondary);
+}
+.jwt-status.ok  { border-color: var(--green-mid); color: var(--green-dark); background: var(--green-bg); }
+.jwt-status.bad { border-color: var(--red-mid); color: var(--red-mid); background: var(--red-bg); }
+.jwt-status.warn { border-color: var(--amber-mid); color: var(--amber-dark); background: var(--amber-bg); }
+.jwt-sec { border: 1px solid var(--border-md); border-radius: var(--radius-md); margin-bottom: 12px; overflow: hidden; }
+.jwt-sec-head { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--border); background: var(--bg-secondary); }
+.jwt-sec-title { flex: 1; font-family: var(--font-mono); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; }
+.jwt-sec.h .jwt-sec-title { color: var(--purple-dark); } .jwt-sec.p .jwt-sec-title { color: var(--blue-dark); } .jwt-sec.s .jwt-sec-title { color: var(--green-dark); } .jwt-sec.c .jwt-sec-title { color: var(--text-secondary); }
+.jwt-sec-head .btn-icon { width: 26px; height: 26px; font-size: 13px; }
+.jwt-pre { margin: 0; padding: 10px 12px; font: 12.5px/1.55 var(--font-mono); white-space: pre-wrap; word-break: break-word; color: var(--text-primary); }
+.jwt-k { color: var(--purple-dark); } .jwt-s { color: var(--green-dark); } .jwt-n { color: var(--blue-mid); } .jwt-b { color: var(--amber-dark); font-weight: 600; }
+.jwt-claims { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.jwt-claims td { padding: 6px 12px; vertical-align: top; }
+.jwt-claims tr + tr td { border-top: 1px solid var(--border); }
+.jwt-claims td:first-child { width: 1%; white-space: nowrap; font-family: var(--font-mono); font-weight: 600; color: var(--text-secondary); }
+.jwt-claims td:last-child { word-break: break-word; }
+.jwt-claims .rel { font-family: var(--font-mono); font-size: 11.5px; margin-left: 6px; color: var(--text-tertiary); }
+.jwt-claims .rel.bad { color: var(--red-mid); font-weight: 600; } .jwt-claims .rel.ok { color: var(--green-dark); font-weight: 600; }
+.jwt-note { font-size: 12px; color: var(--text-tertiary); padding: 0 2px; }
+.jwt-empty { margin: auto; padding: 32px 20px; text-align: center; color: var(--text-tertiary); font-size: 13px; max-width: 360px; }
+.jwt-empty i { display: block; font-size: 30px; margin-bottom: 8px; }
+.jwt-err { color: var(--red-mid); font-size: 13px; padding: 2px; }
+@media (max-width: 760px) {
+  .jwt-body { flex-direction: column; }
+  .jwt-pane { flex: 1 1 0; }
+  .jwt-pane + .jwt-pane { border-left: 0; border-top: 1px solid var(--border-md); }
+  .jwt-in { font-size: 16px; min-height: 80px; }   /* 16px stops iOS zooming into the field */
+  .jwt-parts { max-height: 40%; }
+}
 
 /* Task card */
 .task-card {
@@ -519,6 +580,14 @@ html.is-touch .pending-card-actions { opacity: 1; }
   border: 1px solid var(--border-md); border-radius: var(--radius-md); background: var(--bg); color: var(--text-primary);
 }
 .lm-input:disabled { opacity: 0.55; cursor: not-allowed; }
+/* Keyword chips in the Lambda table search: Enter sets a word aside as a chip, then the next one is typed */
+.lm-kwbox { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 3px 6px; min-height: 36px; box-sizing: border-box; cursor: text; }
+.lm-kwbox:focus-within { border-color: var(--blue-mid); }
+.lm-kwbox .lm-kw-in { flex: 1; min-width: 120px; border: none; outline: none; background: transparent; color: inherit; font: inherit; font-size: 13px; padding: 4px 2px; }
+.lm-kw-chip { display: inline-flex; align-items: center; gap: 2px; background: var(--blue-bg); color: var(--blue-dark); border-radius: 12px; padding: 2px 3px 2px 9px; font-size: 12px; font-weight: 600; max-width: 100%; }
+.lm-kw-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lm-kw-chip button { border: none; background: none; color: inherit; cursor: pointer; padding: 0 4px; font-size: 15px; line-height: 1; }
+@media (max-width: 560px) { .lm-kwbox .lm-kw-in { font-size: 16px; } }
 .lm-input.invalid { border-color: var(--red-mid); }
 .lm-hint { flex-basis: 100%; font-size: 12px; color: var(--text-tertiary); }
 .lm-hint button { background: none; border: none; padding: 0; font: inherit; color: var(--blue-mid); cursor: pointer; text-decoration: underline; }
@@ -578,6 +647,7 @@ html.is-touch .pending-card-actions { opacity: 1; }
 .cm-lambda-fns { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 8px 20px 0; font-size: 12px; color: var(--text-secondary); }
 .cm-lambda-fns.hidden { display: none; }
 #lambda-log-modal { z-index: 130; }
+#lcd-changes-modal.lcd-over { z-index: 140; }   /* change viewer opened from the Lambda log / Linked Lambda entries popup sits above it (code viewer is 160) */
 /* "Link to a task" popup opened by Add in the Linked tasks popup: date switcher + task cards */
 #lm-addtask-modal .modal { max-width: 720px; width: 100%; }
 #lm-addtask-modal .modal-body { padding: 0; }
@@ -1725,6 +1795,44 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
 }
 .work-time.working { color: var(--green-dark); }
 
+/* ── Header TTL widget (Lambda Functions / Lambda changes / Code viewer) + consolidated view ── */
+.ttl-hdr-widget {
+  display: inline-flex; align-items: center; gap: 7px; flex-shrink: 0;
+  margin-left: auto; margin-right: 8px; padding: 4px 11px;
+  border: 1px solid var(--border-md); border-radius: 999px;
+  background: var(--bg); color: var(--text-secondary); cursor: pointer;
+  font-family: var(--font-mono); font-size: 13px; font-weight: 700; line-height: 1.2;
+  font-variant-numeric: tabular-nums; transition: border-color 0.3s, color 0.3s, background 0.3s;
+}
+.ttl-hdr-widget:hover { background: var(--bg-secondary); }
+.ttl-hw-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-tertiary); flex-shrink: 0; transition: background 0.3s; }
+.ttl-hw-lbl { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.85; }
+.ttl-hdr-widget.working  { border-color: var(--green-mid); color: var(--green-dark); background: var(--green-bg); }
+.ttl-hdr-widget.working .ttl-hw-dot  { background: var(--green-mid); }
+.ttl-hdr-widget.on-break { border-color: var(--amber-mid); color: var(--amber-dark); background: var(--amber-bg); }
+.ttl-hdr-widget.on-break .ttl-hw-dot { background: var(--amber-mid); }
+@media (max-width: 560px) { .ttl-hw-lbl { display: none; } .ttl-hdr-widget { padding: 4px 9px; font-size: 12px; } }
+.ttl-cons-overlay { position: fixed; inset: 0; z-index: 400; background: transparent; }   /* click-catcher only; the panel is anchored under the header widget */
+.ttl-cons-overlay.hidden { display: none; }
+.ttl-cons { position: absolute; top: 60px; right: 8px; background: var(--bg); border: 1px solid var(--border-md); border-radius: var(--radius-lg); box-shadow: 0 10px 30px rgba(0,0,0,0.35); width: min(380px, calc(100vw - 16px)); max-height: 70vh; display: flex; flex-direction: column; overflow: hidden; }
+.ttl-cons-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+.ttl-cons-sum { display: flex; gap: 10px; padding: 12px 18px; border-bottom: 1px solid var(--border); }
+.ttl-cons-box { flex: 1; border: 1px solid var(--border-md); border-radius: var(--radius-md); padding: 8px 10px; transition: border-color 0.3s; }
+.ttl-cons-box .k { font-family: var(--font-mono); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-tertiary); }
+.ttl-cons-box .v { font-family: var(--font-mono); font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text-primary); line-height: 1.2; }
+.ttl-cons-box.worked.live { border-color: var(--green-mid); } .ttl-cons-box.worked.live .v { color: var(--green-dark); }
+.ttl-cons-box.brk.live { border-color: var(--amber-mid); } .ttl-cons-box.brk.live .v { color: var(--amber-dark); }
+.ttl-cons-list { overflow-y: auto; padding: 6px 10px 12px; }
+.ttl-cons-row { display: flex; align-items: center; gap: 10px; padding: 9px 8px; }
+.ttl-cons-row + .ttl-cons-row { border-top: 1px solid var(--border); }
+.ttl-cons-row .info { flex: 1; min-width: 0; }
+.ttl-cons-row .nm { font-size: 13.5px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ttl-cons-row .pj { font-size: 11px; color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ttl-cons-row .tm { font-family: var(--font-mono); font-size: 13px; font-variant-numeric: tabular-nums; color: var(--text-secondary); }
+.ttl-cons-row.running .tm { color: var(--green-dark); font-weight: 600; }
+.ttl-cons-row.paused  .tm { color: var(--amber-dark); }
+.ttl-cons-empty { padding: 22px 12px; text-align: center; color: var(--text-tertiary); font-size: 13px; }
+
 /* ── Break timer ── */
 .break-widget {
   position: fixed; bottom: 20px; right: 20px;
@@ -2201,6 +2309,8 @@ mark.cbv-hl.cur { background: color-mix(in srgb, #ff9632 65%, transparent); outl
             <button class="btn" onclick="openCSVModal()" title="Import or export the log as CSV or Excel"><i class="ti ti-file-import"></i> Import / Export</button>
             <button class="btn" onclick="startTour()" id="tour-btn" title="App Tour"><i class="ti ti-route"></i> Tour</button>
             <button class="btn" onclick="cycleTheme()" id="theme-toggle-btn" title="Switch theme"><i class="ti ti-sun" id="theme-toggle-icon"></i> <span id="theme-toggle-label">Light</span></button>
+            <div class="more-menu-section" role="presentation">Utilities</div>
+            <button class="btn" onclick="openJwtDecoder()" id="jwt-menu-btn" title="Decode a JWT token"><i class="ti ti-key"></i> JWT Decoder</button>
           </div>
         </div>
       </div>
@@ -2511,6 +2621,7 @@ mark.cbv-hl.cur { background: color-mix(in srgb, #ff9632 65%, transparent); outl
   <div class="modal">
     <div class="modal-header">
       <div class="modal-title"><i class="ti ti-function" style="vertical-align:-2px;margin-right:6px;color:var(--blue-mid)"></i><span id="lcdp-title">Lambda changes</span></div>
+      <button type="button" class="ttl-hdr-widget idle" onclick="ttlConsOpen(event)" title="Time tracker — click to start / pause tasks" aria-label="Open time tracker"><span class="ttl-hw-dot"></span><span class="ttl-hw-lbl">Worked</span><span class="ttl-hw-time">00:00:00</span></button>
       <button class="btn-icon" onclick="lcdpClose()" title="Close" aria-label="Close"><i class="ti ti-x"></i></button>
     </div>
     <div class="modal-body" id="lcdp-body"></div>
@@ -2593,6 +2704,45 @@ mark.cbv-hl.cur { background: color-mix(in srgb, #ff9632 65%, transparent); outl
   </div>
 </div>
 
+<!-- Consolidated TTL view (opens from the header TTL widget in the Lambda / Code popups): today's tasks with Start / Pause / Resume -->
+<div class="ttl-cons-overlay hidden" id="ttl-cons-overlay" onclick="if(event.target===this)ttlConsClose()">
+  <div class="ttl-cons" role="dialog" aria-modal="true" aria-label="Time tracker">
+    <div class="ttl-cons-head">
+      <div class="modal-title"><i class="ti ti-clock" style="vertical-align:-2px;margin-right:6px;color:var(--green-mid)"></i>Time tracker</div>
+      <button type="button" class="btn-icon" onclick="ttlConsClose()" title="Close (Esc)" aria-label="Close time tracker"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="ttl-cons-sum" id="ttl-cons-sum"></div>
+    <div class="ttl-cons-list" id="ttl-cons-list"></div>
+  </div>
+</div>
+
+<!-- Utilities → JWT Decoder: full-screen split view (token on the left, decoded on the right), header carries the TTL widget like the Lambda / Code popups -->
+<div class="jwt-overlay hidden" id="jwt-overlay" role="dialog" aria-modal="true" aria-label="JWT Decoder">
+  <div class="lm-head">
+    <div class="lm-title"><i class="ti ti-key" style="font-size:18px;color:var(--blue-mid)"></i>JWT Decoder</div>
+    <button type="button" class="ttl-hdr-widget idle" onclick="ttlConsOpen(event)" title="Time tracker — click to start / pause tasks" aria-label="Open time tracker"><span class="ttl-hw-dot"></span><span class="ttl-hw-lbl">Worked</span><span class="ttl-hw-time">00:00:00</span></button>
+    <button type="button" class="btn-icon" onclick="closeJwtDecoder()" title="Close (Esc)" aria-label="Close JWT decoder"><i class="ti ti-x"></i></button>
+  </div>
+  <div class="jwt-body">
+    <div class="jwt-pane">
+      <div class="jwt-pane-head">
+        <div class="jwt-pane-title">Encoded token</div>
+        <button type="button" class="btn" onclick="jwtPaste()" title="Paste from the clipboard"><i class="ti ti-clipboard"></i> Paste</button>
+        <button type="button" class="btn" onclick="jwtClear()" title="Clear the token"><i class="ti ti-eraser"></i> Clear</button>
+      </div>
+      <textarea class="jwt-in" id="jwt-input" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" placeholder="Paste a JWT here (eyJhbGciOi…)" oninput="jwtDecodeNow()"></textarea>
+      <div class="jwt-parts hidden" id="jwt-parts"></div>
+    </div>
+    <div class="jwt-pane">
+      <div class="jwt-pane-head">
+        <div class="jwt-pane-title">Decoded</div>
+        <button type="button" class="btn" id="jwt-copy-all" onclick="jwtCopy('all', this)" title="Copy the decoded header and payload as JSON" disabled><i class="ti ti-clipboard-copy"></i> Copy JSON</button>
+      </div>
+      <div class="jwt-out" id="jwt-output"></div>
+    </div>
+  </div>
+</div>
+
 <!-- Function code viewer (View on a Lambda function row): file tree + code from the Code Backup folder, with a date picker -->
 <div class="cbv-overlay hidden" id="cbv-overlay" role="dialog" aria-modal="true" aria-label="Function code">
   <div class="cbv-head">
@@ -2600,7 +2750,8 @@ mark.cbv-hl.cur { background: color-mix(in srgb, #ff9632 65%, transparent); outl
     <div class="cbv-title" id="cbv-title">Code</div>
     <label class="cbv-datewrap" id="cbv-datewrap"><i class="ti ti-calendar"></i> Backup date <select id="cbv-date" onchange="cbvSetDate(+this.value)"></select></label>
     <span class="cbv-count" id="cbv-count"></span>
-    <button type="button" class="btn-icon" onclick="cbvClose()" title="Close (Esc)" aria-label="Close code viewer"><i class="ti ti-x"></i></button>
+    <button type="button" class="ttl-hdr-widget idle" onclick="ttlConsOpen(event)" title="Time tracker — click to start / pause tasks" aria-label="Open time tracker"><span class="ttl-hw-dot"></span><span class="ttl-hw-lbl">Worked</span><span class="ttl-hw-time">00:00:00</span></button>
+      <button type="button" class="btn-icon" onclick="cbvClose()" title="Close (Esc)" aria-label="Close code viewer"><i class="ti ti-x"></i></button>
   </div>
   <div class="cbv-body"><div class="cbv-side" id="cbv-side"></div><div class="cbv-main" id="cbv-main"></div></div>
 </div>
@@ -2609,7 +2760,8 @@ mark.cbv-hl.cur { background: color-mix(in srgb, #ff9632 65%, transparent); outl
 <div class="lm-overlay hidden" id="lambda-overlay" role="dialog" aria-modal="true" aria-label="Lambda Functions">
   <div class="lm-head">
     <div class="lm-title"><i class="ti ti-function" style="font-size:18px;color:var(--blue-mid)"></i>Lambda Functions</div>
-    <button type="button" class="btn-icon" onclick="closeLambdaOverlay()" title="Close (Esc)" aria-label="Close Lambda Functions"><i class="ti ti-x"></i></button>
+    <button type="button" class="ttl-hdr-widget idle" onclick="ttlConsOpen(event)" title="Time tracker — click to start / pause tasks" aria-label="Open time tracker"><span class="ttl-hw-dot"></span><span class="ttl-hw-lbl">Worked</span><span class="ttl-hw-time">00:00:00</span></button>
+      <button type="button" class="btn-icon" onclick="closeLambdaOverlay()" title="Close (Esc)" aria-label="Close Lambda Functions"><i class="ti ti-x"></i></button>
   </div>
   <div class="lm-tabs" id="lm-tabs"></div>
   <div class="lm-toolbar" id="lm-toolbar"></div>
@@ -15927,6 +16079,9 @@ const FS_PORTAL_IDS = [
   'complete-modal',
   'lcd-changes-modal',
   'lambda-log-modal',
+  'lambda-overlay',        // Lambda Functions full-page overlay
+  'cbv-overlay',           // function code viewer
+  'ttl-cons-overlay',      // consolidated TTL view (header widget)
   'carry-forward-modal',
   'pending-tasks-modal',
   'todo-modal',
@@ -20315,7 +20470,7 @@ function llmRender() {
   } else {
     const link = _llm.mode === 'link';
     title.textContent = link ? 'Linked Lambda entries' : 'Lambda log';
-    const list = _llm.entries.map((e, i) => `<div class="llm-item"><span class="llm-badge ${e.type}">${e.type === 'new' ? 'NEW' : 'CHANGE'}</span><div class="llm-item-body">${llmSummary(e)}${lamMissingRequired(LLM_TYPES[e.type].store, e.values).length ? '<span class="llm-miss">Details needed</span>' : ''}</div><div class="llm-item-actions"><button type="button" class="btn-icon" title="Edit" onclick="llmEdit(${i})"><i class="ti ti-pencil"></i></button><button type="button" class="btn-icon btn-delete" title="Remove" onclick="llmRemove(${i})"><i class="ti ti-trash"></i></button></div></div>`).join('');
+    const list = _llm.entries.map((e, i) => `<div class="llm-item"><span class="llm-badge ${e.type}">${e.type === 'new' ? 'NEW' : 'CHANGE'}</span><div class="llm-item-body">${llmSummary(e)}${lamMissingRequired(LLM_TYPES[e.type].store, e.values).length ? '<span class="llm-miss">Details needed</span>' : ''}</div><div class="llm-item-actions"><button type="button" class="btn-icon" title="View change (file changes from the change log, with View in code)" aria-label="View change" onclick="llmViewChange(${i})"><i class="ti ti-eye"></i></button><button type="button" class="btn-icon" title="Edit" onclick="llmEdit(${i})"><i class="ti ti-pencil"></i></button><button type="button" class="btn-icon btn-delete" title="Remove" onclick="llmRemove(${i})"><i class="ti ti-trash"></i></button></div></div>`).join('');
     body.innerHTML = `<div class="llm-hint">${link ? 'These Lambda entries are linked to this task. Edit, remove or add entries, then press Save.' : 'This task includes Lambda. Add an entry for each Lambda function used. Nothing is saved until you confirm.'}</div>` +
       (_llm.entries.length ? `<div class="llm-list">${list}</div>` : `<div class="llm-empty">No entries yet. Tap “Add entry” to log a Lambda.</div>`) +
       `<div class="llm-error hidden" id="llm-error">Add at least one entry (or untick “Includes Lambda” in the popup).</div>` +
@@ -20337,6 +20492,19 @@ function llmPickFn(i) {
 }
 function llmPick(type) { if (!_llm || !LLM_TYPES[type]) return; _llm.seed = null; _llm.formType = type; _llm.editIdx = null; _llm.view = 'form'; llmRender(); }
 function llmEdit(i) { if (!_llm || !_llm.entries[i]) return; _llm.formType = _llm.entries[i].type; _llm.editIdx = i; _llm.view = 'form'; llmRender(); }
+// View change for one entry of the Lambda log / Linked Lambda entries popup: the entry's Name + Date pick the file changes in the
+// change-log JSON (same viewer as the Lambda tables; each file there has View in code). Works on unsaved entries too.
+function llmViewChange(i) {
+  if (!_llm || !_llm.entries[i]) return;
+  const e = _llm.entries[i], st = LLM_TYPES[e.type].store, cols = getLambdaColumns(st);
+  const nc = lcdNameCols()[e.type === 'new' ? 'fn' : 'ch'], dc = lcdDateCol(cols);
+  const name = nc && e.values[nc.key] != null ? String(e.values[nc.key]).trim() : '';
+  let iso = dc ? (lmParseDate(e.values[dc.key], dc) || '') : '';
+  if (!iso) iso = (_llm.ctx && _llm.ctx.date) || '';
+  if (!name) { alert('This entry has no Name yet, so it cannot be looked up in the change log. Edit the entry and fill in its Name.'); return; }
+  if (!iso) { alert('This entry has no Date, so it cannot be looked up in the change log.'); return; }
+  lcdvOpenStandalone(name, iso, e.type === 'new' ? 'new' : 'change', true);
+}
 function llmRemove(i) { if (!_llm) return; _llm.entries.splice(i, 1); _llm.dirty = true; llmRender(); }
 function llmSaveEntry() {
   if (!_llm) return;
@@ -20351,7 +20519,7 @@ function llmSaveEntry() {
 // Resets a Lambda tab's search / entity filters / date range so freshly saved records are visible.
 function lmRevealTab(k) {
   const s = lmGetState(k);
-  s.q = ''; s.ent = {}; s.fromTouched = false; s.toTouched = false;
+  s.q = ''; s.kw = []; s.ent = {}; s.fromTouched = false; s.toTouched = false;
 }
 // Writes the staged entries: updates edited records, adds new ones, deletes removed ones (all by taskId link).
 function lambdaCommitLinked(linkId, entries) {
@@ -20484,8 +20652,9 @@ function lmSel(k) { return lmSelected[k] || (lmSelected[k] = new Set()); }
 let lmVisibleIds = [];
 
 function lmGetState(k) {
-  if (!lmTabState[k]) lmTabState[k] = { by: '', q: '', from: '', to: '', fromTouched: false, toTouched: false, sortCol: null, sortDir: 'asc', ent: {} };
+  if (!lmTabState[k]) lmTabState[k] = { by: '', q: '', kw: [], from: '', to: '', fromTouched: false, toTouched: false, sortCol: null, sortDir: 'asc', ent: {} };
   if (!lmTabState[k].ent) lmTabState[k].ent = {};
+  if (!lmTabState[k].kw) lmTabState[k].kw = [];
   return lmTabState[k];
 }
 function lmLoadPrefs(k) {
@@ -20859,7 +21028,7 @@ function lmRenderToolbar() {
   lmEntClose();
   const k = lmActiveTab, s = lmGetState(k), cols = getLambdaColumns(k);
   const searchable = cols.filter(c => c.searchable === true);
-  if (!searchable.some(c => c.key === s.by)) s.by = searchable.length ? searchable[0].key : '';
+  if (s.by !== '__all' && !searchable.some(c => c.key === s.by)) s.by = searchable.length ? '__all' : '';   // default: all searchable columns
   const dates = lmLoadRecords(k, cols).map(r => r._date).filter(Boolean).sort();
   const today = todayStr();
   if (!s.fromTouched) s.from = dates.length ? dates[0] : today;   // oldest record date
@@ -20873,10 +21042,10 @@ function lmRenderToolbar() {
   el.innerHTML =
     `<div class="lm-field"><label for="lm-by">Search by <span class="lm-req" title="Required">*</span></label>
        <select id="lm-by" class="lm-input" onchange="lmOnBy(this.value)" ${none ? 'disabled' : ''}>
-         ${none ? '<option value="">No searchable columns</option>' : searchable.map(c => `<option value="${esc(c.key)}" ${c.key === s.by ? 'selected' : ''}>${esc(c.label)}</option>`).join('')}
+         ${none ? '<option value="">No searchable columns</option>' : `<option value="__all" ${s.by === '__all' ? 'selected' : ''}>All searchable columns</option>` + searchable.map(c => `<option value="${esc(c.key)}" ${c.key === s.by ? 'selected' : ''}>${esc(c.label)}</option>`).join('')}
        </select></div>
      <div class="lm-field lm-field-grow"><label for="lm-q">Search</label>
-       <input id="lm-q" class="lm-input" type="search" autocomplete="off" placeholder="${none ? 'Mark a column Searchable first' : 'Type to search…'}" value="${esc(s.q)}" oninput="lmOnQuery(this.value)" ${none ? 'disabled' : ''} /></div>
+       <div class="lm-kwbox lm-input" id="lm-kwbox" onclick="document.getElementById('lm-q').focus()" title="Type a keyword and press Enter (or comma) to set it aside as a chip, then type the next one. A row must contain all the keywords. Backspace removes the last chip.">${lmKwChipsHtml(s)}<input id="lm-q" class="lm-kw-in" type="text" autocomplete="off" spellcheck="false" placeholder="${none ? 'Mark a column Searchable first' : (s.kw.length ? 'Add another keyword…' : 'Type a keyword, press Enter to add…')}" value="${esc(s.q)}" oninput="lmOnQuery(this.value)" onkeydown="lmKwKey(event)" ${none ? 'disabled' : ''} /></div></div>
      ${entFields}
      <div class="lm-daterange">
        <div class="lm-field"><label for="lm-from">From</label>
@@ -20893,6 +21062,38 @@ function lmOpenMasters() {
 }
 function lmOnBy(v) { lmGetState(lmActiveTab).by = v; lmRenderTable(); }
 function lmOnQuery(v) { lmGetState(lmActiveTab).q = v; lmRenderTable(); }
+// ── Keyword chips: Enter / comma sets the typed word aside, the next keyword is typed after it (all chips + the live text must match) ──
+function lmKwChipsHtml(s) {
+  return (s.kw || []).map((w, i) => `<span class="lm-kw-chip"><span>${esc(w)}</span><button type="button" onclick="event.stopPropagation();lmKwRemove(${i})" aria-label="Remove keyword ${esc(w)}" title="Remove">×</button></span>`).join('');
+}
+function lmKwRefreshChips() {
+  const s = lmGetState(lmActiveTab), box = document.getElementById('lm-kwbox'), inp = document.getElementById('lm-q');
+  if (!box || !inp) return;
+  box.querySelectorAll('.lm-kw-chip').forEach(c => c.remove());
+  inp.insertAdjacentHTML('beforebegin', lmKwChipsHtml(s));
+  inp.placeholder = s.kw.length ? 'Add another keyword…' : 'Type a keyword, press Enter to add…';
+}
+function lmKwCommit() {
+  const s = lmGetState(lmActiveTab), inp = document.getElementById('lm-q');
+  if (!inp) return false;
+  const words = lmSearchTokens(inp.value);
+  if (!words.length) return false;
+  words.forEach(w => { if (s.kw.indexOf(w) === -1) s.kw.push(w); });
+  inp.value = ''; s.q = '';
+  lmKwRefreshChips(); lmRenderTable();
+  return true;
+}
+function lmKwRemove(i) {
+  const s = lmGetState(lmActiveTab);
+  s.kw.splice(i, 1);
+  lmKwRefreshChips(); lmRenderTable();
+  const inp = document.getElementById('lm-q'); if (inp) inp.focus();
+}
+function lmKwKey(e) {
+  const inp = e.target, s = lmGetState(lmActiveTab);
+  if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); lmKwCommit(); }
+  else if (e.key === 'Backspace' && !inp.value && s.kw.length) { e.preventDefault(); s.kw.pop(); lmKwRefreshChips(); lmRenderTable(); }
+}
 function lmOnDate(which, v) {
   const s = lmGetState(lmActiveTab);
   if (which === 'from') { s.from = v; s.fromTouched = !!v; } else { s.to = v; s.toTouched = !!v; }
@@ -20901,7 +21102,7 @@ function lmOnDate(which, v) {
 }
 function lmResetFilters() {
   const s = lmGetState(lmActiveTab);
-  s.q = ''; s.fromTouched = false; s.toTouched = false; s.ent = {};   // entity filters go back to "all selected"
+  s.q = ''; s.kw = []; s.fromTouched = false; s.toTouched = false; s.ent = {};   // entity filters go back to "all selected"
   lmRenderToolbar();
   lmRenderTable();
 }
@@ -20926,7 +21127,7 @@ function lmToggleFilters() {
 function lmActiveFilterCount() {
   const s = lmGetState(lmActiveTab);
   let n = 0;
-  if (String(s.q || '').trim() && s.by) n++;
+  if ((String(s.q || '').trim() || (s.kw && s.kw.length)) && s.by) n++;
   if (s.fromTouched) n++;
   if (s.toTouched) n++;
   n += Object.keys(s.ent || {}).filter(key => Array.isArray(s.ent[key]) && lmEntityCols(lmActiveTab).some(c => c.key === key)).length;
@@ -21128,9 +21329,17 @@ function lmDefaultSort(k) {
 function lmEffectiveSort(k, s) {
   return s.sortCol ? { key: s.sortCol, dir: s.sortDir === 'desc' ? 'desc' : 'asc' } : lmDefaultSort(k);
 }
+// "alpha beta", "alpha, beta" -> ['alpha','beta'];  '"get user" beta' -> ['get user','beta'].
+function lmSearchTokens(q) {
+  const out = [], re = /"([^"]+)"|([^\s,;]+)/g;
+  let m;
+  while ((m = re.exec(String(q || '').toLowerCase()))) { const t = (m[1] != null ? m[1] : m[2]).trim(); if (t) out.push(t); }
+  return out;
+}
 function lmFilteredRows() {
   const k = lmActiveTab, s = lmGetState(k), cols = getLambdaColumns(k);
   const q = String(s.q || '').trim().toLowerCase();
+  const qTokens = (s.kw || []).map(x => String(x).toLowerCase()).concat(lmSearchTokens(q));   // several keywords: every one must be found (any order); "quoted words" stay one phrase
   // Entity filters only restrict once the user has changed them from the default "all selected".
   const ents = lmEntityCols(k).filter(c => Array.isArray(s.ent[c.key])).map(c => ({
     col: c, known: lmKnownItems(c), sel: new Set(s.ent[c.key].map(x => String(x).toLowerCase()))
@@ -21139,11 +21348,14 @@ function lmFilteredRows() {
     if (s.from && r._date && r._date < s.from) return false;
     if (s.to && r._date && r._date > s.to) return false;
     for (const e of ents) if (!lmEntityMatch(r, e)) return false;
-    if (q && s.by) {
-      const byCol = cols.find(c => c.key === s.by);
-      const raw = String((r.values && r.values[s.by]) == null ? '' : r.values[s.by]).toLowerCase();
-      const shown = lmDisplayValue(byCol, raw).toLowerCase();
-      if (raw.indexOf(q) === -1 && shown.indexOf(q) === -1) return false;
+    if (qTokens.length && s.by) {
+      // Like the AWS console function filter: every keyword must be found (AND), each in the chosen column
+      // or, with "All searchable columns", in any searchable column of the row.
+      const scan = (s.by === '__all' ? cols.filter(c => c.searchable === true) : cols.filter(c => c.key === s.by)).map(c => {
+        const raw = String((r.values && r.values[c.key]) == null ? '' : r.values[c.key]).toLowerCase();
+        return raw + '\u0001' + lmDisplayValue(c, raw).toLowerCase();
+      });
+      for (const tk of qTokens) if (!scan.some(t => t.indexOf(tk) !== -1)) return false;
     }
     return true;
   });
@@ -24811,7 +25023,301 @@ function renderWorkWidget() {
   widget.className  = 'work-widget' + (isWorking ? ' working' : '');
   label.textContent = isWorking ? 'Working' : 'Worked';
   sub.textContent   = isToday ? 'Total logged today' : 'Total logged on ' + selDate;
+  // Header TTL widgets (Lambda / Code popups) ride this same 1-second render — no extra timer.
+  try { renderTtlHdrWidgets(); } catch (e) {}
 }
+
+// ── Header TTL widget + consolidated view ─────────────────────────────────────
+// Shown in the header of the Lambda Functions overlay, the Lambda changes popup and the code
+// viewer, just before their Close button, so the timer stays visible and usable while those
+// full-page popups cover the bottom Work / Break widgets. Working → Worked total in the worked
+// colour; on break → Break total in the break colour. Reads the existing totals only.
+function ttlHdrMode() {
+  const today = todayStr();
+  if (hasRunningTask()) return { mode: 'working', label: 'Worked', secs: workTotalSecsForDate(today) };
+  if (isWithinWorkHours()) return { mode: 'on-break', label: 'Break', secs: breakTotalSecsForDisplay(today) };
+  return { mode: 'idle', label: 'Worked', secs: workTotalSecsForDate(today) };
+}
+function ttlHms(secs) {
+  secs = Math.max(0, Math.floor(secs || 0));
+  return pad(Math.floor(secs / 3600)) + ':' + pad(Math.floor((secs % 3600) / 60)) + ':' + pad(secs % 60);
+}
+function renderTtlHdrWidgets() {
+  const m = ttlHdrMode();
+  const txt = ttlHms(m.secs);
+  document.querySelectorAll('.ttl-hdr-widget').forEach(w => {
+    w.className = 'ttl-hdr-widget ' + m.mode;
+    const l = w.querySelector('.ttl-hw-lbl'), t = w.querySelector('.ttl-hw-time');
+    if (l) l.textContent = m.label;
+    if (t) t.textContent = txt;
+  });
+  if (ttlConsIsOpen()) ttlConsTick();
+}
+function ttlConsIsOpen() {
+  const el = document.getElementById('ttl-cons-overlay');
+  return !!(el && !el.classList.contains('hidden'));
+}
+// Today's open tasks in a FIXED order (the order of the task list). Starting / pausing / resuming a task never moves it:
+// only its button and timer colour change, so the row you just pressed stays under your finger.
+function ttlConsTasks() {
+  const today = todayStr();
+  return tasks
+    .filter(t => t && !isTaskDeleted(t) && t.status !== 'done' && taskDateStr(t) === today &&
+      !(typeof isRecurringTaskStillHidden === 'function' && isRecurringTaskStillHidden(t)));
+}
+function ttlConsSig(list) { return list.map(t => t.id + ':' + t.status).join('|'); }
+function ttlConsSummary() {
+  const box = document.getElementById('ttl-cons-sum');
+  if (!box) return;
+  const today = todayStr();
+  const working = hasRunningTask();
+  const onBreak = !working && isWithinWorkHours();
+  const dayOff = isTodayWeekend() && !isWorkingDay();
+  box.innerHTML =
+    '<div class="ttl-cons-box worked' + (working ? ' live' : '') + '"><div class="k">' + (working ? 'Working' : 'Worked') + '</div><div class="v">' + ttlHms(workTotalSecsForDate(today)) + '</div></div>' +
+    '<div class="ttl-cons-box brk' + (onBreak ? ' live' : '') + '"><div class="k">' + (onBreak ? 'On break' : 'Break') + '</div><div class="v">' + (dayOff ? '—' : ttlHms(breakTotalSecsForDisplay(today))) + '</div></div>';
+}
+function ttlConsRender() {
+  const listEl = document.getElementById('ttl-cons-list');
+  if (!listEl) return;
+  ttlConsSummary();
+  const list = ttlConsTasks();
+  window.__ttlConsSig = ttlConsSig(list);
+  const keepTop = listEl.scrollTop;   // a rebuild (status change) must not jump the list
+  if (!list.length) { listEl.innerHTML = '<div class="ttl-cons-empty">No open tasks for today.</div>'; return; }
+  listEl.innerHTML = list.map(t => {
+    const st = t.status;
+    const named = !!String(t.heading || '').trim();
+    let btn;
+    if (st === 'running')
+      btn = '<button type="button" class="btn-icon btn-pause" onclick="ttlConsAct(' + t.id + ',\'pause\')" title="Pause"><i class="ti ti-player-pause"></i></button>';
+    else if (st === 'paused')
+      btn = '<button type="button" class="btn-icon btn-start" onclick="ttlConsAct(' + t.id + ',\'resume\')" title="Resume"><i class="ti ti-player-play"></i></button>';
+    else
+      btn = '<button type="button" class="btn-icon btn-start" ' + (named ? '' : 'disabled ') + 'onclick="ttlConsAct(' + t.id + ',\'start\')" title="' + (named ? 'Start timer' : 'Enter a task name first') + '"><i class="ti ti-player-play"></i></button>';
+    return '<div class="ttl-cons-row ' + esc(st) + '" data-tid="' + t.id + '">' +
+      '<div class="info"><div class="nm">' + esc(named ? t.heading : '(untitled task)') + '</div>' +
+      (t.project ? '<div class="pj">' + esc(Array.isArray(t.project) ? t.project.join(', ') : t.project) + '</div>' : '') + '</div>' +
+      '<div class="tm">' + fmt(liveElapsedSecs(t)) + '</div>' + btn + '</div>';
+  }).join('');
+  listEl.scrollTop = keepTop;
+}
+// Once a second: refresh the totals and each row's timer in place; rebuild only if a status changed.
+function ttlConsTick() {
+  const list = ttlConsTasks();
+  if (ttlConsSig(list) !== window.__ttlConsSig) { ttlConsRender(); return; }
+  ttlConsSummary();
+  document.querySelectorAll('#ttl-cons-list [data-tid]').forEach(row => {
+    const t = tasks.find(x => String(x.id) === row.getAttribute('data-tid'));
+    const tm = row.querySelector('.tm');
+    if (t && tm) tm.textContent = fmt(liveElapsedSecs(t));
+  });
+}
+function ttlConsOpen(ev) {
+  if (ev) { ev.stopPropagation(); ev.preventDefault(); }
+  const el = document.getElementById('ttl-cons-overlay');
+  if (!el) return;
+  window.__ttlConsAnchor = (ev && ev.currentTarget) || null;   // the header widget that was clicked
+  el.classList.remove('hidden');
+  ttlConsRender();
+  ttlConsPosition();
+}
+// Anchors the panel just under the clicked header widget, right-aligned to it and kept inside the viewport.
+function ttlConsPosition() {
+  const box = document.querySelector('#ttl-cons-overlay .ttl-cons');
+  if (!box) return;
+  const a = window.__ttlConsAnchor, vw = window.innerWidth, vh = window.innerHeight, m = 8;
+  const w = box.offsetWidth;
+  let left, top;
+  if (a && a.isConnected) { const r = a.getBoundingClientRect(); left = r.right - w; top = r.bottom + 6; }
+  else { left = vw - w - m; top = 60; }
+  left = Math.max(m, Math.min(left, vw - w - m));
+  top = Math.max(m, Math.min(top, vh - 120));
+  box.style.left = left + 'px'; box.style.right = 'auto'; box.style.top = top + 'px';
+  box.style.maxHeight = Math.min(vh - top - m, vh * 0.7) + 'px';
+}
+window.addEventListener('resize', () => { if (ttlConsIsOpen()) ttlConsPosition(); });
+function ttlConsClose() {
+  const el = document.getElementById('ttl-cons-overlay');
+  if (el) el.classList.add('hidden');
+}
+function ttlConsAct(id, act) {
+  try {
+    if (act === 'pause') pauseTask(id);
+    else if (act === 'resume') resumeTask(id);
+    else startTask(id);
+  } catch (e) { console.error('TTL consolidated action failed', e); }
+  ttlConsRender();
+  renderTtlHdrWidgets();
+  try { renderWorkWidget(); } catch (e) {}
+}
+// One Escape closes only this view (capture phase), not the Lambda / Code popup under it.
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && ttlConsIsOpen()) { e.stopImmediatePropagation(); e.preventDefault(); ttlConsClose(); }
+}, true);
+
+// ── Utilities → JWT Decoder ───────────────────────────────────────────────────
+// Full-screen split view opened from More ▾ → Utilities. Left: the token (decoded live as you type or paste).
+// Right: header, payload (+ readable claims such as exp / iat / nbf) and the raw signature.
+// Everything runs in the browser: the token is never sent anywhere or saved, and the signature is NOT verified.
+let _jwt = null;   // last successful decode: { header, payload, sig, headerRaw, payloadRaw }
+function jwtIsOpen() { const el = document.getElementById('jwt-overlay'); return !!(el && !el.classList.contains('hidden')); }
+function openJwtDecoder() {
+  try { closeMoreMenu(); } catch (e) {}
+  const el = document.getElementById('jwt-overlay');
+  if (!el) return;
+  el.classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+  renderTtlHdrWidgets();
+  jwtDecodeNow();
+  const inp = document.getElementById('jwt-input');
+  if (inp && !document.documentElement.classList.contains('is-touch')) inp.focus();   // no keyboard pop-up on touch devices
+}
+function closeJwtDecoder() {
+  const el = document.getElementById('jwt-overlay');
+  if (el) el.classList.add('hidden');
+  document.body.style.overflow = '';
+  _jwt = null;
+  const inp = document.getElementById('jwt-input'); if (inp) inp.value = '';   // a token is sensitive: nothing is kept after closing
+  jwtDecodeNow();
+}
+function jwtB64Decode(seg) {
+  let b = String(seg || '').replace(/-/g, '+').replace(/_/g, '/');
+  while (b.length % 4) b += '=';
+  const bin = atob(b);
+  const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
+  return new TextDecoder('utf-8').decode(bytes);
+}
+function jwtNormalize(raw) {
+  let t = String(raw || '').trim().replace(/^["'`]+|["'`]+$/g, '');
+  t = t.replace(/^authorization\s*:\s*/i, '').replace(/^bearer\s+/i, '');
+  return t.replace(/\s+/g, '');
+}
+function jwtHighlight(obj) {
+  const src = JSON.stringify(obj, null, 2);
+  const re = /("(?:\\.|[^\\"])*"(\s*:)?|\b(?:true|false|null)\b|-?\d+(?:\.\d+)?(?:[eE][+\-]?\d+)?)/g;
+  let out = '', last = 0, m;
+  while ((m = re.exec(src))) {
+    out += esc(src.slice(last, m.index));
+    const t = m[0];
+    const cls = m[2] ? 'jwt-k' : t[0] === '"' ? 'jwt-s' : /^(true|false|null)$/.test(t) ? 'jwt-b' : 'jwt-n';
+    out += '<span class="' + cls + '">' + esc(t) + '</span>';
+    last = m.index + t.length;
+  }
+  return out + esc(src.slice(last));
+}
+function jwtRel(secs) {
+  const a = Math.abs(secs);
+  const d = Math.floor(a / 86400), h = Math.floor((a % 86400) / 3600), mi = Math.floor((a % 3600) / 60), sc = a % 60;
+  const parts = d ? [d + 'd', h + 'h'] : h ? [h + 'h', mi + 'm'] : mi ? [mi + 'm', sc + 's'] : [sc + 's'];
+  return parts.join(' ');
+}
+function jwtClaimRows(payload) {
+  const rows = [];
+  const now = Math.floor(Date.now() / 1000);
+  const NAMES = { iss: 'Issuer', sub: 'Subject', aud: 'Audience', jti: 'Token ID' };
+  Object.keys(NAMES).forEach(k => {
+    if (payload[k] == null) return;
+    const v = Array.isArray(payload[k]) ? payload[k].join(', ') : typeof payload[k] === 'object' ? JSON.stringify(payload[k]) : payload[k];
+    rows.push('<tr><td>' + k + '</td><td>' + esc(NAMES[k] + ': ' + v) + '</td></tr>');
+  });
+  [['iat', 'Issued at'], ['nbf', 'Not before'], ['exp', 'Expires']].forEach(([k, label]) => {
+    const v = payload[k];
+    if (v == null) return;
+    if (typeof v !== 'number' || !isFinite(v)) { rows.push('<tr><td>' + k + '</td><td>' + esc(label + ': ' + v) + ' <span class="rel bad">not a valid timestamp</span></td></tr>'); return; }
+    const when = new Date(v * 1000);
+    let rel = '', cls = '';
+    if (k === 'exp') { rel = v <= now ? 'expired ' + jwtRel(now - v) + ' ago' : 'in ' + jwtRel(v - now); cls = v <= now ? 'bad' : 'ok'; }
+    else if (k === 'nbf') { rel = v > now ? 'not valid yet — in ' + jwtRel(v - now) : jwtRel(now - v) + ' ago'; cls = v > now ? 'bad' : ''; }
+    else rel = v > now ? 'in ' + jwtRel(v - now) : jwtRel(now - v) + ' ago';
+    rows.push('<tr><td>' + k + '</td><td>' + esc(label + ': ' + when.toLocaleString() + '  (' + when.toISOString() + ')') + '<span class="rel ' + cls + '">' + esc(rel) + '</span></td></tr>');
+  });
+  return rows.join('');
+}
+function jwtDecodeNow() {
+  const inp = document.getElementById('jwt-input'), out = document.getElementById('jwt-output');
+  const parts = document.getElementById('jwt-parts'), copyAll = document.getElementById('jwt-copy-all');
+  if (!inp || !out) return;
+  _jwt = null;
+  if (copyAll) copyAll.disabled = true;
+  const token = jwtNormalize(inp.value);
+  if (!token) {
+    if (parts) { parts.classList.add('hidden'); parts.innerHTML = ''; }
+    out.innerHTML = '<div class="jwt-empty"><i class="ti ti-key"></i>Paste a JWT on the left and its header, payload and claims show up here.<br><br>Decoded in this browser only. Nothing is sent or saved.</div>';
+    return;
+  }
+  const seg = token.split('.');
+  if (seg.length !== 3 && seg.length !== 2) {
+    if (parts) { parts.classList.add('hidden'); parts.innerHTML = ''; }
+    out.innerHTML = '<div class="jwt-status bad"><i class="ti ti-alert-triangle"></i> Not a JWT</div><div class="jwt-err">A JWT has three parts separated by dots (header.payload.signature). This has ' + seg.length + '.</div>';
+    return;
+  }
+  let header, payload, headerRaw, payloadRaw, err = '';
+  try { headerRaw = jwtB64Decode(seg[0]); header = JSON.parse(headerRaw); } catch (e) { err = 'The header is not valid Base64URL JSON.'; }
+  if (!err) { try { payloadRaw = jwtB64Decode(seg[1]); payload = JSON.parse(payloadRaw); } catch (e) { err = 'The payload is not valid Base64URL JSON.'; } }
+  // colour-coded view of the three parts under the input
+  if (parts) {
+    parts.classList.remove('hidden');
+    parts.innerHTML = '<div class="jwt-parts-k">Token parts</div><div class="jwt-parts-v"><span class="jwt-p-h">' + esc(seg[0]) + '</span><span class="jwt-p-dot">.</span><span class="jwt-p-p">' + esc(seg[1]) + '</span>' +
+      (seg.length === 3 ? '<span class="jwt-p-dot">.</span><span class="jwt-p-s">' + esc(seg[2]) + '</span>' : '') + '</div>';
+  }
+  if (err) { out.innerHTML = '<div class="jwt-status bad"><i class="ti ti-alert-triangle"></i> Invalid token</div><div class="jwt-err">' + esc(err) + '</div>'; return; }
+  _jwt = { header, payload, sig: seg[2] || '', headerRaw, payloadRaw };
+  if (copyAll) copyAll.disabled = false;
+  const now = Math.floor(Date.now() / 1000);
+  const p = payload && typeof payload === 'object' ? payload : {};
+  let st = 'ok', stTxt = 'Valid format', stIcon = 'circle-check';
+  if (typeof p.exp === 'number' && p.exp <= now) { st = 'bad'; stTxt = 'Expired'; stIcon = 'circle-x'; }
+  else if (typeof p.nbf === 'number' && p.nbf > now) { st = 'warn'; stTxt = 'Not valid yet'; stIcon = 'alert-triangle'; }
+  else if (seg.length === 2) { st = 'warn'; stTxt = 'Unsigned token'; stIcon = 'alert-triangle'; }
+  const claimRows = jwtClaimRows(p);
+  const secHead = (cls, title, key) => '<div class="jwt-sec-head"><div class="jwt-sec-title">' + title + '</div>' +
+    (key ? '<button type="button" class="btn-icon" onclick="jwtCopy(\'' + key + '\', this)" title="Copy" aria-label="Copy ' + title + '"><i class="ti ti-copy"></i></button>' : '') + '</div>';
+  out.innerHTML =
+    '<div class="jwt-status ' + st + '"><i class="ti ti-' + stIcon + '"></i> ' + stTxt + (header && header.alg ? ' · ' + esc(header.alg) : '') + '</div>' +
+    '<div class="jwt-sec h">' + secHead('h', 'Header', 'header') + '<pre class="jwt-pre">' + jwtHighlight(header) + '</pre></div>' +
+    '<div class="jwt-sec p">' + secHead('p', 'Payload', 'payload') + '<pre class="jwt-pre">' + jwtHighlight(payload) + '</pre></div>' +
+    (claimRows ? '<div class="jwt-sec c">' + secHead('c', 'Claims', '') + '<table class="jwt-claims">' + claimRows + '</table></div>' : '') +
+    '<div class="jwt-sec s">' + secHead('s', 'Signature', seg[2] ? 'sig' : '') + '<pre class="jwt-pre">' + (seg[2] ? esc(seg[2]) : '(none)') + '</pre></div>' +
+    '<div class="jwt-note">The signature is shown as-is and is not verified. Decoding does not prove the token is genuine.</div>';
+}
+function jwtCopy(what, btn) {
+  if (!_jwt) return;
+  const text = what === 'header' ? JSON.stringify(_jwt.header, null, 2)
+    : what === 'payload' ? JSON.stringify(_jwt.payload, null, 2)
+    : what === 'sig' ? _jwt.sig
+    : JSON.stringify({ header: _jwt.header, payload: _jwt.payload }, null, 2);
+  const done = () => {
+    if (!btn) return;
+    const old = btn.innerHTML;
+    btn.innerHTML = '<i class="ti ti-check"></i>' + (btn.classList.contains('btn-icon') ? '' : ' Copied');
+    setTimeout(() => { btn.innerHTML = old; }, 1200);
+  };
+  const fallback = () => {
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.cssText = 'position:fixed;opacity:0;top:0;left:0';
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); done(); } catch (e) {}
+    ta.remove();
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, fallback); else fallback();
+}
+function jwtPaste() {
+  const inp = document.getElementById('jwt-input');
+  if (!inp) return;
+  if (navigator.clipboard && navigator.clipboard.readText) {
+    navigator.clipboard.readText().then(t => { inp.value = t; jwtDecodeNow(); }, () => { inp.focus(); });   // blocked? focus the box so long-press / Ctrl+V works
+  } else inp.focus();
+}
+function jwtClear() {
+  const inp = document.getElementById('jwt-input');
+  if (inp) { inp.value = ''; inp.focus(); }
+  jwtDecodeNow();
+}
+// Escape closes only the decoder; the time tracker panel (on top of it) closes first, via its own capture listener.
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && jwtIsOpen() && !ttlConsIsOpen()) { e.stopImmediatePropagation(); e.preventDefault(); closeJwtDecoder(); }
+}, true);
 
 // ── Break timer ───────────────────────────────────────────────────────────────
 
@@ -27031,8 +27537,16 @@ function lcdpOpen() {
 }
 function lcdpClose() {
   const m = document.getElementById('lcd-changes-modal');
-  if (m) m.classList.add('hidden');
+  if (m) { m.classList.add('hidden'); m.classList.remove('lcd-over'); }
   _lcdp = null;
+}
+// Opens the change viewer on its own (no Back button) for one function + date. over = true when it is opened above the Lambda log popup.
+function lcdvOpenStandalone(name, iso, kind, over) {
+  _lcdp = { iso, view: 'list', rows: [], pick: null, standalone: true, over: !!over };
+  const m = document.getElementById('lcd-changes-modal');
+  m.classList.toggle('lcd-over', !!over);
+  m.classList.remove('hidden');
+  lcdvStart(name, kind);
 }
 function lcdpRefreshIfOpen() { if (_lcdp) lcdpRender(); }
 function lcdpBack() { if (!_lcdp) return; _lcdp.view = 'list'; _lcdp.pick = null; _lcdp.detail = null; lcdpRender(); }
@@ -27164,9 +27678,7 @@ function lmViewChange(id) {
   const iso = dc ? lmParseDate(rec.values && rec.values[dc.key], dc) : '';
   if (!name) { alert('This change has no Name, so it cannot be looked up in the change log.'); return; }
   if (!iso) { alert('This change has no Date, so it cannot be looked up in the change log.'); return; }
-  _lcdp = { iso, view: 'list', rows: [], pick: null, standalone: true };
-  document.getElementById('lcd-changes-modal').classList.remove('hidden');
-  lcdvStart(name, 'change');
+  lcdvOpenStandalone(name, iso, 'change', false);
 }
 // "View in code" on a file of the change viewer: opens the Code Backup viewer on the backup of this change's date, on that file,
 // scrolled to its first changed line. Same-day backups are tried first; with several that day, the first one taken at/after the
@@ -27366,7 +27878,7 @@ function lcdpPick(j) {
   }
 }
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && _lcdp && !document.querySelector('#lambda-log-modal:not(.hidden), #lm-edit-modal:not(.hidden), #confirm-overlay:not(.hidden)')) { e.stopImmediatePropagation(); lcdpClose(); }
+  if (e.key === 'Escape' && _lcdp && !document.querySelector((_lcdp.over ? '' : '#lambda-log-modal:not(.hidden), ') + '#lm-edit-modal:not(.hidden), #confirm-overlay:not(.hidden)')) { e.stopImmediatePropagation(); lcdpClose(); }
 }, true);
 
 function lcdRefetch() {
