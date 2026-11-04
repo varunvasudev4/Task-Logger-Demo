@@ -519,6 +519,14 @@ html.is-touch .pending-card-actions { opacity: 1; }
   border: 1px solid var(--border-md); border-radius: var(--radius-md); background: var(--bg); color: var(--text-primary);
 }
 .lm-input:disabled { opacity: 0.55; cursor: not-allowed; }
+/* Keyword chips in the Lambda table search: Enter sets a word aside as a chip, then the next one is typed */
+.lm-kwbox { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 3px 6px; min-height: 36px; box-sizing: border-box; cursor: text; }
+.lm-kwbox:focus-within { border-color: var(--blue-mid); }
+.lm-kwbox .lm-kw-in { flex: 1; min-width: 120px; border: none; outline: none; background: transparent; color: inherit; font: inherit; font-size: 13px; padding: 4px 2px; }
+.lm-kw-chip { display: inline-flex; align-items: center; gap: 2px; background: var(--blue-bg); color: var(--blue-dark); border-radius: 12px; padding: 2px 3px 2px 9px; font-size: 12px; font-weight: 600; max-width: 100%; }
+.lm-kw-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lm-kw-chip button { border: none; background: none; color: inherit; cursor: pointer; padding: 0 4px; font-size: 15px; line-height: 1; }
+@media (max-width: 560px) { .lm-kwbox .lm-kw-in { font-size: 16px; } }
 .lm-input.invalid { border-color: var(--red-mid); }
 .lm-hint { flex-basis: 100%; font-size: 12px; color: var(--text-tertiary); }
 .lm-hint button { background: none; border: none; padding: 0; font: inherit; color: var(--blue-mid); cursor: pointer; text-decoration: underline; }
@@ -20421,7 +20429,7 @@ function llmSaveEntry() {
 // Resets a Lambda tab's search / entity filters / date range so freshly saved records are visible.
 function lmRevealTab(k) {
   const s = lmGetState(k);
-  s.q = ''; s.ent = {}; s.fromTouched = false; s.toTouched = false;
+  s.q = ''; s.kw = []; s.ent = {}; s.fromTouched = false; s.toTouched = false;
 }
 // Writes the staged entries: updates edited records, adds new ones, deletes removed ones (all by taskId link).
 function lambdaCommitLinked(linkId, entries) {
@@ -20554,8 +20562,9 @@ function lmSel(k) { return lmSelected[k] || (lmSelected[k] = new Set()); }
 let lmVisibleIds = [];
 
 function lmGetState(k) {
-  if (!lmTabState[k]) lmTabState[k] = { by: '', q: '', from: '', to: '', fromTouched: false, toTouched: false, sortCol: null, sortDir: 'asc', ent: {} };
+  if (!lmTabState[k]) lmTabState[k] = { by: '', q: '', kw: [], from: '', to: '', fromTouched: false, toTouched: false, sortCol: null, sortDir: 'asc', ent: {} };
   if (!lmTabState[k].ent) lmTabState[k].ent = {};
+  if (!lmTabState[k].kw) lmTabState[k].kw = [];
   return lmTabState[k];
 }
 function lmLoadPrefs(k) {
@@ -20929,7 +20938,7 @@ function lmRenderToolbar() {
   lmEntClose();
   const k = lmActiveTab, s = lmGetState(k), cols = getLambdaColumns(k);
   const searchable = cols.filter(c => c.searchable === true);
-  if (!searchable.some(c => c.key === s.by)) s.by = searchable.length ? searchable[0].key : '';
+  if (s.by !== '__all' && !searchable.some(c => c.key === s.by)) s.by = searchable.length ? '__all' : '';   // default: all searchable columns
   const dates = lmLoadRecords(k, cols).map(r => r._date).filter(Boolean).sort();
   const today = todayStr();
   if (!s.fromTouched) s.from = dates.length ? dates[0] : today;   // oldest record date
@@ -20943,10 +20952,10 @@ function lmRenderToolbar() {
   el.innerHTML =
     `<div class="lm-field"><label for="lm-by">Search by <span class="lm-req" title="Required">*</span></label>
        <select id="lm-by" class="lm-input" onchange="lmOnBy(this.value)" ${none ? 'disabled' : ''}>
-         ${none ? '<option value="">No searchable columns</option>' : searchable.map(c => `<option value="${esc(c.key)}" ${c.key === s.by ? 'selected' : ''}>${esc(c.label)}</option>`).join('')}
+         ${none ? '<option value="">No searchable columns</option>' : `<option value="__all" ${s.by === '__all' ? 'selected' : ''}>All searchable columns</option>` + searchable.map(c => `<option value="${esc(c.key)}" ${c.key === s.by ? 'selected' : ''}>${esc(c.label)}</option>`).join('')}
        </select></div>
      <div class="lm-field lm-field-grow"><label for="lm-q">Search</label>
-       <input id="lm-q" class="lm-input" type="search" autocomplete="off" placeholder="${none ? 'Mark a column Searchable first' : 'Type keywords to search (all must match)…'}" title="Several keywords: a row must contain all of them, in any order. Use &quot;double quotes&quot; for an exact phrase." value="${esc(s.q)}" oninput="lmOnQuery(this.value)" ${none ? 'disabled' : ''} /></div>
+       <div class="lm-kwbox lm-input" id="lm-kwbox" onclick="document.getElementById('lm-q').focus()" title="Type a keyword and press Enter (or comma) to set it aside as a chip, then type the next one. A row must contain all the keywords. Backspace removes the last chip.">${lmKwChipsHtml(s)}<input id="lm-q" class="lm-kw-in" type="text" autocomplete="off" spellcheck="false" placeholder="${none ? 'Mark a column Searchable first' : (s.kw.length ? 'Add another keyword…' : 'Type a keyword, press Enter to add…')}" value="${esc(s.q)}" oninput="lmOnQuery(this.value)" onkeydown="lmKwKey(event)" ${none ? 'disabled' : ''} /></div></div>
      ${entFields}
      <div class="lm-daterange">
        <div class="lm-field"><label for="lm-from">From</label>
@@ -20963,6 +20972,38 @@ function lmOpenMasters() {
 }
 function lmOnBy(v) { lmGetState(lmActiveTab).by = v; lmRenderTable(); }
 function lmOnQuery(v) { lmGetState(lmActiveTab).q = v; lmRenderTable(); }
+// ── Keyword chips: Enter / comma sets the typed word aside, the next keyword is typed after it (all chips + the live text must match) ──
+function lmKwChipsHtml(s) {
+  return (s.kw || []).map((w, i) => `<span class="lm-kw-chip"><span>${esc(w)}</span><button type="button" onclick="event.stopPropagation();lmKwRemove(${i})" aria-label="Remove keyword ${esc(w)}" title="Remove">×</button></span>`).join('');
+}
+function lmKwRefreshChips() {
+  const s = lmGetState(lmActiveTab), box = document.getElementById('lm-kwbox'), inp = document.getElementById('lm-q');
+  if (!box || !inp) return;
+  box.querySelectorAll('.lm-kw-chip').forEach(c => c.remove());
+  inp.insertAdjacentHTML('beforebegin', lmKwChipsHtml(s));
+  inp.placeholder = s.kw.length ? 'Add another keyword…' : 'Type a keyword, press Enter to add…';
+}
+function lmKwCommit() {
+  const s = lmGetState(lmActiveTab), inp = document.getElementById('lm-q');
+  if (!inp) return false;
+  const words = lmSearchTokens(inp.value);
+  if (!words.length) return false;
+  words.forEach(w => { if (s.kw.indexOf(w) === -1) s.kw.push(w); });
+  inp.value = ''; s.q = '';
+  lmKwRefreshChips(); lmRenderTable();
+  return true;
+}
+function lmKwRemove(i) {
+  const s = lmGetState(lmActiveTab);
+  s.kw.splice(i, 1);
+  lmKwRefreshChips(); lmRenderTable();
+  const inp = document.getElementById('lm-q'); if (inp) inp.focus();
+}
+function lmKwKey(e) {
+  const inp = e.target, s = lmGetState(lmActiveTab);
+  if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); lmKwCommit(); }
+  else if (e.key === 'Backspace' && !inp.value && s.kw.length) { e.preventDefault(); s.kw.pop(); lmKwRefreshChips(); lmRenderTable(); }
+}
 function lmOnDate(which, v) {
   const s = lmGetState(lmActiveTab);
   if (which === 'from') { s.from = v; s.fromTouched = !!v; } else { s.to = v; s.toTouched = !!v; }
@@ -20971,7 +21012,7 @@ function lmOnDate(which, v) {
 }
 function lmResetFilters() {
   const s = lmGetState(lmActiveTab);
-  s.q = ''; s.fromTouched = false; s.toTouched = false; s.ent = {};   // entity filters go back to "all selected"
+  s.q = ''; s.kw = []; s.fromTouched = false; s.toTouched = false; s.ent = {};   // entity filters go back to "all selected"
   lmRenderToolbar();
   lmRenderTable();
 }
@@ -20996,7 +21037,7 @@ function lmToggleFilters() {
 function lmActiveFilterCount() {
   const s = lmGetState(lmActiveTab);
   let n = 0;
-  if (String(s.q || '').trim() && s.by) n++;
+  if ((String(s.q || '').trim() || (s.kw && s.kw.length)) && s.by) n++;
   if (s.fromTouched) n++;
   if (s.toTouched) n++;
   n += Object.keys(s.ent || {}).filter(key => Array.isArray(s.ent[key]) && lmEntityCols(lmActiveTab).some(c => c.key === key)).length;
@@ -21208,7 +21249,7 @@ function lmSearchTokens(q) {
 function lmFilteredRows() {
   const k = lmActiveTab, s = lmGetState(k), cols = getLambdaColumns(k);
   const q = String(s.q || '').trim().toLowerCase();
-  const qTokens = lmSearchTokens(q);   // several keywords: every one must be found (any order); "quoted words" stay one phrase
+  const qTokens = (s.kw || []).map(x => String(x).toLowerCase()).concat(lmSearchTokens(q));   // several keywords: every one must be found (any order); "quoted words" stay one phrase
   // Entity filters only restrict once the user has changed them from the default "all selected".
   const ents = lmEntityCols(k).filter(c => Array.isArray(s.ent[c.key])).map(c => ({
     col: c, known: lmKnownItems(c), sel: new Set(s.ent[c.key].map(x => String(x).toLowerCase()))
@@ -21217,11 +21258,14 @@ function lmFilteredRows() {
     if (s.from && r._date && r._date < s.from) return false;
     if (s.to && r._date && r._date > s.to) return false;
     for (const e of ents) if (!lmEntityMatch(r, e)) return false;
-    if (q && s.by) {
-      const byCol = cols.find(c => c.key === s.by);
-      const raw = String((r.values && r.values[s.by]) == null ? '' : r.values[s.by]).toLowerCase();
-      const shown = lmDisplayValue(byCol, raw).toLowerCase();
-      for (const tk of qTokens) if (raw.indexOf(tk) === -1 && shown.indexOf(tk) === -1) return false;
+    if (qTokens.length && s.by) {
+      // Like the AWS console function filter: every keyword must be found (AND), each in the chosen column
+      // or, with "All searchable columns", in any searchable column of the row.
+      const scan = (s.by === '__all' ? cols.filter(c => c.searchable === true) : cols.filter(c => c.key === s.by)).map(c => {
+        const raw = String((r.values && r.values[c.key]) == null ? '' : r.values[c.key]).toLowerCase();
+        return raw + '\u0001' + lmDisplayValue(c, raw).toLowerCase();
+      });
+      for (const tk of qTokens) if (!scan.some(t => t.indexOf(tk) !== -1)) return false;
     }
     return true;
   });
