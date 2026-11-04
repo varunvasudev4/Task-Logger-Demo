@@ -375,6 +375,52 @@ html.is-touch .search-btn { display: inline-flex; }
   text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-tertiary);
 }
 
+/* ── Utilities → Base64 Encoder / Decoder (reuses the JWT split-view layout) ── */
+.b64-overlay .hidden { display: none !important; }
+.b64-seg { display: inline-flex; margin-left: 10px; border: 1px solid var(--border-md); border-radius: var(--radius-md); overflow: hidden; }
+.b64-seg button { border: 0; background: var(--bg); color: var(--text-secondary); padding: 5px 12px; font: 600 12px var(--font-mono); cursor: pointer; }
+.b64-seg button + button { border-left: 1px solid var(--border-md); }
+.b64-seg button.on { background: var(--blue-mid); color: #fff; }
+.b64-col { flex: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.b64-drop { margin: 12px 14px 0; border: 1.5px dashed var(--border-md); border-radius: var(--radius-md); padding: 16px 12px; text-align: center; cursor: pointer; color: var(--text-secondary); font-size: 13px; }
+.b64-drop:hover, .b64-drop.over { border-color: var(--blue-mid); background: var(--bg-secondary); }
+.b64-drop i { display: block; font-size: 26px; margin-bottom: 4px; color: var(--blue-mid); }
+.b64-drop small { display: block; margin-top: 4px; font-size: 11px; color: var(--text-tertiary); }
+.b64-file { margin: 8px 14px 0; display: flex; align-items: center; gap: 8px; font: 12px var(--font-mono); color: var(--text-secondary); word-break: break-all; }
+.b64-file span { flex: 1; min-width: 0; }
+.b64-opts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; padding: 8px 14px; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--text-secondary); }
+.b64-opts label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+.b64-opts select, .b64-fn input { font: 12px var(--font-mono); background: var(--bg); color: var(--text-primary); border: 1px solid var(--border-md); border-radius: 4px; padding: 3px 6px; }
+.b64-stat, .b64-msg { padding: 6px 14px; font: 11.5px var(--font-mono); color: var(--text-tertiary); border-top: 1px solid var(--border); min-height: 18px; }
+.b64-msg.bad { color: var(--red-mid); }
+.b64-dec-body { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.b64-info { padding: 10px 14px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
+.b64-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.b64-chip { font: 11.5px var(--font-mono); padding: 2px 8px; border: 1px solid var(--border-md); border-radius: 999px; color: var(--text-secondary); background: var(--bg-secondary); }
+.b64-chip.t { color: var(--green-dark); border-color: var(--green-mid); background: var(--green-bg); font-weight: 700; }
+.b64-chip.mute { color: var(--text-tertiary); }
+.b64-fn { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary); }
+.b64-fn input { flex: 1; min-width: 0; }
+.b64-tabs { display: flex; gap: 2px; padding: 0 14px; border-bottom: 1px solid var(--border); }
+.b64-tabs button { border: 0; background: none; padding: 8px 12px; font: 600 12px var(--font-mono); color: var(--text-tertiary); cursor: pointer; border-bottom: 2px solid transparent; }
+.b64-tabs button.on { color: var(--text-primary); border-bottom-color: var(--blue-mid); }
+.b64-view { flex: 1; overflow: auto; min-height: 0; padding: 12px 14px 18px; }
+.b64-view.flush { padding: 0; overflow: hidden; }
+.b64-frame { width: 100%; height: 100%; border: 0; background: #fff; }
+.b64-imgwrap { display: flex; justify-content: center; }
+.b64-imgwrap img { max-width: 100%; height: auto; border: 1px solid var(--border); background: repeating-conic-gradient(rgba(128,128,128,.18) 0 25%, transparent 0 50%) 0 0 / 16px 16px; }
+.b64-view audio, .b64-view video { width: 100%; max-height: 70vh; }
+.b64-view pre { margin: 0; font: 12.5px/1.55 var(--font-mono); white-space: pre-wrap; word-break: break-all; color: var(--text-primary); }
+.b64-sheets { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.b64-sheets .btn { padding: 4px 10px; font-size: 12px; }
+.b64-sheets .btn.on { background: var(--blue-mid); color: #fff; border-color: var(--blue-mid); }
+.b64-tblwrap { overflow: auto; border: 1px solid var(--border-md); border-radius: var(--radius-md); }
+.b64-tbl { border-collapse: collapse; font-size: 12px; width: max-content; min-width: 100%; }
+.b64-tbl th, .b64-tbl td { padding: 4px 10px; border: 1px solid var(--border); text-align: left; white-space: nowrap; max-width: 360px; overflow: hidden; text-overflow: ellipsis; }
+.b64-tbl th { background: var(--bg-secondary); font-weight: 600; }
+.b64-note { font-size: 12px; color: var(--text-tertiary); margin-top: 8px; }
+@media (max-width: 760px) { .b64-seg { margin-left: 6px; } .b64-drop { padding: 12px 10px; } }
+
 /* ── Utilities → JWT Decoder: full-screen, split view (token in / decoded out) ── */
 .jwt-overlay { position: fixed; inset: 0; z-index: 110; background: var(--bg); display: flex; flex-direction: column; }
 .jwt-overlay.hidden { display: none; }
@@ -2311,6 +2357,7 @@ mark.cbv-hl.cur { background: color-mix(in srgb, #ff9632 65%, transparent); outl
             <button class="btn" onclick="cycleTheme()" id="theme-toggle-btn" title="Switch theme"><i class="ti ti-sun" id="theme-toggle-icon"></i> <span id="theme-toggle-label">Light</span></button>
             <div class="more-menu-section" role="presentation">Utilities</div>
             <button class="btn" onclick="openJwtDecoder()" id="jwt-menu-btn" title="Decode a JWT token"><i class="ti ti-key"></i> JWT Decoder</button>
+            <button class="btn" onclick="openB64Tool()" id="b64-menu-btn" title="Encode or decode Base64 for text and any file type"><i class="ti ti-binary"></i> Base64 Encoder / Decoder</button>
           </div>
         </div>
       </div>
@@ -2739,6 +2786,75 @@ mark.cbv-hl.cur { background: color-mix(in srgb, #ff9632 65%, transparent); outl
         <button type="button" class="btn" id="jwt-copy-all" onclick="jwtCopy('all', this)" title="Copy the decoded header and payload as JSON" disabled><i class="ti ti-clipboard-copy"></i> Copy JSON</button>
       </div>
       <div class="jwt-out" id="jwt-output"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Utilities → Base64 Encoder / Decoder: full-screen split view like the JWT decoder. Encode: any file or text → Base64. Decode: Base64 / data URI → detected file with preview + download -->
+<div class="jwt-overlay b64-overlay hidden" id="b64-overlay" role="dialog" aria-modal="true" aria-label="Base64 Encoder and Decoder">
+  <div class="lm-head">
+    <div class="lm-title"><i class="ti ti-binary" style="font-size:18px;color:var(--blue-mid)"></i>Base64
+      <div class="b64-seg" role="tablist" aria-label="Mode">
+        <button type="button" id="b64-seg-enc" class="on" onclick="b64SetMode('encode')">Encode</button>
+        <button type="button" id="b64-seg-dec" onclick="b64SetMode('decode')">Decode</button>
+      </div>
+    </div>
+    <button type="button" class="ttl-hdr-widget idle" onclick="ttlConsOpen(event)" title="Time tracker — click to start / pause tasks" aria-label="Open time tracker"><span class="ttl-hw-dot"></span><span class="ttl-hw-lbl">Worked</span><span class="ttl-hw-time">00:00:00</span></button>
+    <button type="button" class="btn-icon" onclick="closeB64Tool()" title="Close (Esc)" aria-label="Close Base64 tool"><i class="ti ti-x"></i></button>
+  </div>
+  <div class="jwt-body">
+    <div class="jwt-pane" id="b64-left">
+      <div class="b64-col" id="b64-enc-in">
+        <div class="jwt-pane-head">
+          <div class="jwt-pane-title">File or text to encode</div>
+          <button type="button" class="btn" onclick="b64PasteText()" title="Paste text from the clipboard"><i class="ti ti-clipboard"></i> Paste</button>
+          <button type="button" class="btn" onclick="b64ClearEnc()" title="Clear"><i class="ti ti-eraser"></i> Clear</button>
+        </div>
+        <div class="b64-drop" id="b64-drop" onclick="document.getElementById('b64-file').click()">
+          <i class="ti ti-upload"></i>Drop any file here, or click to choose
+          <small>PDF · CSV · Excel · PNG · JPEG · SVG · GIF · WebP · audio · video · ZIP · any type</small>
+        </div>
+        <input type="file" id="b64-file" hidden onchange="b64FilePicked(this)">
+        <div class="b64-file hidden" id="b64-file-row"></div>
+        <textarea class="jwt-in" id="b64-text" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" placeholder="…or type / paste text to encode" oninput="b64TextInput()"></textarea>
+      </div>
+      <div class="b64-col hidden" id="b64-dec-in">
+        <div class="jwt-pane-head">
+          <div class="jwt-pane-title">Base64 or data: URI</div>
+          <button type="button" class="btn" onclick="b64PasteDec()" title="Paste from the clipboard"><i class="ti ti-clipboard"></i> Paste</button>
+          <button type="button" class="btn" onclick="document.getElementById('b64-dfile').click()" title="Load a text file that contains Base64"><i class="ti ti-file-import"></i> Open</button>
+          <button type="button" class="btn" onclick="b64ClearDec()" title="Clear"><i class="ti ti-eraser"></i> Clear</button>
+        </div>
+        <input type="file" id="b64-dfile" hidden onchange="b64FilePicked(this)">
+        <textarea class="jwt-in" id="b64-in" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" placeholder="Paste Base64 or a data:…;base64,… URI here (standard or URL-safe)" oninput="b64DecodeSoon()"></textarea>
+        <div class="b64-msg" id="b64-in-msg"></div>
+      </div>
+    </div>
+    <div class="jwt-pane">
+      <div class="b64-col" id="b64-enc-out">
+        <div class="jwt-pane-head">
+          <div class="jwt-pane-title">Base64 output</div>
+          <button type="button" class="btn" id="b64-enc-copy" onclick="b64CopyOut(this)" disabled><i class="ti ti-clipboard-copy"></i> Copy</button>
+          <button type="button" class="btn" id="b64-enc-dl" onclick="b64DownloadOut()" title="Save the Base64 as a .txt file" disabled><i class="ti ti-download"></i> .txt</button>
+        </div>
+        <div class="b64-opts">
+          <label title="Use - and _ instead of + and /, and drop the = padding"><input type="checkbox" id="b64-o-url" onchange="b64EncodeNow()"> URL-safe</label>
+          <label title="Prefix with data:&lt;mime&gt;;base64,"><input type="checkbox" id="b64-o-uri" onchange="b64EncodeNow()"> Data URI</label>
+          <label title="Insert line breaks (ignored for Data URI)">Line wrap
+            <select id="b64-o-wrap" onchange="b64EncodeNow()"><option value="0">None</option><option value="64">64</option><option value="76">76 (MIME)</option></select></label>
+        </div>
+        <textarea class="jwt-in" id="b64-out" readonly spellcheck="false" placeholder="The encoded Base64 appears here"></textarea>
+        <div class="b64-stat" id="b64-enc-stat"></div>
+      </div>
+      <div class="b64-col hidden" id="b64-dec-out">
+        <div class="jwt-pane-head">
+          <div class="jwt-pane-title">Decoded</div>
+          <button type="button" class="btn" id="b64-dec-open" onclick="b64OpenDec()" title="Open in a new tab" disabled><i class="ti ti-external-link"></i> Open</button>
+          <button type="button" class="btn" id="b64-dec-copy" onclick="b64CopyDec(this)" title="Copy the decoded text" disabled><i class="ti ti-clipboard-copy"></i> Copy</button>
+          <button type="button" class="btn" id="b64-dec-dl" onclick="b64DownloadDec()" title="Download the decoded file" disabled><i class="ti ti-download"></i> Download</button>
+        </div>
+        <div class="b64-dec-body" id="b64-dec-body"></div>
+      </div>
     </div>
   </div>
 </div>
@@ -25317,6 +25433,542 @@ function jwtClear() {
 // Escape closes only the decoder; the time tracker panel (on top of it) closes first, via its own capture listener.
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && jwtIsOpen() && !ttlConsIsOpen()) { e.stopImmediatePropagation(); e.preventDefault(); closeJwtDecoder(); }
+}, true);
+
+// ── Utilities → Base64 Encoder / Decoder ──────────────────────────────────────
+// Full-screen split view opened from More ▾ → Utilities.
+// Encode: drop / choose any file (PDF, CSV, Excel, PNG, JPEG, SVG, audio, video, zip …) or type text → Base64
+//         (optional URL-safe, Data URI, line wrap).
+// Decode: paste Base64 or a data: URI (or open a .txt holding it) → the file type is detected from its signature,
+//         shown as a preview (image / PDF / audio / video / CSV or Excel table / text) with Text and Hex tabs, and can be downloaded.
+// Everything runs in the browser: nothing is uploaded or saved, and all data is cleared when the tool closes.
+let _b64 = { mode: 'encode', enc: null, out: '', dec: null, url: '', tab: 'preview', sheet: 0, wb: null, timer: null, wired: false };
+
+const B64_T = {
+  pdf:  { ext: 'pdf',  mime: 'application/pdf', label: 'PDF document', kind: 'pdf' },
+  png:  { ext: 'png',  mime: 'image/png', label: 'PNG image', kind: 'image' },
+  jpg:  { ext: 'jpg',  mime: 'image/jpeg', label: 'JPEG image', kind: 'image' },
+  gif:  { ext: 'gif',  mime: 'image/gif', label: 'GIF image', kind: 'image' },
+  webp: { ext: 'webp', mime: 'image/webp', label: 'WebP image', kind: 'image' },
+  bmp:  { ext: 'bmp',  mime: 'image/bmp', label: 'BMP image', kind: 'image' },
+  ico:  { ext: 'ico',  mime: 'image/x-icon', label: 'ICO icon', kind: 'image' },
+  tiff: { ext: 'tiff', mime: 'image/tiff', label: 'TIFF image', kind: 'image' },
+  avif: { ext: 'avif', mime: 'image/avif', label: 'AVIF image', kind: 'image' },
+  heic: { ext: 'heic', mime: 'image/heic', label: 'HEIC image', kind: 'image' },
+  svg:  { ext: 'svg',  mime: 'image/svg+xml', label: 'SVG image', kind: 'image', text: true },
+  xlsx: { ext: 'xlsx', mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', label: 'Excel workbook (XLSX)', kind: 'sheet' },
+  xls:  { ext: 'xls',  mime: 'application/vnd.ms-excel', label: 'Legacy Office file (XLS / DOC / PPT)', kind: 'sheet' },
+  docx: { ext: 'docx', mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', label: 'Word document (DOCX)', kind: 'binary' },
+  pptx: { ext: 'pptx', mime: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', label: 'PowerPoint (PPTX)', kind: 'binary' },
+  csv:  { ext: 'csv',  mime: 'text/csv', label: 'CSV (comma separated)', kind: 'csv', text: true, delim: ',' },
+  tsv:  { ext: 'tsv',  mime: 'text/tab-separated-values', label: 'TSV (tab separated)', kind: 'csv', text: true, delim: '\t' },
+  json: { ext: 'json', mime: 'application/json', label: 'JSON', kind: 'text', text: true },
+  xml:  { ext: 'xml',  mime: 'application/xml', label: 'XML', kind: 'text', text: true },
+  html: { ext: 'html', mime: 'text/html', label: 'HTML', kind: 'text', text: true },
+  rtf:  { ext: 'rtf',  mime: 'application/rtf', label: 'RTF document', kind: 'binary' },
+  txt:  { ext: 'txt',  mime: 'text/plain', label: 'Plain text', kind: 'text', text: true },
+  zip:  { ext: 'zip',  mime: 'application/zip', label: 'ZIP archive', kind: 'binary' },
+  gz:   { ext: 'gz',   mime: 'application/gzip', label: 'GZIP archive', kind: 'binary' },
+  rar:  { ext: 'rar',  mime: 'application/vnd.rar', label: 'RAR archive', kind: 'binary' },
+  '7z': { ext: '7z',   mime: 'application/x-7z-compressed', label: '7-Zip archive', kind: 'binary' },
+  bz2:  { ext: 'bz2',  mime: 'application/x-bzip2', label: 'BZIP2 archive', kind: 'binary' },
+  tar:  { ext: 'tar',  mime: 'application/x-tar', label: 'TAR archive', kind: 'binary' },
+  mp3:  { ext: 'mp3',  mime: 'audio/mpeg', label: 'MP3 audio', kind: 'audio' },
+  wav:  { ext: 'wav',  mime: 'audio/wav', label: 'WAV audio', kind: 'audio' },
+  ogg:  { ext: 'ogg',  mime: 'audio/ogg', label: 'OGG audio', kind: 'audio' },
+  flac: { ext: 'flac', mime: 'audio/flac', label: 'FLAC audio', kind: 'audio' },
+  m4a:  { ext: 'm4a',  mime: 'audio/mp4', label: 'M4A audio', kind: 'audio' },
+  mp4:  { ext: 'mp4',  mime: 'video/mp4', label: 'MP4 video', kind: 'video' },
+  mov:  { ext: 'mov',  mime: 'video/quicktime', label: 'QuickTime video', kind: 'video' },
+  webm: { ext: 'webm', mime: 'video/webm', label: 'WebM / Matroska video', kind: 'video' },
+  woff: { ext: 'woff', mime: 'font/woff', label: 'WOFF font', kind: 'binary' },
+  woff2:{ ext: 'woff2',mime: 'font/woff2', label: 'WOFF2 font', kind: 'binary' },
+  ttf:  { ext: 'ttf',  mime: 'font/ttf', label: 'TrueType font', kind: 'binary' },
+  otf:  { ext: 'otf',  mime: 'font/otf', label: 'OpenType font', kind: 'binary' },
+  sqlite:{ ext: 'sqlite', mime: 'application/vnd.sqlite3', label: 'SQLite database', kind: 'binary' },
+  exe:  { ext: 'exe',  mime: 'application/vnd.microsoft.portable-executable', label: 'Windows executable', kind: 'binary' },
+  bin:  { ext: 'bin',  mime: 'application/octet-stream', label: 'Binary data', kind: 'binary' }
+};
+const B64_MIME_ALIAS = { 'image/jpg': 'jpg', 'image/pjpeg': 'jpg', 'image/x-ms-bmp': 'bmp', 'image/vnd.microsoft.icon': 'ico', 'text/xml': 'xml', 'application/x-zip-compressed': 'zip', 'audio/mp3': 'mp3', 'audio/x-wav': 'wav', 'audio/x-m4a': 'm4a', 'application/csv': 'csv', 'text/x-csv': 'csv', 'application/x-gzip': 'gz', 'application/x-msexcel': 'xls', 'application/msword': 'xls', 'application/vnd.ms-powerpoint': 'xls' };
+const B64_EXT_ALIAS = { jpeg: 'jpg', jpe: 'jpg', tif: 'tiff', htm: 'html', text: 'txt', log: 'txt', md: 'txt', yaml: 'txt', yml: 'txt', ini: 'txt', sql: 'txt', js: 'txt', css: 'txt', py: 'txt', xlsm: 'xlsx', mpeg: 'mp3', mkv: 'webm' };
+
+function b64KeyFromMime(m) {
+  m = String(m || '').toLowerCase().split(';')[0].trim();
+  if (!m) return '';
+  if (B64_MIME_ALIAS[m]) return B64_MIME_ALIAS[m];
+  for (const k in B64_T) if (B64_T[k].mime === m) return k;
+  if (m.indexOf('text/') === 0) return 'txt';
+  return '';
+}
+function b64KeyFromName(name) {
+  const m = /\.([A-Za-z0-9]+)$/.exec(String(name || ''));
+  if (!m) return '';
+  const e = m[1].toLowerCase();
+  const k = B64_EXT_ALIAS[e] || e;
+  return B64_T[k] ? k : '';
+}
+function b64Size(n) {
+  if (n < 1024) return n + ' B';
+  if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
+  if (n < 1073741824) return (n / 1048576).toFixed(2) + ' MB';
+  return (n / 1073741824).toFixed(2) + ' GB';
+}
+function b64El(id) { return document.getElementById(id); }
+function b64IsOpen() { const el = b64El('b64-overlay'); return !!(el && !el.classList.contains('hidden')); }
+
+// ── bytes <-> Base64 (chunked so large files do not overflow the call stack) ──
+function b64BytesToStr(u8) {
+  const parts = [];
+  for (let i = 0; i < u8.length; i += 49152) parts.push(btoa(String.fromCharCode.apply(null, u8.subarray(i, i + 49152))));
+  return parts.join('');
+}
+function b64StrToBytes(b64) {
+  const bin = atob(b64);
+  const u8 = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  return u8;
+}
+
+// ── open / close / mode ──
+function openB64Tool() {
+  try { closeMoreMenu(); } catch (e) {}
+  const el = b64El('b64-overlay');
+  if (!el) return;
+  el.classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+  b64Wire();
+  renderTtlHdrWidgets();
+  b64SetMode(_b64.mode);
+}
+function closeB64Tool() {
+  const el = b64El('b64-overlay');
+  if (el) el.classList.add('hidden');
+  document.body.style.overflow = '';
+  b64ClearEnc(true);
+  b64ClearDec(true);
+}
+function b64SetMode(m) {
+  _b64.mode = m === 'decode' ? 'decode' : 'encode';
+  const enc = _b64.mode === 'encode';
+  b64El('b64-seg-enc').classList.toggle('on', enc);
+  b64El('b64-seg-dec').classList.toggle('on', !enc);
+  b64El('b64-enc-in').classList.toggle('hidden', !enc);
+  b64El('b64-enc-out').classList.toggle('hidden', !enc);
+  b64El('b64-dec-in').classList.toggle('hidden', enc);
+  b64El('b64-dec-out').classList.toggle('hidden', enc);
+  if (enc) b64EncodeNow(); else b64DecodeNow();
+  const inp = b64El(enc ? 'b64-text' : 'b64-in');
+  if (inp && !document.documentElement.classList.contains('is-touch')) inp.focus();
+}
+function b64Wire() {
+  if (_b64.wired) return;
+  _b64.wired = true;
+  const left = b64El('b64-left');
+  const drop = b64El('b64-drop');
+  ['dragenter', 'dragover'].forEach(ev => left.addEventListener(ev, e => { e.preventDefault(); e.stopPropagation(); if (drop) drop.classList.add('over'); }));
+  left.addEventListener('dragleave', e => { e.preventDefault(); if (drop) drop.classList.remove('over'); });
+  left.addEventListener('drop', e => {
+    e.preventDefault(); e.stopPropagation();
+    if (drop) drop.classList.remove('over');
+    const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f) b64HandleFile(f);
+  });
+}
+function b64FilePicked(inp) {
+  const f = inp && inp.files && inp.files[0];
+  if (f) b64HandleFile(f);
+  if (inp) inp.value = '';   // allow choosing the same file again
+}
+function b64HandleFile(file) {
+  if (file.size > 150 * 1048576) {
+    const msg = 'That file is ' + b64Size(file.size) + ' — too large to handle in the browser (limit 150 MB).';
+    if (_b64.mode === 'encode') b64El('b64-enc-stat').textContent = msg; else { b64El('b64-in-msg').textContent = msg; b64El('b64-in-msg').className = 'b64-msg bad'; }
+    return;
+  }
+  const fr = new FileReader();
+  if (_b64.mode === 'encode') {
+    fr.onload = () => {
+      const bytes = new Uint8Array(fr.result);
+      const k = b64KeyFromMime(file.type) || b64KeyFromName(file.name) || b64Detect(bytes, '').key;
+      _b64.enc = { name: file.name, size: file.size, mime: (file.type || (B64_T[k] && B64_T[k].mime) || 'application/octet-stream'), bytes: bytes };
+      b64El('b64-text').value = '';
+      b64EncodeNow();
+    };
+    fr.readAsArrayBuffer(file);
+  } else {
+    fr.onload = () => { b64El('b64-in').value = String(fr.result || ''); b64DecodeNow(); };
+    fr.readAsText(file);
+  }
+}
+
+// ── clipboard helpers ──
+function b64CopyText(text, btn) {
+  const done = () => {
+    if (!btn) return;
+    const old = btn.innerHTML;
+    btn.innerHTML = '<i class="ti ti-check"></i> Copied';
+    setTimeout(() => { btn.innerHTML = old; }, 1200);
+  };
+  const fallback = () => {
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.cssText = 'position:fixed;opacity:0;top:0;left:0';
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); done(); } catch (e) {}
+    ta.remove();
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, fallback); else fallback();
+}
+function b64PasteInto(id, after) {
+  const inp = b64El(id);
+  if (!inp) return;
+  if (navigator.clipboard && navigator.clipboard.readText) {
+    navigator.clipboard.readText().then(t => { inp.value = t; after(); }, () => { inp.focus(); });
+  } else inp.focus();
+}
+function b64PasteText() { b64PasteInto('b64-text', b64TextInput); }
+function b64PasteDec() { b64PasteInto('b64-in', b64DecodeNow); }
+function b64SaveBlob(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+function b64SafeName(n, fb) {
+  n = String(n || '').replace(/[\\\/:*?"<>|\u0000-\u001f]/g, '_').trim();
+  return n || fb;
+}
+
+// ── Encode ──
+function b64TextInput() {
+  if (b64El('b64-text').value) _b64.enc = null;
+  b64EncodeNow();
+}
+function b64ClearEnc(silent) {
+  _b64.enc = null; _b64.out = '';
+  const t = b64El('b64-text'); if (t) t.value = '';
+  if (!silent) { b64EncodeNow(); if (t) t.focus(); } else b64EncodeNow();
+}
+function b64EncodeNow() {
+  const outEl = b64El('b64-out'), stat = b64El('b64-enc-stat'), row = b64El('b64-file-row');
+  const copy = b64El('b64-enc-copy'), dl = b64El('b64-enc-dl');
+  let bytes = null, mime = 'text/plain;charset=utf-8', label = '';
+  if (_b64.enc) {
+    bytes = _b64.enc.bytes; mime = _b64.enc.mime; label = _b64.enc.name;
+    row.classList.remove('hidden');
+    row.innerHTML = '<i class="ti ti-file"></i><span>' + esc(_b64.enc.name) + ' · ' + esc(_b64.enc.mime) + ' · ' + b64Size(_b64.enc.size) + '</span>' +
+      '<button type="button" class="btn-icon" onclick="b64ClearEnc()" title="Remove file" aria-label="Remove file"><i class="ti ti-x"></i></button>';
+  } else {
+    row.classList.add('hidden'); row.innerHTML = '';
+    const txt = b64El('b64-text').value;
+    if (txt) { bytes = new TextEncoder().encode(txt); label = 'text'; }
+  }
+  if (!bytes) {
+    _b64.out = ''; outEl.value = ''; stat.textContent = '';
+    copy.disabled = true; dl.disabled = true;
+    return;
+  }
+  let body = b64BytesToStr(bytes);
+  const urlSafe = b64El('b64-o-url').checked, asUri = b64El('b64-o-uri').checked;
+  const wrap = parseInt(b64El('b64-o-wrap').value, 10) || 0;
+  if (urlSafe) body = body.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  if (wrap && !asUri) body = body.replace(new RegExp('(.{' + wrap + '})', 'g'), '$1\n').replace(/\n$/, '');
+  const out = asUri ? 'data:' + mime + ';base64,' + body : body;
+  _b64.out = out;
+  const LIM = 1500000;
+  outEl.value = out.length > LIM ? out.slice(0, LIM) : out;
+  stat.textContent = label + ' · ' + b64Size(bytes.length) + ' → ' + out.length.toLocaleString() + ' characters' +
+    (out.length > LIM ? ' · display shortened, Copy and .txt use the full output' : '');
+  copy.disabled = false; dl.disabled = false;
+}
+function b64CopyOut(btn) { if (_b64.out) b64CopyText(_b64.out, btn); }
+function b64DownloadOut() {
+  if (!_b64.out) return;
+  const base = _b64.enc ? _b64.enc.name.replace(/\.[^.]+$/, '') : 'text';
+  b64SaveBlob(new Blob([_b64.out], { type: 'text/plain' }), b64SafeName(base, 'encoded') + '.base64.txt');
+}
+
+// ── Detection ──
+function b64Latin1(u8) { return new TextDecoder('latin1').decode(u8); }
+function b64ZipKind(u8) {
+  const n = u8.length, W = 262144;
+  const s = b64Latin1(u8.subarray(0, Math.min(n, W))) + (n > W ? b64Latin1(u8.subarray(Math.max(W, n - W))) : '');
+  if (s.indexOf('xl/workbook') >= 0 || s.indexOf('xl/worksheets') >= 0) return 'xlsx';
+  if (s.indexOf('word/document') >= 0) return 'docx';
+  if (s.indexOf('ppt/presentation') >= 0 || s.indexOf('ppt/slides') >= 0) return 'pptx';
+  return 'zip';
+}
+function b64LooksText(u8) {
+  const n = Math.min(u8.length, 65536);
+  if (!n) return false;
+  let bad = 0;
+  for (let i = 0; i < n; i++) { const c = u8[i]; if (c === 0 || (c < 9) || (c > 13 && c < 32 && c !== 27)) bad++; }
+  if (bad / n > 0.005) return false;
+  let end = n;
+  if (u8.length > n) { while (end > 0 && (u8[end - 1] & 0xC0) === 0x80) end--; if (end > 0 && u8[end - 1] >= 0xC0) end--; }
+  try { new TextDecoder('utf-8', { fatal: true }).decode(u8.subarray(0, end)); return true; } catch (e) { return false; }
+}
+function b64DelimOf(text) {
+  const lines = text.split(/\r\n|\n|\r/).filter(l => l.trim()).slice(0, 20);
+  if (lines.length < 2) return '';
+  for (const d of [',', '\t', ';', '|']) {
+    const counts = lines.map(l => l.split(d).length);
+    if (counts[0] >= 2 && counts.filter(c => c === counts[0]).length >= Math.ceil(lines.length * 0.9)) return d;
+  }
+  return '';
+}
+function b64Detect(u8, hint) {
+  const n = u8.length;
+  const sig = (arr, off) => { off = off || 0; for (let i = 0; i < arr.length; i++) if (u8[off + i] !== arr[i]) return false; return true; };
+  const asc = (s, off) => { off = off || 0; for (let i = 0; i < s.length; i++) if (u8[off + i] !== s.charCodeAt(i)) return false; return true; };
+  const hintKey = b64KeyFromMime(hint);
+  let k = '';
+  if (n >= 4) {
+    if (asc('%PDF')) k = 'pdf';
+    else if (sig([0x89, 0x50, 0x4E, 0x47])) k = 'png';
+    else if (sig([0xFF, 0xD8, 0xFF])) k = 'jpg';
+    else if (asc('GIF8')) k = 'gif';
+    else if (n > 12 && asc('RIFF') && asc('WEBP', 8)) k = 'webp';
+    else if (n > 12 && asc('RIFF') && asc('WAVE', 8)) k = 'wav';
+    else if (sig([0, 0, 1, 0])) k = 'ico';
+    else if (sig([0x49, 0x49, 0x2A, 0]) || sig([0x4D, 0x4D, 0, 0x2A])) k = 'tiff';
+    else if (n > 12 && asc('ftyp', 4)) {
+      const brand = String.fromCharCode(u8[8], u8[9], u8[10], u8[11]);
+      k = /^avi[fs]/.test(brand) ? 'avif' : /^(heic|heix|hevc|mif1|msf1)/.test(brand) ? 'heic' : brand === 'M4A ' ? 'm4a' : brand === 'qt  ' ? 'mov' : 'mp4';
+    }
+    else if (sig([0x50, 0x4B, 3, 4]) || sig([0x50, 0x4B, 5, 6])) k = b64ZipKind(u8);
+    else if (n >= 8 && sig([0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1])) k = 'xls';
+    else if (sig([0x1F, 0x8B])) k = 'gz';
+    else if (asc('Rar!')) k = 'rar';
+    else if (n >= 6 && sig([0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C])) k = '7z';
+    else if (asc('OggS')) k = 'ogg';
+    else if (asc('fLaC')) k = 'flac';
+    else if (asc('ID3')) k = 'mp3';
+    else if (sig([0x1A, 0x45, 0xDF, 0xA3])) k = 'webm';
+    else if (asc('wOFF')) k = 'woff';
+    else if (asc('wOF2')) k = 'woff2';
+    else if (asc('OTTO')) k = 'otf';
+    else if (sig([0, 1, 0, 0])) k = 'ttf';
+    else if (n > 16 && asc('SQLite format 3')) k = 'sqlite';
+    else if (asc('{\\rtf')) k = 'rtf';
+  }
+  if (!k && n > 262 && asc('ustar', 257)) k = 'tar';
+  if (k) return Object.assign({ key: k, by: 'file signature' }, B64_T[k]);
+
+  if (b64LooksText(u8)) {
+    const full = n <= 5242880 ? new TextDecoder('utf-8').decode(u8) : new TextDecoder('utf-8').decode(u8.subarray(0, 262144));
+    const s = full.replace(/^\uFEFF/, '');
+    const head = s.slice(0, 2000).trim();
+    let key = '';
+    if (/^<svg[\s>]/i.test(head) || (/^(<\?xml|<!--|<!doctype svg)/i.test(head) && /<svg[\s>]/i.test(head))) key = 'svg';
+    else if (/^<!doctype html|^<html[\s>]/i.test(head)) key = 'html';
+    else if (/^<\?xml/i.test(head) || (/^<[A-Za-z_!?]/.test(head) && /[>]\s*$/.test(s.trim()))) key = 'xml';
+    else if (/^[\[{]/.test(head) && n <= 5242880) { try { JSON.parse(s); key = 'json'; } catch (e) {} }
+    if (!key) {
+      const d = b64DelimOf(s);
+      if (d === '\t') key = 'tsv';
+      else if (d) key = 'csv';
+    }
+    if (!key && hintKey && B64_T[hintKey].text) key = hintKey;
+    if (!key) key = 'txt';
+    return Object.assign({ key: key, by: 'content' }, B64_T[key]);
+  }
+  // weaker signatures, only for non-text data
+  if (n > 64 && asc('MZ')) return Object.assign({ key: 'exe', by: 'file signature' }, B64_T.exe);
+  if (n > 14 && asc('BM') && u8[6] === 0 && u8[7] === 0 && u8[8] === 0 && u8[9] === 0) return Object.assign({ key: 'bmp', by: 'file signature' }, B64_T.bmp);
+  if (n > 4 && asc('BZh') && u8[3] >= 0x31 && u8[3] <= 0x39) return Object.assign({ key: 'bz2', by: 'file signature' }, B64_T.bz2);
+  if (n > 4 && u8[0] === 0xFF && (u8[1] & 0xE0) === 0xE0 && (u8[1] & 0x06) !== 0 && (u8[2] >> 4) !== 15) return Object.assign({ key: 'mp3', by: 'file signature' }, B64_T.mp3);
+  if (hintKey && hintKey !== 'txt') return Object.assign({ key: hintKey, by: 'data URI type' }, B64_T[hintKey]);
+  return Object.assign({ key: 'bin', by: 'content' }, B64_T.bin);
+}
+
+// ── Decode ──
+function b64DecodeSoon() {
+  clearTimeout(_b64.timer);
+  _b64.timer = setTimeout(b64DecodeNow, 120);
+}
+function b64ClearDec(silent) {
+  b64FreeUrl();
+  _b64.dec = null; _b64.wb = null; _b64.sheet = 0; _b64.tab = 'preview';
+  const i = b64El('b64-in'); if (i) i.value = '';
+  b64DecodeNow();
+  if (!silent && i) i.focus();
+}
+function b64FreeUrl() { if (_b64.url) { try { URL.revokeObjectURL(_b64.url); } catch (e) {} _b64.url = ''; } }
+function b64Url() {
+  if (!_b64.url && _b64.dec) _b64.url = URL.createObjectURL(new Blob([_b64.dec.bytes], { type: _b64.dec.t.mime }));
+  return _b64.url;
+}
+function b64DecButtons(on, canOpen, canCopy) {
+  b64El('b64-dec-dl').disabled = !on;
+  b64El('b64-dec-open').disabled = !(on && canOpen);
+  b64El('b64-dec-copy').disabled = !(on && canCopy);
+}
+function b64ParseInput(raw) {
+  let t = String(raw || '').trim().replace(/^["'`]+|["'`]+$/g, '');
+  let mime = '';
+  const m = /^data:([^;,]*)((?:;[^;,=]+(?:=[^;,]*)?)*),/i.exec(t);
+  let isB64 = true;
+  if (m) { mime = m[1]; isB64 = /;base64/i.test(m[2]); t = t.slice(m[0].length); }
+  if (m && !isB64) {   // data URI holding percent-encoded text
+    let txt = t; try { txt = decodeURIComponent(t); } catch (e) {}
+    return { bytes: new TextEncoder().encode(txt), mime: mime };
+  }
+  t = t.replace(/\s+/g, '');
+  if (/%[0-9A-Fa-f]{2}/.test(t)) { try { t = decodeURIComponent(t); } catch (e) {} }
+  if (!t) return null;
+  const bad = /[^A-Za-z0-9+\/_=-]/.exec(t);
+  if (bad) throw new Error('Not valid Base64: unexpected character "' + bad[0] + '" at position ' + (bad.index + 1) + '.');
+  t = t.replace(/-/g, '+').replace(/_/g, '/');
+  if (/=[^=]/.test(t)) throw new Error('Not valid Base64: "=" padding appears in the middle of the data.');
+  t = t.replace(/=+$/, '');
+  if (t.length % 4 === 1) throw new Error('Not valid Base64: the length is not valid (a character is missing).');
+  while (t.length % 4) t += '=';
+  return { bytes: b64StrToBytes(t), mime: mime };
+}
+function b64DecodeNow() {
+  const body = b64El('b64-dec-body'), msg = b64El('b64-in-msg');
+  if (!body) return;
+  const raw = b64El('b64-in').value;
+  b64FreeUrl(); _b64.wb = null;
+  const empty = '<div class="jwt-empty"><i class="ti ti-binary"></i>Paste Base64 (or a data: URI) on the left. The file type is detected automatically and shown here.</div>';
+  if (!raw.trim()) { _b64.dec = null; msg.textContent = ''; msg.className = 'b64-msg'; body.innerHTML = empty; b64DecButtons(false); return; }
+  let parsed;
+  try { parsed = b64ParseInput(raw); }
+  catch (e) {
+    _b64.dec = null; msg.textContent = e.message; msg.className = 'b64-msg bad';
+    body.innerHTML = '<div class="jwt-empty"><i class="ti ti-alert-triangle"></i>' + esc(e.message) + '</div>'; b64DecButtons(false); return;
+  }
+  if (!parsed) { _b64.dec = null; body.innerHTML = empty; b64DecButtons(false); return; }
+  const t = b64Detect(parsed.bytes, parsed.mime);
+  const prevKey = _b64.dec && _b64.dec.t.key;
+  _b64.dec = { bytes: parsed.bytes, t: t, mime: parsed.mime };
+  if (prevKey !== t.key) { _b64.tab = 'preview'; _b64.sheet = 0; }
+  msg.textContent = parsed.bytes.length.toLocaleString() + ' bytes decoded'; msg.className = 'b64-msg';
+  const k = t.kind;
+  b64DecButtons(true, ['image', 'pdf', 'audio', 'video'].indexOf(k) >= 0 || !!t.text, !!t.text || k === 'sheet');
+  body.innerHTML =
+    '<div class="b64-info"><div class="b64-chips"><span class="b64-chip t">' + esc(t.label) + '</span><span class="b64-chip">' + esc(t.mime) + '</span>' +
+    '<span class="b64-chip">' + b64Size(parsed.bytes.length) + '</span><span class="b64-chip" id="b64-dim" style="display:none"></span>' +
+    '<span class="b64-chip mute">detected from ' + esc(t.by) + '</span></div>' +
+    '<label class="b64-fn">Save as <input id="b64-fname" type="text" spellcheck="false" value="decoded.' + esc(t.ext) + '"></label></div>' +
+    '<div class="b64-tabs" id="b64-tabs"></div><div class="b64-view" id="b64-view"></div>';
+  b64RenderTabs();
+}
+function b64Tab(tab) { _b64.tab = tab; b64RenderTabs(); }
+function b64RenderTabs() {
+  const el = b64El('b64-tabs');
+  if (!el || !_b64.dec) return;
+  const tabs = [['preview', 'Preview'], ['text', 'Text'], ['hex', 'Hex']];
+  el.innerHTML = tabs.map(x => '<button type="button" class="' + (_b64.tab === x[0] ? 'on' : '') + '" onclick="b64Tab(\'' + x[0] + '\')">' + x[1] + '</button>').join('');
+  b64RenderView();
+}
+function b64TextOf(u8, limit) { return new TextDecoder('utf-8').decode(limit && u8.length > limit ? u8.subarray(0, limit) : u8); }
+function b64Hex(u8) {
+  const max = Math.min(u8.length, 4096), out = [];
+  for (let o = 0; o < max; o += 16) {
+    const sl = u8.subarray(o, Math.min(o + 16, max));
+    let hex = '', asc = '';
+    for (let i = 0; i < 16; i++) {
+      if (i < sl.length) { hex += sl[i].toString(16).padStart(2, '0') + ' '; asc += (sl[i] >= 32 && sl[i] < 127) ? String.fromCharCode(sl[i]) : '.'; }
+      else hex += '   ';
+      if (i === 7) hex += ' ';
+    }
+    out.push(o.toString(16).padStart(8, '0') + '  ' + hex + ' |' + asc + '|');
+  }
+  return out.join('\n') + (u8.length > max ? '\n… first ' + max.toLocaleString() + ' of ' + u8.length.toLocaleString() + ' bytes shown' : '');
+}
+function b64ParseCsv(text, delim, maxRows) {
+  const rows = []; let row = [], cur = '', q = false, hit = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) { if (c === '"') { if (text[i + 1] === '"') { cur += '"'; i++; } else q = false; } else cur += c; }
+    else if (c === '"') q = true;
+    else if (c === delim) { row.push(cur); cur = ''; }
+    else if (c === '\n' || c === '\r') {
+      if (c === '\r' && text[i + 1] === '\n') i++;
+      row.push(cur); cur = ''; rows.push(row); row = [];
+      if (rows.length >= maxRows) { hit = true; break; }
+    } else cur += c;
+  }
+  if (!hit && (cur !== '' || row.length)) { row.push(cur); rows.push(row); }
+  return { rows: rows, more: hit };
+}
+function b64Table(rows, more) {
+  if (!rows.length) return '<div class="b64-note">No rows.</div>';
+  const w = rows.reduce((m, r) => Math.max(m, r.length), 0);
+  const cell = (v) => esc(String(v == null ? '' : v).slice(0, 500));
+  let h = '<div class="b64-tblwrap"><table class="b64-tbl"><thead><tr>';
+  for (let c = 0; c < w; c++) h += '<th>' + cell(rows[0][c]) + '</th>';
+  h += '</tr></thead><tbody>';
+  for (let r = 1; r < rows.length; r++) { h += '<tr>'; for (let c = 0; c < w; c++) h += '<td>' + cell(rows[r][c]) + '</td>'; h += '</tr>'; }
+  return h + '</tbody></table></div>' + (more ? '<div class="b64-note">Showing the first ' + rows.length.toLocaleString() + ' rows. Download the file for the rest.</div>' : '');
+}
+function b64Sheet(i) { _b64.sheet = i; b64RenderView(); }
+function b64RenderView() {
+  const d = _b64.dec, v = b64El('b64-view');
+  if (!d || !v) return;
+  const t = d.t, k = t.kind;
+  v.classList.remove('flush');
+  if (_b64.tab === 'hex') { v.innerHTML = '<pre>' + esc(b64Hex(d.bytes)) + '</pre>'; return; }
+  if (_b64.tab === 'text') {
+    const LIM = 1000000;
+    v.innerHTML = '<pre>' + esc(b64TextOf(d.bytes, LIM)) + '</pre>' + (d.bytes.length > LIM ? '<div class="b64-note">Showing the first 1 MB as text.</div>' : '') +
+      (t.text ? '' : '<div class="b64-note">This is binary data, so the text view will mostly be unreadable.</div>');
+    return;
+  }
+  const nopre = '<div class="jwt-empty"><i class="ti ti-file-unknown"></i>No preview for this type. Use Download to save it as a file.</div>';
+  try {
+    if (k === 'image') {
+      v.innerHTML = '<div class="b64-imgwrap"><img id="b64-img" src="' + b64Url() + '" alt="Decoded image"></div>';
+      const im = b64El('b64-img');
+      im.onload = () => { const c = b64El('b64-dim'); if (c && im.naturalWidth) { c.textContent = im.naturalWidth + ' × ' + im.naturalHeight + ' px'; c.style.display = ''; } };
+      im.onerror = () => { v.innerHTML = '<div class="jwt-empty"><i class="ti ti-photo-off"></i>This browser cannot display this image type. Use Download to save it.</div>'; };
+    } else if (k === 'pdf') {
+      v.classList.add('flush');
+      v.innerHTML = '<iframe class="b64-frame" src="' + b64Url() + '" title="PDF preview"></iframe>';
+    } else if (k === 'audio') {
+      v.innerHTML = '<audio controls src="' + b64Url() + '"></audio>';
+    } else if (k === 'video') {
+      v.innerHTML = '<video controls src="' + b64Url() + '"></video>';
+    } else if (k === 'csv') {
+      const r = b64ParseCsv(b64TextOf(d.bytes, 5000000), t.delim, 501);
+      v.innerHTML = b64Table(r.rows.slice(0, 500), r.more || r.rows.length > 500);
+    } else if (k === 'sheet') {
+      if (typeof XLSX === 'undefined') { v.innerHTML = nopre; return; }
+      if (!_b64.wb) _b64.wb = XLSX.read(d.bytes, { type: 'array' });
+      const names = _b64.wb.SheetNames || [];
+      if (!names.length) { v.innerHTML = nopre; return; }
+      const si = Math.min(_b64.sheet, names.length - 1);
+      const rows = XLSX.utils.sheet_to_json(_b64.wb.Sheets[names[si]], { header: 1, raw: false, defval: '' });
+      v.innerHTML = (names.length > 1 ? '<div class="b64-sheets">' + names.map((n, i) => '<button type="button" class="btn' + (i === si ? ' on' : '') + '" onclick="b64Sheet(' + i + ')">' + esc(n) + '</button>').join('') + '</div>' : '') +
+        b64Table(rows.slice(0, 500), rows.length > 500);
+    } else if (t.text) {
+      let s = b64TextOf(d.bytes, 1000000);
+      if (t.key === 'json') { try { s = JSON.stringify(JSON.parse(b64TextOf(d.bytes)), null, 2); } catch (e) {} }
+      v.innerHTML = '<pre>' + esc(s) + '</pre>';
+    } else v.innerHTML = nopre;
+  } catch (e) {
+    v.innerHTML = '<div class="jwt-empty"><i class="ti ti-alert-triangle"></i>Could not preview this file (' + esc(e.message || e) + '). Use Download to save it.</div>';
+  }
+}
+function b64DownloadDec() {
+  const d = _b64.dec; if (!d) return;
+  const inp = b64El('b64-fname');
+  b64SaveBlob(new Blob([d.bytes], { type: d.t.mime }), b64SafeName(inp && inp.value, 'decoded.' + d.t.ext));
+}
+function b64OpenDec() { if (_b64.dec) window.open(b64Url(), '_blank'); }
+function b64CopyDec(btn) {
+  const d = _b64.dec; if (!d) return;
+  let text;
+  if (d.t.kind === 'sheet' && typeof XLSX !== 'undefined' && _b64.wb) {
+    const names = _b64.wb.SheetNames; text = XLSX.utils.sheet_to_csv(_b64.wb.Sheets[names[Math.min(_b64.sheet, names.length - 1)]]);
+  } else text = b64TextOf(d.bytes);
+  b64CopyText(text, btn);
+}
+// Escape closes only this tool; the time tracker panel (on top of it) closes first, via its own capture listener.
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && b64IsOpen() && !ttlConsIsOpen()) { e.stopImmediatePropagation(); e.preventDefault(); closeB64Tool(); }
 }, true);
 
 // ── Break timer ───────────────────────────────────────────────────────────────
