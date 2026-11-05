@@ -2508,7 +2508,7 @@ tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--blue-mid); }
             <div class="more-menu-section" role="presentation">Utilities</div>
             <button class="btn" onclick="openJwtDecoder()" id="jwt-menu-btn" title="Decode a JWT token"><i class="ti ti-key"></i> JWT Decoder</button>
             <button class="btn" onclick="openB64Tool()" id="b64-menu-btn" title="Encode or decode Base64 for text and any file type"><i class="ti ti-binary"></i> Base64 Encoder / Decoder</button>
-            <button class="btn" onclick="openTzConv()" id="tzc-menu-btn" title="Convert a date and time from one time zone to another"><i class="ti ti-world-time"></i> Time Zone Converter</button>
+            <button class="btn" onclick="openTzConv()" id="tzc-menu-btn" title="Convert a date and time from one time zone to another"><i class="ti ti-world"></i> Time Zone Converter</button>
             <button class="btn" onclick="openCodeCompare()" id="cc-menu-btn" title="Compare JS, HTML, SQL and other code side by side and transfer changes"><i class="ti ti-git-compare"></i> Code Compare</button>
           </div>
         </div>
@@ -2845,7 +2845,7 @@ tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--blue-mid); }
 <div class="modal-overlay hidden" id="tzc-modal" onclick="if(event.target===this)closeTzConv()">
   <div class="modal" role="dialog" aria-modal="true" aria-label="Time Zone Converter">
     <div class="modal-header">
-      <div class="modal-title"><i class="ti ti-world-time" style="vertical-align:-2px;margin-right:6px;color:var(--blue-mid)"></i>Time Zone Converter</div>
+      <div class="modal-title"><i class="ti ti-world" style="vertical-align:-2px;margin-right:6px;color:var(--blue-mid)"></i>Time Zone Converter</div>
       <button class="btn-icon" onclick="closeTzConv()" title="Close (Esc)" aria-label="Close"><i class="ti ti-x"></i></button>
     </div>
     <div class="modal-body">
@@ -2977,7 +2977,7 @@ tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--blue-mid); }
 <div class="jwt-overlay cc-overlay hidden" id="cc-overlay" role="dialog" aria-modal="true" aria-label="Code Compare">
   <div class="lm-head cc-top">
     <div class="lm-title"><i class="ti ti-git-compare" style="font-size:18px;color:var(--blue-mid)"></i><span class="cc-tname">Code Compare</span>
-      <label class="cc-lam" title="Compare the backup files of two Lambda functions, file by file"><input type="checkbox" id="cc-lambda" onchange="ccSetLambda(this.checked)"> Lambda</label>
+      <label class="cc-lam" id="cc-lam-wrap" title="Compare the backup files of two Lambda functions, file by file"><input type="checkbox" id="cc-lambda" onchange="ccSetLambda(this.checked)"> Lambda</label>
     </div>
     <div class="cc-nav">
       <button type="button" class="btn" onclick="ccGo(-1)" title="Previous difference (Shift+F7)" aria-label="Previous difference"><i class="ti ti-chevron-up"></i></button>
@@ -19378,6 +19378,7 @@ function toggleLambdaLoggingFlag() {
   saveState();
   if (typeof lcdUpdateButton === 'function') lcdUpdateButton();
   if (typeof applyMastersTabFilter === 'function') applyMastersTabFilter(_mastersProfileMode);
+  if (typeof ccSyncLambdaGate === 'function' && typeof _cc !== 'undefined' && _cc) ccSyncLambdaGate();
 }
 
 function toggleSleepFlag() {
@@ -26445,6 +26446,7 @@ function openCodeCompare() {
   el.classList.remove('hidden');
   document.body.style.overflow = 'hidden';
   try { renderTtlHdrWidgets(); } catch (e) {}
+  ccSyncLambdaGate();
   document.getElementById('cc-lambda').checked = _cc.lambda;
   ccSyncOptUi();
   ccRenderHeads(); ccRenderFiles(); ccRender();
@@ -26850,6 +26852,13 @@ async function ccLoadFns(ask) {
     _cc.fns = (await cbkSubdirs(_cbkHandle)).map(d => ({ name: d.name, h: d })).sort((x, y) => x.name.localeCompare(y.name, undefined, { numeric: true, sensitivity: 'base' }));
     if (!_cc.fns.length) _cc.fnErr = 'The Code Backup folder has no function folders yet.';
   } catch (e) { _cc.fnErr = 'Could not read the backup folder: ' + e.message; _cc.fns = []; }
+}
+// The Lambda tick is only offered while "Enable Lambda logging" (Masters → User) is on; turning the flag off also drops Lambda mode.
+function ccSyncLambdaGate() {
+  const w = document.getElementById('cc-lam-wrap'); if (!w) return;
+  const on = typeof isLambdaLoggingEnabled === 'function' && isLambdaLoggingEnabled();
+  w.style.display = on ? '' : 'none';
+  if (!on && _cc && _cc.lambda) { _cc.lambda = false; ccSaveOpts(); const c = document.getElementById('cc-lambda'); if (c) c.checked = false; ccSyncOptUi(); if (ccIsOpen()) { ccRenderHeads(); ccRenderFiles(); } }
 }
 async function ccSetLambda(on) {
   ccInit(); _cc.lambda = !!on; ccSaveOpts(); ccSyncOptUi();
