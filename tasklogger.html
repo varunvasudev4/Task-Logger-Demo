@@ -2383,6 +2383,62 @@ tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--blue-mid); }
 .cc-same { margin: 24px auto; text-align: center; color: var(--green-dark); font-size: 13px; }
 .cc-kw, .cc-tg { color: var(--purple-dark); } .cc-st { color: var(--green-dark); } .cc-cm { color: var(--text-tertiary); font-style: italic; }
 .cc-nu { color: var(--blue-mid); } .cc-at, .cc-pr { color: var(--blue-dark); }
+
+/* Code Compare v2: one compact top bar, live editable panes with in-place highlighting + connector ribbons, full screen */
+.cc-top { flex-wrap: wrap; justify-content: flex-start; gap: 6px 10px; padding: 6px 10px; padding-top: max(6px, env(safe-area-inset-top, 0px)); }
+.cc-top .ttl-hdr-widget { margin-left: 0; margin-right: 0; }
+.cc-top .lm-title { font-size: 14px; white-space: nowrap; }
+.cc-top .cc-lam { margin-left: 4px; }
+.cc-nav { display: flex; align-items: center; gap: 6px; }
+.cc-nav .btn, .cc-tools .btn { padding: 4px 9px; font-size: 12px; }
+.cc-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-left: auto; }
+.cc-tools .btn.on { border-color: var(--blue-mid); color: var(--blue-mid); }
+.cc-optwrap { position: relative; }
+.cc-opts { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; display: flex; flex-direction: column; gap: 6px; padding: 10px; background: var(--bg); border: 1px solid var(--border-md); border-radius: var(--radius-md); box-shadow: 0 8px 24px rgba(0,0,0,0.25); min-width: 230px; }
+.cc-opts.hidden { display: none; }
+.cc-opts .cc-chip { border-radius: var(--radius-md); }
+.cc-heads { grid-template-columns: 1fr 52px 1fr; }
+.cc-head { padding: 4px 8px; }
+.cc-head-gap { border-inline: 1px solid var(--border-md); }
+.cc-main.live { overflow: hidden; }
+.cc-live { display: flex; height: 100%; min-height: 0; }
+.cc-pane { position: relative; flex: 1 1 0; min-width: 0; height: 100%; background: var(--bg); }
+.cc-bd, .cc-live .cc-ta { position: absolute; inset: 0; margin: 0; }
+.cc-bd { overflow: hidden; pointer-events: none; }
+.cc-bdi, .cc-live .cc-ta { box-sizing: border-box; font: 12.5px/1.55 var(--font-mono); letter-spacing: normal; tab-size: 4; white-space: pre; word-break: normal; overflow-wrap: normal; }
+.cc-bdi { position: relative; color: transparent; min-width: 100%; width: max-content; padding: 10px 24px 30px 12px; }
+.cc-bdi.wrap { width: auto; padding: 10px 12px 30px; }
+.cc-bdi.wrap, .cc-live .cc-ta.wrap { white-space: pre-wrap; overflow-wrap: break-word; word-break: normal; }
+.cc-live .cc-ta { width: 100%; height: 100%; min-height: 0; border: 0; outline: 0; resize: none; padding: 10px 12px; background: transparent; color: var(--text-primary); overflow: auto; caret-color: var(--text-primary); }
+.cc-bl { min-height: 1.55em; }
+.cc-bl.del { background: color-mix(in srgb, var(--red-mid) 14%, transparent); }
+.cc-bl.add { background: color-mix(in srgb, var(--green-mid) 17%, transparent); }
+.cc-bl.cur.del { background: color-mix(in srgb, var(--red-mid) 28%, transparent); }
+.cc-bl.cur.add { background: color-mix(in srgb, var(--green-mid) 30%, transparent); }
+.cc-bdi mark { color: transparent; border-radius: 2px; }
+.cc-bdi mark.d { background: color-mix(in srgb, var(--red-mid) 38%, transparent); }
+.cc-bdi mark.a { background: color-mix(in srgb, var(--green-mid) 42%, transparent); }
+.cc-gut { flex: 0 0 52px; position: relative; overflow: hidden; background: var(--bg-secondary); border-inline: 1px solid var(--border-md); }
+.cc-gut svg { position: absolute; inset: 0; pointer-events: none; }
+.cc-rb { stroke-width: 1; }
+.cc-rb.del { fill: color-mix(in srgb, var(--red-mid) 18%, transparent); stroke: color-mix(in srgb, var(--red-mid) 55%, transparent); }
+.cc-rb.add { fill: color-mix(in srgb, var(--green-mid) 20%, transparent); stroke: color-mix(in srgb, var(--green-mid) 55%, transparent); }
+.cc-rb.chg { fill: color-mix(in srgb, var(--blue-mid) 16%, transparent); stroke: color-mix(in srgb, var(--blue-mid) 50%, transparent); }
+.cc-rb.cur { stroke-width: 2; fill-opacity: 1; }
+.cc-gb { position: absolute; left: 0; right: 0; display: flex; justify-content: center; gap: 2px; }
+.cc-xb { width: 22px; height: 20px; padding: 0; display: flex; align-items: center; justify-content: center; border: 1px solid var(--border-md); border-radius: 4px; background: var(--bg); color: var(--text-secondary); cursor: pointer; font-size: 13px; line-height: 1; }
+.cc-xb:hover { color: var(--blue-mid); border-color: var(--blue-mid); }
+.cc-overlay.cc-nohead .cc-heads, .cc-overlay.cc-nohead .cc-files { display: none; }
+.cc-overlay.cc-full .cc-tname, .cc-overlay.cc-full .ttl-hdr-widget, .cc-overlay.cc-full .cc-lbl { display: none; }
+.cc-overlay.cc-full .cc-top { padding-top: 4px; padding-bottom: 4px; }
+@media (max-width: 700px) {
+  .cc-heads { grid-template-columns: 1fr; }
+  .cc-head-gap { display: none; }
+  .cc-live { flex-direction: column; }
+  .cc-gut { display: none; }
+  .cc-bdi, .cc-live .cc-ta { font-size: 16px; }
+  .cc-top .cc-lbl { display: none; }
+}
 @media (max-width: 700px) {
   .cc-heads { grid-template-columns: 1fr; }
   .cc-head + .cc-head { border-left: 0; border-top: 1px solid var(--border-md); }
@@ -2919,30 +2975,38 @@ tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--blue-mid); }
 
 <!-- Utilities → Code Compare: full-screen side-by-side diff. "Lambda" checkbox in the header turns each side into a Lambda function → backup date → file picker. -->
 <div class="jwt-overlay cc-overlay hidden" id="cc-overlay" role="dialog" aria-modal="true" aria-label="Code Compare">
-  <div class="lm-head">
-    <div class="lm-title"><i class="ti ti-git-compare" style="font-size:18px;color:var(--blue-mid)"></i>Code Compare
+  <div class="lm-head cc-top">
+    <div class="lm-title"><i class="ti ti-git-compare" style="font-size:18px;color:var(--blue-mid)"></i><span class="cc-tname">Code Compare</span>
       <label class="cc-lam" title="Compare the backup files of two Lambda functions, file by file"><input type="checkbox" id="cc-lambda" onchange="ccSetLambda(this.checked)"> Lambda</label>
+    </div>
+    <div class="cc-nav">
+      <button type="button" class="btn" onclick="ccGo(-1)" title="Previous difference (Shift+F7)" aria-label="Previous difference"><i class="ti ti-chevron-up"></i></button>
+      <span class="cc-pos" id="cc-pos">–</span>
+      <button type="button" class="btn" onclick="ccGo(1)" title="Next difference (F7)" aria-label="Next difference"><i class="ti ti-chevron-down"></i></button>
+      <span class="cc-stat" id="cc-stat"></span>
+    </div>
+    <div class="cc-tools">
+      <div class="cc-optwrap">
+        <button type="button" class="btn" id="cc-opt-btn" onclick="ccToggleOpts(event)" title="Compare options" aria-label="Compare options"><i class="ti ti-adjustments-horizontal"></i> <span class="cc-lbl">Options</span></button>
+        <div class="cc-opts hidden" id="cc-opts">
+          <label class="cc-chip" title="Ignore differences in spaces and tabs"><input type="checkbox" id="cc-o-ws" onchange="ccOpt()"> Ignore whitespace</label>
+          <label class="cc-chip" title="Ignore upper / lower case"><input type="checkbox" id="cc-o-ic" onchange="ccOpt()"> Ignore case</label>
+          <label class="cc-chip" title="Wrap long lines"><input type="checkbox" id="cc-o-wrap" onchange="ccOpt()"> Wrap lines</label>
+          <label class="cc-chip" title="Highlight the changed words inside a line"><input type="checkbox" id="cc-o-word" onchange="ccOpt()"> Word diff</label>
+          <label class="cc-chip" title="Aligned view only: fold long runs of unchanged lines"><input type="checkbox" id="cc-o-collapse" onchange="ccOpt()"> Hide unchanged (aligned view)</label>
+          <label class="cc-chip" id="cc-o-match-wrap" title="Lambda mode: picking a file on one side picks the same path on the other side"><input type="checkbox" id="cc-o-match" onchange="ccOpt()"> Match files</label>
+        </div>
+      </div>
+      <button type="button" class="btn" onclick="ccSwap()" title="Swap the two sides" aria-label="Swap sides"><i class="ti ti-arrows-exchange"></i></button>
+      <button type="button" class="btn" id="cc-undo" onclick="ccUndo()" title="Undo the last transfer" aria-label="Undo transfer" disabled><i class="ti ti-arrow-back-up"></i></button>
+      <button type="button" class="btn" onclick="ccApplyAll('LR')" title="Make the right side equal to the left"><i class="ti ti-arrow-narrow-right"></i> All</button>
+      <button type="button" class="btn" onclick="ccApplyAll('RL')" title="Make the left side equal to the right"><i class="ti ti-arrow-narrow-left"></i> All</button>
+      <button type="button" class="btn" id="cc-mode" onclick="ccToggleMode()" title="Switch between the live editable panes and the aligned read-only view"><i class="ti ti-layout-columns"></i> <span class="cc-lbl">Aligned</span></button>
+      <button type="button" class="btn" id="cc-hh" onclick="ccToggleHeads()" title="Hide / show the file bars to get more code area" aria-label="Hide or show file bars"><i class="ti ti-layout-navbar-collapse"></i></button>
+      <button type="button" class="btn" id="cc-fs" onclick="ccToggleFull()" title="Full screen" aria-label="Full screen"><i class="ti ti-arrows-maximize"></i></button>
     </div>
     <button type="button" class="ttl-hdr-widget idle" onclick="ttlConsOpen(event)" title="Time tracker — click to start / pause tasks" aria-label="Open time tracker"><span class="ttl-hw-dot"></span><span class="ttl-hw-lbl">Worked</span><span class="ttl-hw-time">00:00:00</span></button>
     <button type="button" class="btn-icon" onclick="closeCodeCompare()" title="Close (Esc)" aria-label="Close Code Compare"><i class="ti ti-x"></i></button>
-  </div>
-  <div class="cc-bar">
-    <button type="button" class="btn" id="cc-mode" onclick="ccToggleMode()" title="Switch between editing the two texts and the side-by-side comparison"><i class="ti ti-git-compare"></i> <span>Compare</span></button>
-    <button type="button" class="btn" onclick="ccGo(-1)" title="Previous difference (Shift+F7)" aria-label="Previous difference"><i class="ti ti-chevron-up"></i></button>
-    <span class="cc-pos" id="cc-pos">0 / 0</span>
-    <button type="button" class="btn" onclick="ccGo(1)" title="Next difference (F7)" aria-label="Next difference"><i class="ti ti-chevron-down"></i></button>
-    <span class="cc-stat" id="cc-stat"></span>
-    <span class="cc-sep"></span>
-    <label class="cc-chip" title="Ignore differences in spaces and tabs"><input type="checkbox" id="cc-o-ws" onchange="ccOpt()"> Ignore whitespace</label>
-    <label class="cc-chip" title="Ignore upper / lower case"><input type="checkbox" id="cc-o-ic" onchange="ccOpt()"> Ignore case</label>
-    <label class="cc-chip" title="Fold long runs of unchanged lines"><input type="checkbox" id="cc-o-collapse" onchange="ccOpt()"> Hide unchanged</label>
-    <label class="cc-chip" title="Wrap long lines"><input type="checkbox" id="cc-o-wrap" onchange="ccOpt()"> Wrap</label>
-    <label class="cc-chip" title="Highlight the changed words inside a line"><input type="checkbox" id="cc-o-word" onchange="ccOpt()"> Word diff</label>
-    <label class="cc-chip" id="cc-o-match-wrap" title="Lambda mode: picking a file on one side picks the same path on the other side"><input type="checkbox" id="cc-o-match" onchange="ccOpt()"> Match files</label>
-    <button type="button" class="btn" onclick="ccSwap()" title="Swap the two sides"><i class="ti ti-arrows-exchange"></i></button>
-    <button type="button" class="btn" id="cc-undo" onclick="ccUndo()" title="Undo the last transfer" disabled><i class="ti ti-arrow-back-up"></i></button>
-    <button type="button" class="btn" onclick="ccApplyAll('LR')" title="Make the right side equal to the left"><i class="ti ti-arrow-narrow-right"></i> All</button>
-    <button type="button" class="btn" onclick="ccApplyAll('RL')" title="Make the left side equal to the right"><i class="ti ti-arrow-narrow-left"></i> All</button>
   </div>
   <div class="cc-heads" id="cc-heads"></div>
   <div class="cc-files hidden" id="cc-files"></div>
@@ -26356,7 +26420,7 @@ function ccLangName(k) { const x = CC_LANGS.find(l => l[0] === k); return x ? x[
 function ccNewSide() { return { text: '', name: '', lang: 'auto', handle: null, eol: '\n', msg: '', tok: 0, ftok: 0, fn: '', fnDir: null, dates: [], di: 0, files: [], filePath: '', lines: null, toks: null, toksLang: '' }; }
 function ccInit() {
   if (_cc) return;
-  _cc = { mode: 'edit', lambda: false, o: { ws: false, ic: false, collapse: false, wrap: true, word: true, match: true }, L: ccNewSide(), R: ccNewSide(), fns: null, fnErr: '', needPerm: false, flt: { L: '', R: '' }, rows: [], blocks: [], cur: -1, exp: new Set(), undo: [], scan: null, scanBusy: false, scanMsg: '', scanF: 'all' };
+  _cc = { mode: 'live', lambda: false, o: { ws: false, ic: false, collapse: false, wrap: true, word: true, match: true }, L: ccNewSide(), R: ccNewSide(), fns: null, fnErr: '', needPerm: false, flt: { L: '', R: '' }, rows: [], blocks: [], cur: -1, exp: new Set(), undo: [], scan: null, scanBusy: false, scanMsg: '', scanF: 'all' };
   try { const p = JSON.parse(localStorage.getItem(CC_OPT_KEY) || 'null'); if (p && typeof p === 'object') { Object.keys(_cc.o).forEach(k => { if (typeof p[k] === 'boolean') _cc.o[k] = p[k]; }); if (typeof p.lambda === 'boolean') _cc.lambda = p.lambda; } } catch (e) {}
 }
 function ccSaveOpts() { try { localStorage.setItem(CC_OPT_KEY, JSON.stringify(Object.assign({ lambda: _cc.lambda }, _cc.o))); } catch (e) {} }
@@ -26384,16 +26448,20 @@ function openCodeCompare() {
   document.getElementById('cc-lambda').checked = _cc.lambda;
   ccSyncOptUi();
   ccRenderHeads(); ccRenderFiles(); ccRender();
+  ccSyncToolBtns();
+  if (!_ccRO && window.ResizeObserver) { _ccRO = new ResizeObserver(() => { if (ccIsOpen() && _cc.mode === 'live') { ccLayoutBd(); ccDrawSoon(); } }); _ccRO.observe(document.getElementById('cc-main')); }
   if (_cc.lambda && _cc.fns === null) ccLoadFns(false).then(() => { ccRenderHeads(); ccRenderFiles(); });
 }
 function closeCodeCompare() {
-  const el = document.getElementById('cc-overlay'); if (el) el.classList.add('hidden');
+  const el = document.getElementById('cc-overlay'); if (el) { el.classList.add('hidden'); el.classList.remove('cc-full'); }
+  try { if (document.fullscreenElement) document.exitFullscreen(); } catch (e) {}
+  const o = document.getElementById('cc-opts'); if (o) o.classList.add('hidden');
   document.body.style.overflow = '';
 }
 document.addEventListener('keydown', (e) => {
   if (!ccIsOpen()) return;
   if (e.key === 'Escape' && !ttlConsIsOpen()) { e.stopImmediatePropagation(); e.preventDefault(); closeCodeCompare(); }
-  else if (e.key === 'F7') { e.preventDefault(); if (_cc.mode !== 'diff') ccSetMode('diff'); else ccGo(e.shiftKey ? -1 : 1); }
+  else if (e.key === 'F7') { e.preventDefault(); ccGo(e.shiftKey ? -1 : 1); }
 }, true);
 
 // ── options / bar ─────────────────────────────────────────────────────────────
@@ -26407,19 +26475,18 @@ function ccOpt() {
   o.ws = g('cc-o-ws'); o.ic = g('cc-o-ic'); o.collapse = g('cc-o-collapse'); o.wrap = g('cc-o-wrap'); o.word = g('cc-o-word'); o.match = g('cc-o-match');
   ccSaveOpts(); _cc.exp.clear(); _cc.scan = null; ccRenderFiles(); ccRender(true);
 }
-function ccToggleMode() { ccSetMode(_cc.mode === 'diff' ? 'edit' : 'diff'); }
-function ccSetMode(m) { _cc.mode = m; ccRenderHeads(); ccRender(); }
+function ccToggleMode() { ccSetMode(_cc.mode === 'diff' ? 'live' : 'diff'); }
+function ccSetMode(m) { _cc.mode = m; ccRenderHeads(); ccRender(); ccSyncToolBtns(); }
 function ccFlash(btn, html) { if (!btn) return; const old = btn.innerHTML; btn.innerHTML = html; setTimeout(() => { btn.innerHTML = old; }, 1200); }
 function ccUpdateBar() {
-  const diff = _cc.mode === 'diff';
-  const mb = document.getElementById('cc-mode'); if (mb) mb.querySelector('span').textContent = diff ? 'Edit' : 'Compare';
-  if (mb) mb.querySelector('i').className = 'ti ' + (diff ? 'ti-edit' : 'ti-git-compare');
-  const n = _cc.blocks.length;
-  document.getElementById('cc-pos').textContent = diff ? (_cc.cur >= 0 ? (_cc.cur + 1) : 0) + ' / ' + n : '–';
-  document.getElementById('cc-stat').textContent = diff ? (n ? n + ' difference' + (n === 1 ? '' : 's') : 'No differences') + ' · ' + ccLines(_cc.L).length + ' / ' + ccLines(_cc.R).length + ' lines' : '';
+  const diff = _cc.mode === 'diff', both = ccBothHave();
+  const mb = document.getElementById('cc-mode');
+  if (mb) { mb.querySelector('span').textContent = diff ? 'Live edit' : 'Aligned'; mb.querySelector('i').className = 'ti ' + (diff ? 'ti-edit' : 'ti-layout-columns'); mb.classList.toggle('on', diff); }
+  const n = _cc.blocks.length, active = diff || both;
+  document.getElementById('cc-pos').textContent = active ? (_cc.cur >= 0 ? (_cc.cur + 1) : 0) + ' / ' + n : '–';
+  document.getElementById('cc-stat').textContent = active ? (n ? n + ' difference' + (n === 1 ? '' : 's') : 'No differences') + ' · ' + ccLines(_cc.L).length + ' / ' + ccLines(_cc.R).length + ' lines' : 'Add code on both sides to compare';
   const ub = document.getElementById('cc-undo'); if (ub) ub.disabled = !_cc.undo.length;
 }
-
 // ── diff engine ───────────────────────────────────────────────────────────────
 function ccMyers(a, b, limit) {
   const n = a.length, m = b.length, max = n + m, off = max + 1, v = new Int32Array(2 * max + 3), trace = [];
@@ -26504,20 +26571,172 @@ function ccHtml(toks, rs, mk) {
   return out || '\u200b';
 }
 
-// ── rendering ─────────────────────────────────────────────────────────────────
+
+// ── live (always editable) view ───────────────────────────────────────────────
+// Two textareas sit on top of two highlight layers (same font / padding / wrapping), so both sides stay editable while the
+// changed lines and words are painted behind the text. Between the panes an SVG gutter draws a ribbon per difference with
+// → / ← buttons; the panes scroll together by matching lines. The diff is recomputed shortly after each keystroke.
+let _ccT = 0, _ccRO = null, _ccRaf = 0, _ccLock = null;
+function ccBothHave() { return _cc.L.text.length > 0 && _cc.R.text.length > 0; }
 function ccRender(keep) {
   ccInit();
   const main = document.getElementById('cc-main'); if (!main) return;
-  const st = keep ? main.scrollTop : 0, sl = keep ? main.scrollLeft : 0;
-  if (_cc.mode === 'edit') {
-    main.innerHTML = '<div class="cc-edit"><textarea class="cc-ta' + (_cc.o.wrap ? ' wrap' : '') + '" id="cc-ta-L" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" placeholder="Paste or open the first (left) code here…" oninput="ccTaInput(\'L\',this)"></textarea><textarea class="cc-ta' + (_cc.o.wrap ? ' wrap' : '') + '" id="cc-ta-R" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" placeholder="Paste or open the second (right) code here…" oninput="ccTaInput(\'R\',this)"></textarea></div>';
+  main.classList.toggle('live', _cc.mode === 'live');
+  if (_cc.mode === 'live') ccRenderLive(keep); else ccRenderDiff(keep);
+}
+function ccRenderLive(keep) {
+  const main = document.getElementById('cc-main');
+  if (!document.getElementById('cc-live')) {
+    const pane = S => '<div class="cc-pane" id="cc-pane-' + S + '"><div class="cc-bd" id="cc-bd-' + S + '"><div class="cc-bdi" id="cc-bdi-' + S + '"></div></div>'
+      + '<textarea class="cc-ta" id="cc-ta-' + S + '" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" placeholder="' + (S === 'L' ? 'Paste or open the first (left) code here…' : 'Paste or open the second (right) code here…') + '" oninput="ccTaInput(\'' + S + '\',this)" onscroll="ccOnScroll(\'' + S + '\')"></textarea></div>';
+    main.innerHTML = '<div class="cc-live" id="cc-live">' + pane('L') + '<div class="cc-gut" id="cc-gut"><svg id="cc-svg" xmlns="http://www.w3.org/2000/svg"></svg><div id="cc-gbtns"></div></div>' + pane('R') + '</div>';
     ['L', 'R'].forEach(S => {
-      const ta = document.getElementById('cc-ta-' + S); ta.value = _cc[S].text;
+      const ta = document.getElementById('cc-ta-' + S);
       ta.addEventListener('dragover', e => { e.preventDefault(); });
       ta.addEventListener('drop', e => { const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if (f) { e.preventDefault(); ccLoadFile(S, f, null); } });
     });
-    _cc.blocks = []; _cc.rows = []; ccUpdateBar(); return;
   }
+  ['L', 'R'].forEach(S => {
+    const ta = document.getElementById('cc-ta-' + S), bdi = document.getElementById('cc-bdi-' + S), st = ta.scrollTop, sl = ta.scrollLeft;
+    if (ta.value !== _cc[S].text) { ta.value = _cc[S].text; if (keep) { ta.scrollTop = st; ta.scrollLeft = sl; } }
+    ta.classList.toggle('wrap', !!_cc.o.wrap); bdi.classList.toggle('wrap', !!_cc.o.wrap);
+  });
+  ccLiveRefresh();
+}
+function ccLiveSchedule() {
+  clearTimeout(_ccT);
+  const n = ccLines(_cc.L).length + ccLines(_cc.R).length;
+  _ccT = setTimeout(ccLiveRefresh, n > 6000 ? 450 : 120);
+}
+function ccFlush() { if (_ccT && _cc.mode === 'live') ccLiveRefresh(); }
+function ccLiveRefresh() {
+  clearTimeout(_ccT); _ccT = 0;
+  if (!document.getElementById('cc-live')) return;
+  if (ccBothHave()) { ccCompute(); ccBuildMap(); } else { _cc.rows = []; _cc.blocks = []; _cc.cur = -1; _cc.mapLR = _cc.mapRL = null; }
+  ccPaintBd(); ccLayoutBd(); ccDraw(); ccUpdateBar();
+}
+function ccBuildMap() {
+  const A = ccLines(_cc.L).length, B = ccLines(_cc.R).length, lr = new Float64Array(A), rl = new Float64Array(B);
+  _cc.rows.forEach(r => { if (r.k === 'e') { lr[r.l] = r.r; rl[r.r] = r.l; } });
+  _cc.blocks.forEach(bl => {
+    for (let q = 0; q < bl.na; q++) lr[bl.a0 + q] = bl.nb ? bl.b0 + q * bl.nb / bl.na : bl.b0;
+    for (let q = 0; q < bl.nb; q++) rl[bl.b0 + q] = bl.na ? bl.a0 + q * bl.na / bl.nb : bl.a0;
+  });
+  _cc.mapLR = lr; _cc.mapRL = rl;
+}
+function ccMarkHtml(text, rs, mk) {
+  if (!rs || !rs.length) return esc(text);
+  let out = '', p = 0;
+  rs.forEach(r => { out += esc(text.slice(p, r[0])) + '<mark class="' + mk + '">' + esc(text.slice(r[0], r[1])) + '</mark>'; p = r[1]; });
+  return out + esc(text.slice(p));
+}
+function ccPaintBd() {
+  const both = ccBothHave(), A = ccLines(_cc.L), B = ccLines(_cc.R);
+  const cls = { L: new Array(A.length), R: new Array(B.length) }, rng = { L: {}, R: {} };
+  if (both) {
+    const wordOk = _cc.o.word && _cc.rows.length < 6000;
+    _cc.rows.forEach(r => {
+      if (r.k !== 'c') return;
+      const cur = r.blk === _cc.cur ? ' cur' : '';
+      if (r.l >= 0) cls.L[r.l] = ' del' + cur;
+      if (r.r >= 0) cls.R[r.r] = ' add' + cur;
+      if (wordOk && r.l >= 0 && r.r >= 0) { const ir = ccInline(A[r.l], B[r.r]); if (ir[0].length) rng.L[r.l] = ir[0]; if (ir[1].length) rng.R[r.r] = ir[1]; }
+    });
+  }
+  ['L', 'R'].forEach(S => {
+    const lines = S === 'L' ? A : B; let h = '';
+    for (let i = 0; i < lines.length; i++) h += '<div class="cc-bl' + (cls[S][i] || '') + '">' + (lines[i] === '' ? '\u200b' : ccMarkHtml(lines[i], rng[S][i], S === 'L' ? 'd' : 'a')) + '</div>';
+    document.getElementById('cc-bdi-' + S).innerHTML = h;
+  });
+}
+function ccLayoutBd() {
+  ['L', 'R'].forEach(S => {
+    const ta = document.getElementById('cc-ta-' + S), bdi = document.getElementById('cc-bdi-' + S), bd = document.getElementById('cc-bd-' + S);
+    if (!ta || !bdi) return;
+    if (_cc.o.wrap) bdi.style.width = ta.clientWidth + 'px'; else bdi.style.width = '';
+    bd.scrollTop = ta.scrollTop; bd.scrollLeft = ta.scrollLeft;
+  });
+}
+function ccLineAt(ch, y) { let lo = 0, hi = ch.length - 1; while (lo < hi) { const m = (lo + hi + 1) >> 1; if (ch[m].offsetTop <= y) lo = m; else hi = m - 1; } return lo; }
+function ccOnScroll(S) {
+  const ta = document.getElementById('cc-ta-' + S), bd = document.getElementById('cc-bd-' + S); if (!ta || !bd) return;
+  bd.scrollTop = ta.scrollTop; bd.scrollLeft = ta.scrollLeft;
+  if (_ccLock && _ccLock.S === S && Date.now() - _ccLock.t < 250) { _ccLock = null; ccDrawSoon(); return; }
+  const O = S === 'L' ? 'R' : 'L', map = S === 'L' ? _cc.mapLR : _cc.mapRL, gut = document.getElementById('cc-gut');
+  if (map && gut && gut.offsetWidth > 5) {
+    const chX = document.getElementById('cc-bdi-' + S).children, chY = document.getElementById('cc-bdi-' + O).children;
+    if (chX.length && chY.length && map.length === chX.length) {
+      const i0 = ccLineAt(chX, ta.scrollTop), off = ta.scrollTop - chX[i0].offsetTop, mp = map[i0], j = Math.min(Math.floor(mp), chY.length - 1), fr = mp - Math.floor(mp);
+      const oa = document.getElementById('cc-ta-' + O), before = oa.scrollTop;
+      oa.scrollTop = chY[j].offsetTop + fr * chY[j].offsetHeight + off;
+      if (Math.abs(oa.scrollTop - before) >= 1) _ccLock = { S: O, t: Date.now() };
+      document.getElementById('cc-bd-' + O).scrollTop = oa.scrollTop;
+    }
+  }
+  ccDrawSoon();
+}
+function ccDrawSoon() { if (_ccRaf) return; _ccRaf = requestAnimationFrame(() => { _ccRaf = 0; ccDraw(); }); }
+function ccDraw() {
+  const svg = document.getElementById('cc-svg'), gb = document.getElementById('cc-gbtns'), gut = document.getElementById('cc-gut');
+  if (!svg || !gut) return;
+  const w = gut.clientWidth, h = gut.clientHeight;
+  svg.setAttribute('width', w); svg.setAttribute('height', h); svg.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
+  if (!_cc.blocks.length || w < 5) { svg.innerHTML = ''; gb.innerHTML = ''; return; }
+  const geo = S => ({ ch: document.getElementById('cc-bdi-' + S).children, st: document.getElementById('cc-ta-' + S).scrollTop });
+  const GL = geo('L'), GR = geo('R');
+  const yTop = (G, i) => { const n = G.ch.length; if (!n) return 0; if (i < n) return G.ch[i].offsetTop - G.st; const l = G.ch[n - 1]; return l.offsetTop + l.offsetHeight - G.st; };
+  const yBot = (G, i, c) => { if (!c) return yTop(G, i); const e = G.ch[Math.min(i + c - 1, G.ch.length - 1)]; return e.offsetTop + e.offsetHeight - G.st; };
+  const cx = w / 2; let paths = '', btns = '';
+  _cc.blocks.forEach(bl => {
+    const l1 = yTop(GL, bl.a0), l2 = Math.max(yBot(GL, bl.a0, bl.na), l1 + 2), r1 = yTop(GR, bl.b0), r2 = Math.max(yBot(GR, bl.b0, bl.nb), r1 + 2);
+    if ((l2 < 0 && r2 < 0) || (l1 > h && r1 > h)) return;
+    const kind = !bl.nb ? 'del' : !bl.na ? 'add' : 'chg';
+    paths += '<path class="cc-rb ' + kind + (bl.id === _cc.cur ? ' cur' : '') + '" d="M0 ' + l1 + ' C ' + cx + ' ' + l1 + ' ' + cx + ' ' + r1 + ' ' + w + ' ' + r1 + ' L ' + w + ' ' + r2 + ' C ' + cx + ' ' + r2 + ' ' + cx + ' ' + l2 + ' 0 ' + l2 + ' Z"/>';
+    const cy = Math.min(Math.max((Math.min(l1, r1) + Math.max(l2, r2)) / 2 - 10, 2), h - 22);
+    btns += '<div class="cc-gb" style="top:' + cy + 'px"><button type="button" class="cc-xb" onclick="ccXfer(' + bl.id + ',\'LR\')" title="Apply this change to the right side" aria-label="Apply to right">&rarr;</button><button type="button" class="cc-xb" onclick="ccXfer(' + bl.id + ',\'RL\')" title="Apply this change to the left side" aria-label="Apply to left">&larr;</button></div>';
+  });
+  svg.innerHTML = paths; gb.innerHTML = btns;
+}
+function ccGoLive(d) {
+  ccFlush();
+  const n = _cc.blocks.length; if (!n) return;
+  _cc.cur = _cc.cur < 0 ? (d > 0 ? 0 : n - 1) : (_cc.cur + d + n) % n;
+  ccPaintBd();
+  const bl = _cc.blocks[_cc.cur], S = bl.na > 0 ? 'L' : 'R', ta = document.getElementById('cc-ta-' + S), ch = document.getElementById('cc-bdi-' + S).children;
+  const el = ch[Math.min(S === 'L' ? bl.a0 : bl.b0, ch.length - 1)];
+  if (el) ta.scrollTop = Math.max(0, el.offsetTop - ta.clientHeight / 3);
+  ccDraw(); ccUpdateBar();
+}
+function ccToggleOpts(e) { if (e) e.stopPropagation(); const o = document.getElementById('cc-opts'); if (o) o.classList.toggle('hidden'); }
+document.addEventListener('click', (e) => { const o = document.getElementById('cc-opts'); if (o && !o.classList.contains('hidden') && !e.target.closest('.cc-opts, #cc-opt-btn')) o.classList.add('hidden'); });
+function ccToggleHeads() { const el = document.getElementById('cc-overlay'); el.classList.toggle('cc-nohead'); ccSyncToolBtns(); setTimeout(() => { ccLayoutBd(); ccDraw(); }, 0); }
+function ccToggleFull() {
+  const el = document.getElementById('cc-overlay'), on = !el.classList.contains('cc-full');
+  el.classList.toggle('cc-full', on); _cc.fsApi = false;
+  try {
+    if (on && el.requestFullscreen) { _cc.fsApi = true; el.requestFullscreen().catch(() => { _cc.fsApi = false; }); }
+    else if (!on && document.fullscreenElement) document.exitFullscreen();
+  } catch (e) {}
+  ccSyncToolBtns();
+}
+document.addEventListener('fullscreenchange', () => {
+  const el = document.getElementById('cc-overlay');
+  if (el && _cc && _cc.fsApi && !document.fullscreenElement) { el.classList.remove('cc-full'); _cc.fsApi = false; ccSyncToolBtns(); }
+  if (el && ccIsOpen()) setTimeout(() => { ccLayoutBd(); ccDraw(); }, 50);
+});
+function ccSyncToolBtns() {
+  const el = document.getElementById('cc-overlay'); if (!el) return;
+  const fs = document.getElementById('cc-fs'), hh = document.getElementById('cc-hh'), full = el.classList.contains('cc-full'), nh = el.classList.contains('cc-nohead');
+  if (fs) { fs.classList.toggle('on', full); fs.title = full ? 'Exit full screen' : 'Full screen'; fs.querySelector('i').className = 'ti ' + (full ? 'ti-arrows-minimize' : 'ti-arrows-maximize'); }
+  if (hh) { hh.classList.toggle('on', nh); hh.title = nh ? 'Show the file bars' : 'Hide the file bars to get more code area'; }
+}
+
+// ── rendering ─────────────────────────────────────────────────────────────────
+function ccRenderDiff(keep) {
+  ccInit();
+  const main = document.getElementById('cc-main'); if (!main) return;
+  const st = keep ? main.scrollTop : 0, sl = keep ? main.scrollLeft : 0;
+  clearTimeout(_ccT); _ccT = 0;
   ccCompute();
   const rows = _cc.rows, n = rows.length, o = _cc.o, L = _cc.L, R = _cc.R, A = ccLines(L), B = ccLines(R), TA = ccToks(L), TB = ccToks(R);
   const collapse = o.collapse || n > 4000, vis = new Uint8Array(n);
@@ -26549,7 +26768,7 @@ function ccRender(keep) {
 }
 function ccExpand(i) { _cc.exp.add(i); ccRender(true); }
 function ccGo(d) {
-  if (_cc.mode !== 'diff') { ccSetMode('diff'); }
+  if (_cc.mode === 'live') { ccGoLive(d); return; }
   const n = _cc.blocks.length; if (!n) return;
   _cc.cur = _cc.cur < 0 ? (d > 0 ? 0 : n - 1) : (_cc.cur + d + n) % n;
   document.querySelectorAll('#cc-main tr.cc-cur').forEach(t => t.classList.remove('cc-cur'));
@@ -26558,12 +26777,12 @@ function ccGo(d) {
   if (trs[0]) trs[0].scrollIntoView({ block: 'center' });
   ccUpdateBar();
 }
-
 // ── editing / transfer ────────────────────────────────────────────────────────
-function ccTaInput(S, el) { const sd = _cc[S]; sd.text = el.value; ccTouch(sd); sd.dirty = true; }
+function ccTaInput(S, el) { const sd = _cc[S]; sd.text = el.value; ccTouch(sd); sd.dirty = true; if (_cc.mode === 'live') ccLiveSchedule(); }
 function ccPushUndo() { _cc.undo.push({ L: _cc.L.text, R: _cc.R.text }); if (_cc.undo.length > 50) _cc.undo.shift(); }
 function ccSetLines(S, lines) { const sd = _cc[S]; sd.text = lines.join(sd.eol); ccTouch(sd); sd.dirty = true; }
 function ccXfer(id, dir) {
+  ccFlush();
   const bl = _cc.blocks[id]; if (!bl) return;
   const a = ccLines(_cc.L).slice(), b = ccLines(_cc.R).slice(); ccPushUndo();
   if (dir === 'LR') { b.splice(bl.b0, bl.nb, ...a.slice(bl.a0, bl.a0 + bl.na)); ccSetLines('R', b); }
@@ -26571,8 +26790,7 @@ function ccXfer(id, dir) {
   _cc.exp.clear(); ccRender(true);
 }
 function ccApplyAll(dir) {
-  if (_cc.mode !== 'diff') ccSetMode('diff');
-  ccPushUndo();
+  ccFlush(); ccPushUndo();
   if (dir === 'LR') ccSetLines('R', ccLines(_cc.L).slice()); else ccSetLines('L', ccLines(_cc.R).slice());
   _cc.exp.clear(); ccRender(true);
 }
@@ -26597,7 +26815,7 @@ async function ccLoadFile(S, f, handle) {
   ccAfterLoad();
 }
 async function ccPaste(S) {
-  try { const t = await navigator.clipboard.readText(); ccSetText(S, t, '', null); ccAfterLoad(true); } catch (e) { if (_cc.mode !== 'edit') ccSetMode('edit'); const ta = document.getElementById('cc-ta-' + S); if (ta) ta.focus(); }
+  try { const t = await navigator.clipboard.readText(); ccSetText(S, t, '', null); ccAfterLoad(true); } catch (e) { if (_cc.mode !== 'live') ccSetMode('live'); const ta = document.getElementById('cc-ta-' + S); if (ta) ta.focus(); }
 }
 function ccClearSide(S) { ccSetText(S, '', '', null); _cc[S].msg = ''; ccRenderHeads(); ccRender(true); }
 function ccCopy(S, btn) {
@@ -26617,13 +26835,10 @@ async function ccSave(S, btn) {
     const w = await sd.handle.createWritable(); await w.write(sd.text); await w.close(); sd.dirty = false; ccFlash(btn, '<i class="ti ti-check"></i> Saved');
   } catch (e) { ccFlash(btn, '<i class="ti ti-alert-triangle"></i> Failed'); }
 }
-function ccAfterLoad(stayEdit) {
+function ccAfterLoad() {
   ccRenderHeads(); ccRenderFiles();
-  if (!stayEdit && ccHas(_cc.L) && ccHas(_cc.R)) _cc.mode = 'diff';
-  else if (stayEdit && _cc.mode === 'diff') _cc.mode = 'diff';
   _cc.exp.clear(); _cc.cur = -1; ccRender();
 }
-
 // ── Lambda mode (Code Backup folder) ──────────────────────────────────────────
 async function ccLoadFns(ask) {
   _cc.fnErr = ''; _cc.needPerm = false;
@@ -26722,7 +26937,7 @@ async function ccOpenScan(i) {
   await Promise.all([ccPickFile('L', r.lp, false, true), ccPickFile('R', r.rp, false, true)]);
   _cc.L.msg = r.lp ? _cc.L.msg : 'Not present in this Lambda.'; _cc.R.msg = r.rp ? _cc.R.msg : 'Not present in this Lambda.';
   _cc.L.name = r.lp; _cc.R.name = r.rp;
-  _cc.mode = 'diff'; _cc.exp.clear(); _cc.cur = -1; ccRenderHeads(); ccRenderFiles(); ccRender();
+  _cc.exp.clear(); _cc.cur = -1; ccRenderHeads(); ccRenderFiles(); ccRender();
 }
 function ccScanIdx() { const p = (_cc.L.filePath || _cc.R.filePath || '').toLowerCase(); return (_cc.scan || []).findIndex(r => r.p.toLowerCase() === p); }
 function ccFileStep(d) {
@@ -26759,7 +26974,7 @@ function ccHeadHtml(S) {
   if (sd.msg) h += '<div class="cc-msg' + (/not shown|larger|Could not|Not present/.test(sd.msg) ? ' bad' : '') + '">' + esc(sd.msg) + '</div>';
   return h + '</div>';
 }
-function ccRenderHeads() { ccInit(); const el = document.getElementById('cc-heads'); if (el) el.innerHTML = ccHeadHtml('L') + ccHeadHtml('R'); ccSyncOptUi(); }
+function ccRenderHeads() { ccInit(); const el = document.getElementById('cc-heads'); if (el) el.innerHTML = ccHeadHtml('L') + '<div class="cc-head-gap"></div>' + ccHeadHtml('R'); ccSyncOptUi(); }
 function ccRenderFiles() {
   const el = document.getElementById('cc-files'); if (!el) return;
   if (!_cc.lambda || (!_cc.L.files.length && !_cc.R.files.length)) { el.classList.add('hidden'); el.innerHTML = ''; return; }
