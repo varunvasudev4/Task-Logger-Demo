@@ -1382,6 +1382,17 @@ tbody td:first-child { color: var(--text-primary); font-weight: 500; }
 .tzc-native { position: absolute; right: 0; top: 30px; width: 1px; height: 1px; opacity: 0; pointer-events: none; border: 0; padding: 0; }
 .tzc-row { display: flex; align-items: flex-end; gap: 8px; }
 .tzc-row .meta-field { flex: 1; }
+.tzc-cb { position: relative; }
+.tzc-cb .meta-input { padding-right: 26px; width: 100%; }
+.tzc-cbi { position: absolute; right: 8px; top: 9px; font-size: 13px; color: var(--text-tertiary); pointer-events: none; }
+.tzc-list { position: fixed; z-index: 3000; max-height: 220px; overflow-y: auto; background: var(--bg); border: 1px solid var(--border-md); border-radius: var(--radius-md); box-shadow: 0 8px 24px rgba(0,0,0,0.25); padding: 4px; }
+.tzc-list.hidden { display: none; }
+.tzc-opt { padding: 6px 8px; font-size: 12.5px; border-radius: 4px; cursor: pointer; color: var(--text-primary); display: flex; justify-content: space-between; gap: 8px; }
+.tzc-opt small { color: var(--text-tertiary); font-size: 11px; white-space: nowrap; }
+.tzc-opt.act, .tzc-opt:hover { background: var(--bg-secondary); }
+.tzc-opt.sel { color: var(--blue-mid); font-weight: 600; }
+.tzc-grp { padding: 6px 8px 2px; font-size: 10.5px; letter-spacing: .05em; text-transform: uppercase; color: var(--text-tertiary); }
+.tzc-none { padding: 8px; font-size: 12px; color: var(--text-tertiary); }
 .tzc-msg { font-size: 11.5px; min-height: 15px; color: var(--text-tertiary); }
 .tzc-msg.err { color: var(--red-mid); }
 .tzc-result { border: 1px solid var(--border-md); border-radius: var(--radius-md); background: var(--bg-secondary); padding: 12px 14px; display: flex; align-items: center; gap: 10px; }
@@ -2384,6 +2395,7 @@ tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--blue-mid); }
 .cc-kw, .cc-tg { color: var(--purple-dark); } .cc-st { color: var(--green-dark); } .cc-cm { color: var(--text-tertiary); font-style: italic; }
 .cc-nu { color: var(--blue-mid); } .cc-at, .cc-pr { color: var(--blue-dark); }
 
+@media (max-width: 700px) { #cc-menu-btn { display: none !important; } }
 /* Code Compare v2: one compact top bar, live editable panes with in-place highlighting + connector ribbons, full screen */
 .cc-top { flex-wrap: wrap; justify-content: flex-start; gap: 6px 10px; padding: 6px 10px; padding-top: max(6px, env(safe-area-inset-top, 0px)); }
 .cc-top .ttl-hdr-widget { margin-left: 0; margin-right: 0; }
@@ -2859,12 +2871,13 @@ tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--blue-mid); }
         <div class="tzc-msg" id="tzc-msg"></div>
       </div>
       <div class="tzc-row">
-        <div class="meta-field"><label class="meta-label" for="tzc-from">From</label><select class="meta-select" id="tzc-from" onchange="tzcUpdate()"><option value="Asia/Kolkata">India (IST)</option><option value="Pacific/Auckland">New Zealand (NZST/NZDT)</option><option value="UTC">UTC</option><option value="Europe/London">UK (GMT/BST)</option><option value="Europe/Paris">Central Europe (CET/CEST)</option><option value="Asia/Dubai">Dubai (GST)</option><option value="Asia/Singapore">Singapore (SGT)</option><option value="Asia/Hong_Kong">Hong Kong (HKT)</option><option value="Asia/Tokyo">Japan (JST)</option><option value="Australia/Sydney">Sydney (AEST/AEDT)</option><option value="America/New_York">US Eastern (ET)</option><option value="America/Chicago">US Central (CT)</option><option value="America/Denver">US Mountain (MT)</option><option value="America/Los_Angeles">US Pacific (PT)</option></select></div>
+        <div class="meta-field"><label class="meta-label" for="tzc-from-q">From</label><div class="tzc-cb"><input type="text" class="meta-input" id="tzc-from-q" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="false" aria-autocomplete="list" placeholder="Search zone or city" onfocus="tzcCbOpen('from')" onclick="tzcCbOpen('from')" oninput="tzcCbFilter('from')" onkeydown="tzcCbKey(event,'from')"><input type="hidden" id="tzc-from"><i class="ti ti-chevron-down tzc-cbi"></i></div></div>
         <button type="button" class="btn-icon" onclick="tzcSwap()" title="Swap zones" aria-label="Swap zones"><i class="ti ti-arrows-exchange"></i></button>
-        <div class="meta-field"><label class="meta-label" for="tzc-to">To</label><select class="meta-select" id="tzc-to" onchange="tzcUpdate()"><option value="Asia/Kolkata">India (IST)</option><option value="Pacific/Auckland">New Zealand (NZST/NZDT)</option><option value="UTC">UTC</option><option value="Europe/London">UK (GMT/BST)</option><option value="Europe/Paris">Central Europe (CET/CEST)</option><option value="Asia/Dubai">Dubai (GST)</option><option value="Asia/Singapore">Singapore (SGT)</option><option value="Asia/Hong_Kong">Hong Kong (HKT)</option><option value="Asia/Tokyo">Japan (JST)</option><option value="Australia/Sydney">Sydney (AEST/AEDT)</option><option value="America/New_York">US Eastern (ET)</option><option value="America/Chicago">US Central (CT)</option><option value="America/Denver">US Mountain (MT)</option><option value="America/Los_Angeles">US Pacific (PT)</option></select></div>
+        <div class="meta-field"><label class="meta-label" for="tzc-to-q">To</label><div class="tzc-cb"><input type="text" class="meta-input" id="tzc-to-q" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="false" aria-autocomplete="list" placeholder="Search zone or city" onfocus="tzcCbOpen('to')" onclick="tzcCbOpen('to')" oninput="tzcCbFilter('to')" onkeydown="tzcCbKey(event,'to')"><input type="hidden" id="tzc-to"><i class="ti ti-chevron-down tzc-cbi"></i></div></div>
       </div>
       <div class="tzc-result empty" id="tzc-result">Enter a date and time to convert</div>
     </div>
+    <div class="tzc-list hidden" id="tzc-list" role="listbox"></div>
     <div class="modal-footer">
       <button type="button" class="btn" onclick="tzcNow()" title="Fill in the current time"><i class="ti ti-clock"></i> Now</button>
       <button type="button" class="btn" id="tzc-copy" onclick="tzcCopy(this)" disabled><i class="ti ti-clipboard-copy"></i> Copy result</button>
@@ -23710,7 +23723,7 @@ function renderSearchResults() {
     return;
   }
 
-  const sorted = [...hits].sort((a, b) => b.sortTs - a.sortTs).slice(0, 80);
+  const sorted = [...hits].sort((a, b) => b.sortTs - a.sortTs).slice(0, 600);
 
   // History index: every log entry grouped by task identity — ticket when present, else
   // task name + project + module (same rule the Pending popup uses). Newest first.
@@ -26201,19 +26214,81 @@ document.addEventListener('keydown', (e) => {
 // Small popup from More ▾ → Utilities. The text box takes a date-time string (validated live); the calendar icon
 // opens the native date-time picker. The typed time is read as wall-clock time in the "From" zone, then shown in "To".
 // Zones are IANA names, so daylight saving (e.g. NZST/NZDT) is handled automatically. Nothing is stored or sent.
+const _TZC_POP = [
+  ['Asia/Kolkata', 'India (IST)', 'india ist mumbai delhi'], ['Pacific/Auckland', 'New Zealand (NZST/NZDT)', 'nz nzst nzdt wellington'], ['UTC', 'UTC', 'gmt utc zulu'],
+  ['Europe/London', 'UK (GMT/BST)', 'uk britain gmt bst'], ['Europe/Paris', 'Central Europe (CET/CEST)', 'cet cest berlin madrid rome'], ['Asia/Dubai', 'Dubai (GST)', 'uae gst gulf'],
+  ['Asia/Singapore', 'Singapore (SGT)', 'sgt'], ['Asia/Hong_Kong', 'Hong Kong (HKT)', 'hkt'], ['Asia/Tokyo', 'Japan (JST)', 'jst'], ['Australia/Sydney', 'Sydney (AEST/AEDT)', 'australia aest aedt melbourne'],
+  ['America/New_York', 'US Eastern (ET)', 'est edt eastern usa'], ['America/Chicago', 'US Central (CT)', 'cst cdt central usa'], ['America/Denver', 'US Mountain (MT)', 'mst mdt mountain usa'], ['America/Los_Angeles', 'US Pacific (PT)', 'pst pdt pacific usa california']
+];
+let _tzcAll = null, _tzcCbId = null, _tzcAct = 0;
+function tzcZones() {
+  if (_tzcAll) return _tzcAll;
+  const pop = _TZC_POP.map(z => ({ z: z[0], label: z[1], kw: z[2], pop: true }));
+  const seen = new Set(pop.map(x => x.z)), list = pop.slice();
+  let local = ''; try { local = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) {}
+  if (local && !seen.has(local)) { list.unshift({ z: local, label: 'Your time zone (' + local.replace(/_/g, ' ') + ')', kw: 'local browser my', pop: true }); seen.add(local); }
+  let all = []; try { all = Intl.supportedValuesOf('timeZone'); } catch (e) {}
+  all.forEach(z => { if (!seen.has(z)) { seen.add(z); list.push({ z, label: z.replace(/_/g, ' '), kw: '', pop: false }); } });
+  return (_tzcAll = list);
+}
+function tzcLabel(zone) { const f = tzcZones().find(x => x.z === zone); return f ? f.label : String(zone).replace(/_/g, ' '); }
+function tzcSetZone(id, zone) { document.getElementById('tzc-' + id).value = zone; document.getElementById('tzc-' + id + '-q').value = tzcLabel(zone); }
+function tzcCbOpen(id) {
+  _tzcCbId = id;
+  const q = document.getElementById('tzc-' + id + '-q'); try { q.select(); } catch (e) {}
+  tzcCbFilter(id, true);
+}
+function tzcCbFilter(id, showAll) {
+  _tzcCbId = id;
+  const q = document.getElementById('tzc-' + id + '-q'), box = document.getElementById('tzc-list'), cur = document.getElementById('tzc-' + id).value;
+  const term = showAll ? '' : q.value.trim().toLowerCase().replace(/_/g, ' ');
+  const hit = z => !term || (z.label + ' ' + z.z.replace(/_/g, ' ') + ' ' + z.kw).toLowerCase().includes(term);
+  const items = tzcZones().filter(hit).slice(0, 600);
+  let h = '', i = 0, lastPop = null;
+  items.forEach(z => {
+    if (!term && lastPop !== z.pop) { h += '<div class="tzc-grp">' + (z.pop ? 'Common' : 'All zones') + '</div>'; lastPop = z.pop; }
+    h += '<div class="tzc-opt' + (z.z === cur ? ' sel' : '') + '" role="option" data-i="' + i + '" data-z="' + escHtmlTzc(z.z) + '" onmousedown="event.preventDefault();tzcCbPick(\'' + id + '\',this.dataset.z)"><span>' + escHtmlTzc(z.label) + '</span>' + (z.pop ? '' : '') + '</div>';
+    i++;
+  });
+  if (!items.length) h = '<div class="tzc-none">No matching time zone</div>';
+  box.innerHTML = h; _tzcAct = 0;
+  const first = box.querySelector('.tzc-opt'); if (first) first.classList.add('act');
+  const r = q.getBoundingClientRect(), below = window.innerHeight - r.bottom, mh = 220;
+  box.style.left = r.left + 'px'; box.style.width = r.width + 'px';
+  if (below < mh + 10 && r.top > below) { box.style.top = ''; box.style.bottom = (window.innerHeight - r.top + 4) + 'px'; } else { box.style.bottom = ''; box.style.top = (r.bottom + 4) + 'px'; }
+  box.classList.remove('hidden'); q.setAttribute('aria-expanded', 'true');
+  if (!term) { const s = box.querySelector('.sel'); if (s) box.scrollTop = Math.max(0, s.offsetTop - 60); }
+}
+function tzcCbClose() {
+  const box = document.getElementById('tzc-list'); if (box) box.classList.add('hidden');
+  ['from', 'to'].forEach(id => { const q = document.getElementById('tzc-' + id + '-q'); if (q) { q.setAttribute('aria-expanded', 'false'); const v = document.getElementById('tzc-' + id).value; if (v) q.value = tzcLabel(v); } });
+  _tzcCbId = null;
+}
+function tzcCbPick(id, zone) { tzcSetZone(id, zone); tzcCbClose(); tzcUpdate(); }
+function tzcCbKey(e, id) {
+  const box = document.getElementById('tzc-list'), opts = box ? Array.from(box.querySelectorAll('.tzc-opt')) : [];
+  if (box.classList.contains('hidden') && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) { tzcCbOpen(id); e.preventDefault(); return; }
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault(); if (!opts.length) return;
+    opts[_tzcAct] && opts[_tzcAct].classList.remove('act');
+    _tzcAct = (_tzcAct + (e.key === 'ArrowDown' ? 1 : -1) + opts.length) % opts.length;
+    opts[_tzcAct].classList.add('act'); opts[_tzcAct].scrollIntoView({ block: 'nearest' });
+  } else if (e.key === 'Enter') { e.preventDefault(); if (opts[_tzcAct]) tzcCbPick(id, opts[_tzcAct].dataset.z); }
+  else if (e.key === 'Tab') tzcCbClose();
+}
+document.addEventListener('mousedown', (e) => { const b = document.getElementById('tzc-list'); if (b && !b.classList.contains('hidden') && !e.target.closest('.tzc-cb, #tzc-list')) tzcCbClose(); });
 let _tzcUtc = null, _tzcText = '';
 function tzcIsOpen() { const el = document.getElementById('tzc-modal'); return !!(el && !el.classList.contains('hidden')); }
 function openTzConv() {
   try { closeMoreMenu(); } catch (e) {}
   const el = document.getElementById('tzc-modal'); if (!el) return;
-  const f = document.getElementById('tzc-from'), t = document.getElementById('tzc-to');
-  if (!el.dataset.init) { f.value = 'Asia/Kolkata'; t.value = 'Pacific/Auckland'; el.dataset.init = '1'; }
+  if (!el.dataset.init) { tzcSetZone('from', 'Asia/Kolkata'); tzcSetZone('to', 'Pacific/Auckland'); el.dataset.init = '1'; }
   el.classList.remove('hidden');
   tzcUpdate();
   const inp = document.getElementById('tzc-input');
   if (inp && !document.documentElement.classList.contains('is-touch')) inp.focus();
 }
-function closeTzConv() { const el = document.getElementById('tzc-modal'); if (el) el.classList.add('hidden'); }
+function closeTzConv() { tzcCbClose(); const el = document.getElementById('tzc-modal'); if (el) el.classList.add('hidden'); }
 // Offset (ms) of a zone at a given UTC instant
 function tzcOffset(utcMs, zone) {
   const p = {};
@@ -26296,7 +26371,7 @@ function tzcUpdate() {
   const diff = tzcOffset(utc, to) - tzcOffset(utc, from);
   const dh = Math.abs(diff) / 3600000;
   const dTxt = diff === 0 ? 'same offset' : (Math.floor(dh) + (dh % 1 ? ':' + String(Math.round((dh % 1) * 60)).padStart(2, '0') : '') + ' h ' + (diff > 0 ? 'ahead of' : 'behind') + ' ' + (src.abbr || 'source'));
-  const toSel = document.getElementById('tzc-to'), toName = toSel.options[toSel.selectedIndex].text;
+  const toName = tzcLabel(to);
   _tzcUtc = utc;
   _tzcText = r.date + ' ' + r.time + ' ' + (r.abbr || toName);
   res.className = 'tzc-result';
@@ -26319,14 +26394,9 @@ function tzcPicked(v) {
   tzcUpdate();
 }
 function tzcSwap() {
-  const f = document.getElementById('tzc-from'), t = document.getElementById('tzc-to'), inp = document.getElementById('tzc-input');
-  if (_tzcUtc !== null) {   // carry the converted time over so the swap round-trips
-    const p = tzcFmt(_tzcUtc, t.value), z = x => String(x).padStart(2, '0');
-    const dt = new Date(_tzcUtc);
-    const parts = {}; new Intl.DateTimeFormat('en-US', { timeZone: t.value, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).formatToParts(dt).forEach(x => { parts[x.type] = x.value; });
-    inp.value = parts.year + '-' + parts.month + '-' + parts.day + ' ' + parts.hour + ':' + parts.minute;
-  }
-  const tmp = f.value; f.value = t.value; t.value = tmp;
+  // Only the zones swap; the typed date-time stays as entered and is read in the new "From" zone.
+  const a = document.getElementById('tzc-from').value, b = document.getElementById('tzc-to').value;
+  tzcSetZone('from', b); tzcSetZone('to', a);
   tzcUpdate();
 }
 function tzcNow() {
@@ -26341,7 +26411,7 @@ function tzcCopy(btn) {
   try { navigator.clipboard.writeText(_tzcText).then(done, () => {}); } catch (e) {}
 }
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && tzcIsOpen()) { e.stopImmediatePropagation(); e.preventDefault(); closeTzConv(); }
+  if (e.key === 'Escape' && tzcIsOpen()) { e.stopImmediatePropagation(); e.preventDefault(); const lb = document.getElementById('tzc-list'); if (lb && !lb.classList.contains('hidden')) tzcCbClose(); else closeTzConv(); }
 }, true);
 
 // ── Utilities → Code Compare ──────────────────────────────────────────────────
@@ -26439,8 +26509,11 @@ function ccHas(sd) { return !!(sd.text || sd.filePath || sd.name); }
 function ccIsOpen() { const el = document.getElementById('cc-overlay'); return !!(el && !el.classList.contains('hidden')); }
 
 // ── open / close ──────────────────────────────────────────────────────────────
+function ccNarrow() { return window.matchMedia && window.matchMedia('(max-width: 700px)').matches; }
+window.addEventListener('resize', () => { if (ccNarrow() && ccIsOpen()) closeCodeCompare(); });
 function openCodeCompare() {
   try { closeMoreMenu(); } catch (e) {}
+  if (ccNarrow()) return;   // Code Compare needs two panes side by side: not offered on phones / narrow screens
   const el = document.getElementById('cc-overlay'); if (!el) return;
   ccInit();
   el.classList.remove('hidden');
