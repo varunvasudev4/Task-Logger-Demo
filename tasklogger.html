@@ -1371,6 +1371,25 @@ tbody td:first-child { color: var(--text-primary); font-weight: 500; }
 .modal-body { padding: 16px 20px; overflow-y: auto; flex: 1; }
 .modal-footer { padding: 12px 20px; border-top: 1px solid var(--border); display: flex; gap: 8px; justify-content: flex-end; }
 
+
+/* ── Utilities → Time Zone Converter (small popup) ── */
+#tzc-modal .modal { max-width: 440px; }
+#tzc-modal .modal-body { display: flex; flex-direction: column; gap: 12px; }
+.tzc-inwrap { position: relative; }
+.tzc-inwrap .meta-input { padding-right: 38px; }
+.tzc-pick { position: absolute; right: 2px; top: 0; height: 32px; width: 34px; display: flex; align-items: center; justify-content: center; background: none; border: none; color: var(--text-tertiary); cursor: pointer; border-radius: var(--radius-md); font-size: 16px; }
+.tzc-pick:hover { color: var(--blue-mid); }
+.tzc-native { position: absolute; right: 0; top: 30px; width: 1px; height: 1px; opacity: 0; pointer-events: none; border: 0; padding: 0; }
+.tzc-row { display: flex; align-items: flex-end; gap: 8px; }
+.tzc-row .meta-field { flex: 1; }
+.tzc-msg { font-size: 11.5px; min-height: 15px; color: var(--text-tertiary); }
+.tzc-msg.err { color: var(--red-mid); }
+.tzc-result { border: 1px solid var(--border-md); border-radius: var(--radius-md); background: var(--bg-secondary); padding: 12px 14px; display: flex; align-items: center; gap: 10px; }
+.tzc-result.empty { color: var(--text-tertiary); font-size: 12px; justify-content: center; min-height: 52px; }
+.tzc-res-main { flex: 1; min-width: 0; }
+.tzc-res-time { font-family: var(--font-mono); font-size: 20px; font-weight: 600; color: var(--text-primary); }
+.tzc-res-sub { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+
 .complete-field { margin-bottom: 14px; }
 .complete-label {
   display: block; font-family: var(--font-mono); font-size: 10.5px; color: var(--text-tertiary);
@@ -2433,6 +2452,7 @@ tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--blue-mid); }
             <div class="more-menu-section" role="presentation">Utilities</div>
             <button class="btn" onclick="openJwtDecoder()" id="jwt-menu-btn" title="Decode a JWT token"><i class="ti ti-key"></i> JWT Decoder</button>
             <button class="btn" onclick="openB64Tool()" id="b64-menu-btn" title="Encode or decode Base64 for text and any file type"><i class="ti ti-binary"></i> Base64 Encoder / Decoder</button>
+            <button class="btn" onclick="openTzConv()" id="tzc-menu-btn" title="Convert a date and time from one time zone to another"><i class="ti ti-world-time"></i> Time Zone Converter</button>
             <button class="btn" onclick="openCodeCompare()" id="cc-menu-btn" title="Compare JS, HTML, SQL and other code side by side and transfer changes"><i class="ti ti-git-compare"></i> Code Compare</button>
           </div>
         </div>
@@ -2765,6 +2785,37 @@ tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--blue-mid); }
 </div>
 
 <!-- Edit one record of a Lambda master table (pencil on each row of Dashboard ▾ → Lambda Functions) -->
+<!-- Utilities → Time Zone Converter: small popup. Text box accepts a date-time string (validated), picker icon at the end. Default IST → New Zealand. -->
+<div class="modal-overlay hidden" id="tzc-modal" onclick="if(event.target===this)closeTzConv()">
+  <div class="modal" role="dialog" aria-modal="true" aria-label="Time Zone Converter">
+    <div class="modal-header">
+      <div class="modal-title"><i class="ti ti-world-time" style="vertical-align:-2px;margin-right:6px;color:var(--blue-mid)"></i>Time Zone Converter</div>
+      <button class="btn-icon" onclick="closeTzConv()" title="Close (Esc)" aria-label="Close"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="modal-body">
+      <div class="meta-field">
+        <label class="meta-label" for="tzc-input">Date &amp; time</label>
+        <div class="tzc-inwrap">
+          <input type="text" class="meta-input" id="tzc-input" autocomplete="off" spellcheck="false" placeholder="e.g. 2026-11-05 14:30, 05/11/2026 2:30 PM, 5 Nov 2026 14:30" oninput="tzcUpdate()">
+          <button type="button" class="tzc-pick" onclick="tzcOpenPicker()" title="Pick date and time" aria-label="Pick date and time"><i class="ti ti-calendar-time"></i></button>
+          <input type="datetime-local" class="tzc-native" id="tzc-native" step="60" tabindex="-1" aria-hidden="true" onchange="tzcPicked(this.value)">
+        </div>
+        <div class="tzc-msg" id="tzc-msg"></div>
+      </div>
+      <div class="tzc-row">
+        <div class="meta-field"><label class="meta-label" for="tzc-from">From</label><select class="meta-select" id="tzc-from" onchange="tzcUpdate()"><option value="Asia/Kolkata">India (IST)</option><option value="Pacific/Auckland">New Zealand (NZST/NZDT)</option><option value="UTC">UTC</option><option value="Europe/London">UK (GMT/BST)</option><option value="Europe/Paris">Central Europe (CET/CEST)</option><option value="Asia/Dubai">Dubai (GST)</option><option value="Asia/Singapore">Singapore (SGT)</option><option value="Asia/Hong_Kong">Hong Kong (HKT)</option><option value="Asia/Tokyo">Japan (JST)</option><option value="Australia/Sydney">Sydney (AEST/AEDT)</option><option value="America/New_York">US Eastern (ET)</option><option value="America/Chicago">US Central (CT)</option><option value="America/Denver">US Mountain (MT)</option><option value="America/Los_Angeles">US Pacific (PT)</option></select></div>
+        <button type="button" class="btn-icon" onclick="tzcSwap()" title="Swap zones" aria-label="Swap zones"><i class="ti ti-arrows-exchange"></i></button>
+        <div class="meta-field"><label class="meta-label" for="tzc-to">To</label><select class="meta-select" id="tzc-to" onchange="tzcUpdate()"><option value="Asia/Kolkata">India (IST)</option><option value="Pacific/Auckland">New Zealand (NZST/NZDT)</option><option value="UTC">UTC</option><option value="Europe/London">UK (GMT/BST)</option><option value="Europe/Paris">Central Europe (CET/CEST)</option><option value="Asia/Dubai">Dubai (GST)</option><option value="Asia/Singapore">Singapore (SGT)</option><option value="Asia/Hong_Kong">Hong Kong (HKT)</option><option value="Asia/Tokyo">Japan (JST)</option><option value="Australia/Sydney">Sydney (AEST/AEDT)</option><option value="America/New_York">US Eastern (ET)</option><option value="America/Chicago">US Central (CT)</option><option value="America/Denver">US Mountain (MT)</option><option value="America/Los_Angeles">US Pacific (PT)</option></select></div>
+      </div>
+      <div class="tzc-result empty" id="tzc-result">Enter a date and time to convert</div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn" onclick="tzcNow()" title="Fill in the current time"><i class="ti ti-clock"></i> Now</button>
+      <button type="button" class="btn" id="tzc-copy" onclick="tzcCopy(this)" disabled><i class="ti ti-clipboard-copy"></i> Copy result</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay hidden" id="lm-edit-modal">
   <div class="modal">
     <div class="modal-header">
@@ -26079,6 +26130,153 @@ function b64CopyDec(btn) {
 // Escape closes only this tool; the time tracker panel (on top of it) closes first, via its own capture listener.
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && b64IsOpen() && !ttlConsIsOpen()) { e.stopImmediatePropagation(); e.preventDefault(); closeB64Tool(); }
+}, true);
+
+// ── Utilities → Time Zone Converter ───────────────────────────────────────────
+// Small popup from More ▾ → Utilities. The text box takes a date-time string (validated live); the calendar icon
+// opens the native date-time picker. The typed time is read as wall-clock time in the "From" zone, then shown in "To".
+// Zones are IANA names, so daylight saving (e.g. NZST/NZDT) is handled automatically. Nothing is stored or sent.
+let _tzcUtc = null, _tzcText = '';
+function tzcIsOpen() { const el = document.getElementById('tzc-modal'); return !!(el && !el.classList.contains('hidden')); }
+function openTzConv() {
+  try { closeMoreMenu(); } catch (e) {}
+  const el = document.getElementById('tzc-modal'); if (!el) return;
+  const f = document.getElementById('tzc-from'), t = document.getElementById('tzc-to');
+  if (!el.dataset.init) { f.value = 'Asia/Kolkata'; t.value = 'Pacific/Auckland'; el.dataset.init = '1'; }
+  el.classList.remove('hidden');
+  tzcUpdate();
+  const inp = document.getElementById('tzc-input');
+  if (inp && !document.documentElement.classList.contains('is-touch')) inp.focus();
+}
+function closeTzConv() { const el = document.getElementById('tzc-modal'); if (el) el.classList.add('hidden'); }
+// Offset (ms) of a zone at a given UTC instant
+function tzcOffset(utcMs, zone) {
+  const p = {};
+  new Intl.DateTimeFormat('en-US', { timeZone: zone, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' })
+    .formatToParts(new Date(utcMs)).forEach(x => { p[x.type] = x.value; });
+  const asUtc = Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second);
+  return asUtc - Math.floor(utcMs / 1000) * 1000;
+}
+// Wall-clock fields in a zone → UTC ms
+function tzcWallToUtc(y, mo, d, h, mi, s, zone) {
+  const guess = Date.UTC(y, mo - 1, d, h, mi, s);
+  let u = guess - tzcOffset(guess, zone);
+  u = guess - tzcOffset(u, zone);
+  return u;
+}
+const _TZC_MON = { jan:1, feb:2, mar:3, apr:4, may:5, jun:6, jul:7, aug:8, sep:9, sept:9, oct:10, nov:11, dec:12, january:1, february:2, march:3, april:4, june:6, july:7, august:8, september:9, october:10, november:11, december:12 };
+// Parse a date-time string → { y, mo, d, h, mi, s, abs? } or null. abs = UTC ms when the string carries its own offset / Z.
+function tzcParse(str) {
+  let t = String(str || '').trim().replace(/\s+/g, ' ');
+  if (!t) return null;
+  let abs = null;
+  const zm = t.match(/(?:\s*(Z|UTC|GMT)|\s*([+-])(\d{2}):?(\d{2}))$/i);
+  let zoneMs = null;
+  if (zm && /\d[\s]*(Z|UTC|GMT|[+-]\d{2}:?\d{2})$/i.test(t)) {
+    zoneMs = zm[1] ? 0 : (zm[2] === '-' ? -1 : 1) * (+zm[3] * 60 + +zm[4]) * 60000;
+    t = t.slice(0, t.length - zm[0].length).trim();
+  }
+  // split date and time parts
+  let datePart = t, timePart = '';
+  let m = t.match(/^(.*?)(?:[T ,]+|\bat\b\s*)(\d{1,2}(?::\d{2}){0,2}(?:\.\d+)?\s*(?:[ap]\.?m\.?)?)$/i);
+  if (m) { datePart = m[1].trim(); timePart = m[2].trim(); }
+  else if (/^\d{1,2}\s*[ap]\.?m\.?$/i.test(t)) return null;
+  let y, mo, d;
+  if ((m = datePart.match(/^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})$/))) { y = +m[1]; mo = +m[2]; d = +m[3]; }
+  else if ((m = datePart.match(/^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{4})$/))) { d = +m[1]; mo = +m[2]; y = +m[3]; }   // day first (IST / NZ style)
+  else if ((m = datePart.match(/^(\d{1,2})(?:st|nd|rd|th)?[\s-]+([A-Za-z]{3,9}),?[\s-]+(\d{4})$/)) && _TZC_MON[m[2].toLowerCase()]) { d = +m[1]; mo = _TZC_MON[m[2].toLowerCase()]; y = +m[3]; }
+  else if ((m = datePart.match(/^([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})$/)) && _TZC_MON[m[1].toLowerCase()]) { mo = _TZC_MON[m[1].toLowerCase()]; d = +m[2]; y = +m[3]; }
+  else return null;
+  let h = 0, mi = 0, s = 0;
+  if (timePart) {
+    const tm = timePart.match(/^(\d{1,2})(?::(\d{2}))?(?::(\d{2}))?(?:\.\d+)?\s*([ap])?\.?m?\.?$/i);
+    if (!tm) return null;
+    h = +tm[1]; mi = tm[2] ? +tm[2] : 0; s = tm[3] ? +tm[3] : 0;
+    if (tm[4]) { if (h < 1 || h > 12) return null; h = h % 12 + (tm[4].toLowerCase() === 'p' ? 12 : 0); }
+  }
+  if (mo < 1 || mo > 12 || d < 1 || h > 23 || mi > 59 || s > 59) return null;
+  const dim = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+  if (d > dim) return null;
+  if (zoneMs !== null) abs = Date.UTC(y, mo - 1, d, h, mi, s) - zoneMs;
+  return { y, mo, d, h, mi, s, abs };
+}
+function utcMsDst(d) { return d.getTime(); }
+function tzcFmt(utcMs, zone) {
+  const dt = new Date(utcMs);
+  const date = new Intl.DateTimeFormat('en-GB', { timeZone: zone, weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' }).format(dt);
+  const time = new Intl.DateTimeFormat('en-GB', { timeZone: zone, hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }).format(dt);
+  let abbr = ''; try { abbr = new Intl.DateTimeFormat('en-US', { timeZone: zone, timeZoneName: 'short' }).formatToParts(dt).find(x => x.type === 'timeZoneName').value; } catch (e) {}
+  const dst = tzcOffset(utcMsDst(dt), zone) !== tzcOffset(Date.UTC(dt.getUTCFullYear(), 0, 1), zone) && tzcOffset(utcMsDst(dt), zone) !== tzcOffset(Date.UTC(dt.getUTCFullYear(), 6, 1), zone) ? false : tzcOffset(dt.getTime(), zone) !== Math.min(tzcOffset(Date.UTC(dt.getUTCFullYear(), 0, 1), zone), tzcOffset(Date.UTC(dt.getUTCFullYear(), 6, 1), zone));
+  const named = { 'Asia/Kolkata': 'IST', 'Asia/Dubai': 'GST', 'Asia/Singapore': 'SGT', 'Asia/Hong_Kong': 'HKT', 'Asia/Tokyo': 'JST', 'UTC': 'UTC', 'Pacific/Auckland': dst ? 'NZDT' : 'NZST', 'Australia/Sydney': dst ? 'AEDT' : 'AEST', 'Europe/London': dst ? 'BST' : 'GMT', 'Europe/Paris': dst ? 'CEST' : 'CET' };
+  if (named[zone]) abbr = named[zone];
+  return { date, time, abbr };
+}
+function tzcGmt(ms) { const sg = ms < 0 ? '-' : '+', a = Math.abs(ms) / 60000; return 'UTC' + sg + String(Math.floor(a / 60)).padStart(2, '0') + ':' + String(a % 60).padStart(2, '0'); }
+function tzcUpdate() {
+  const raw = document.getElementById('tzc-input').value;
+  const msg = document.getElementById('tzc-msg'), res = document.getElementById('tzc-result'), cp = document.getElementById('tzc-copy'), inp = document.getElementById('tzc-input');
+  const from = document.getElementById('tzc-from').value, to = document.getElementById('tzc-to').value;
+  _tzcUtc = null; _tzcText = ''; cp.disabled = true; inp.classList.remove('invalid');
+  if (!raw.trim()) { msg.className = 'tzc-msg'; msg.textContent = ''; res.className = 'tzc-result empty'; res.textContent = 'Enter a date and time to convert'; return; }
+  const p = tzcParse(raw);
+  if (!p) {
+    inp.classList.add('invalid'); msg.className = 'tzc-msg err';
+    msg.textContent = 'Not a valid date & time. Try 2026-11-05 14:30 or 05/11/2026 2:30 PM (day first).';
+    res.className = 'tzc-result empty'; res.textContent = 'Waiting for a valid date and time'; return;
+  }
+  const utc = p.abs !== null ? p.abs : tzcWallToUtc(p.y, p.mo, p.d, p.h, p.mi, p.s, from);
+  msg.className = 'tzc-msg';
+  msg.textContent = p.abs !== null ? 'Offset in the text is used; "From" zone ignored.' : '✓ Valid — read as time in the "From" zone.';
+  const r = tzcFmt(utc, to), src = tzcFmt(utc, from);
+  const diff = tzcOffset(utc, to) - tzcOffset(utc, from);
+  const dh = Math.abs(diff) / 3600000;
+  const dTxt = diff === 0 ? 'same offset' : (Math.floor(dh) + (dh % 1 ? ':' + String(Math.round((dh % 1) * 60)).padStart(2, '0') : '') + ' h ' + (diff > 0 ? 'ahead of' : 'behind') + ' ' + (src.abbr || 'source'));
+  const toSel = document.getElementById('tzc-to'), toName = toSel.options[toSel.selectedIndex].text;
+  _tzcUtc = utc;
+  _tzcText = r.date + ' ' + r.time + ' ' + (r.abbr || toName);
+  res.className = 'tzc-result';
+  res.innerHTML = '<div class="tzc-res-main"><div class="tzc-res-time">' + r.time + ' <span style="font-size:12px;font-weight:500;color:var(--text-secondary)">' + escHtmlTzc(r.abbr) + '</span></div>' +
+    '<div class="tzc-res-sub">' + escHtmlTzc(r.date) + ' · ' + escHtmlTzc(toName) + '</div>' +
+    '<div class="tzc-res-sub" style="color:var(--text-tertiary)">' + escHtmlTzc(tzcGmt(tzcOffset(utc, to))) + ' · ' + escHtmlTzc(dTxt) + '</div></div>';
+  cp.disabled = false;
+}
+function escHtmlTzc(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+function tzcOpenPicker() {
+  const n = document.getElementById('tzc-native'), p = tzcParse(document.getElementById('tzc-input').value);
+  const z = x => String(x).padStart(2, '0');
+  if (p) n.value = p.y + '-' + z(p.mo) + '-' + z(p.d) + 'T' + z(p.h) + ':' + z(p.mi);
+  try { if (n.showPicker) n.showPicker(); else { n.focus(); n.click(); } } catch (e) { try { n.focus(); n.click(); } catch (e2) {} }
+}
+function tzcPicked(v) {
+  if (!v) return;
+  const m = v.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/); if (!m) return;
+  document.getElementById('tzc-input').value = m[1] + '-' + m[2] + '-' + m[3] + ' ' + m[4] + ':' + m[5];
+  tzcUpdate();
+}
+function tzcSwap() {
+  const f = document.getElementById('tzc-from'), t = document.getElementById('tzc-to'), inp = document.getElementById('tzc-input');
+  if (_tzcUtc !== null) {   // carry the converted time over so the swap round-trips
+    const p = tzcFmt(_tzcUtc, t.value), z = x => String(x).padStart(2, '0');
+    const dt = new Date(_tzcUtc);
+    const parts = {}; new Intl.DateTimeFormat('en-US', { timeZone: t.value, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).formatToParts(dt).forEach(x => { parts[x.type] = x.value; });
+    inp.value = parts.year + '-' + parts.month + '-' + parts.day + ' ' + parts.hour + ':' + parts.minute;
+  }
+  const tmp = f.value; f.value = t.value; t.value = tmp;
+  tzcUpdate();
+}
+function tzcNow() {
+  const f = document.getElementById('tzc-from').value, parts = {};
+  new Intl.DateTimeFormat('en-US', { timeZone: f, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).formatToParts(new Date()).forEach(x => { parts[x.type] = x.value; });
+  document.getElementById('tzc-input').value = parts.year + '-' + parts.month + '-' + parts.day + ' ' + parts.hour + ':' + parts.minute;
+  tzcUpdate();
+}
+function tzcCopy(btn) {
+  if (!_tzcText) return;
+  const done = () => { const o = btn.innerHTML; btn.innerHTML = '<i class="ti ti-check"></i> Copied'; setTimeout(() => { btn.innerHTML = o; }, 1200); };
+  try { navigator.clipboard.writeText(_tzcText).then(done, () => {}); } catch (e) {}
+}
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && tzcIsOpen()) { e.stopImmediatePropagation(); e.preventDefault(); closeTzConv(); }
 }, true);
 
 // ── Utilities → Code Compare ──────────────────────────────────────────────────
