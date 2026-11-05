@@ -2299,6 +2299,81 @@ mark.cbv-hl.cur { background: color-mix(in srgb, #ff9632 65%, transparent); outl
 .cbv-hlbtn:hover { background: var(--bg); color: var(--text-primary); }
 .cbv-badge { margin-left: auto; padding: 0 6px; border-radius: 9px; font-size: 10.5px; font-weight: 600; background: color-mix(in srgb, #f5c400 55%, transparent); color: var(--text-primary); }
 @media (max-width: 640px) { .lms-num { width: 100%; } .lms-wrap { padding: 4px 10px 20px; } .lms-status { padding: 6px 10px; } .lms-line { flex-direction: column; gap: 0; } .lms-loc { max-width: 100%; } }
+/* ── Utilities → Code Compare: side-by-side diff (JS / HTML / SQL / CSS / JSON …) with change transfer; Lambda mode compares backup files of two Lambdas ── */
+.cc-lam { display: inline-flex; align-items: center; gap: 6px; margin-left: 10px; padding: 3px 10px; font: 600 11px var(--font-mono); text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-secondary); border: 1px solid var(--border-md); border-radius: var(--radius-md); background: var(--bg); cursor: pointer; user-select: none; }
+.cc-lam input { margin: 0; width: 15px; height: 15px; cursor: pointer; }
+.cc-lam:has(input:checked) { border-color: var(--blue-mid); color: var(--blue-mid); }
+.cc-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 7px 12px; border-bottom: 1px solid var(--border); background: var(--bg); }
+.cc-bar .btn { padding: 4px 9px; font-size: 12px; }
+.cc-bar .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.cc-sep { flex: 1 1 auto; }
+.cc-pos { font: 12px var(--font-mono); color: var(--text-secondary); min-width: 44px; text-align: center; }
+.cc-stat { font: 12px var(--font-mono); color: var(--text-secondary); }
+.cc-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 3px 9px; border: 1px solid var(--border-md); border-radius: 999px; cursor: pointer; user-select: none; color: var(--text-secondary); }
+.cc-chip input { margin: 0; }
+.cc-chip:has(input:checked) { border-color: var(--blue-mid); color: var(--blue-mid); }
+.cc-heads { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid var(--border-md); background: var(--bg-secondary); }
+.cc-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 7px 10px; min-width: 0; }
+.cc-head + .cc-head { border-left: 1px solid var(--border-md); }
+.cc-ttl { font: 600 11px var(--font-mono); text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-secondary); }
+.cc-fname { font: 12px var(--font-mono); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 80px; min-width: 0; }
+.cc-head .btn { padding: 4px 9px; font-size: 12px; }
+.cc-sel { flex: 1 1 140px; min-width: 0; max-width: 100%; min-height: 28px; padding: 3px 6px; font-size: 12px; }
+.cc-flt { flex: 0 1 130px; }
+.cc-msg { flex: 1 1 100%; font-size: 12px; color: var(--text-secondary); }
+.cc-msg.bad { color: var(--red-mid); }
+.cc-files { border-bottom: 1px solid var(--border-md); background: var(--bg-secondary); padding: 6px 12px; max-height: 200px; overflow: auto; font-size: 12px; }
+.cc-files.hidden { display: none; }
+.cc-fhead { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-bottom: 4px; }
+.cc-fhead .btn { padding: 3px 9px; font-size: 12px; }
+.cc-fchip { border: 1px solid var(--border-md); border-radius: 999px; padding: 1px 9px; background: var(--bg); color: var(--text-secondary); font: 11px var(--font-mono); cursor: pointer; }
+.cc-fchip.on { border-color: var(--blue-mid); color: var(--blue-mid); }
+.cc-frow { display: flex; align-items: center; gap: 8px; padding: 3px 4px; border-radius: 4px; cursor: pointer; font-family: var(--font-mono); }
+.cc-frow:hover { background: var(--bg); }
+.cc-frow.cur { background: var(--bg); box-shadow: inset 3px 0 0 var(--blue-mid); }
+.cc-frow span.p { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cc-badge { flex: none; width: 74px; text-align: center; font: 600 10px var(--font-mono); text-transform: uppercase; letter-spacing: 0.05em; padding: 1px 0; border-radius: 4px; border: 1px solid var(--border-md); color: var(--text-tertiary); }
+.cc-badge.mod { color: var(--amber-dark); border-color: var(--amber-mid); background: var(--amber-bg); }
+.cc-badge.add { color: var(--green-dark); border-color: var(--green-mid); background: var(--green-bg); }
+.cc-badge.del { color: var(--red-mid); border-color: var(--red-mid); background: var(--red-bg); }
+.cc-main { flex: 1; min-height: 0; overflow: auto; background: var(--bg); position: relative; }
+.cc-edit { display: grid; grid-template-columns: 1fr 1fr; height: 100%; }
+.cc-ta { width: 100%; height: 100%; min-height: 160px; box-sizing: border-box; resize: none; border: 0; outline: none; padding: 10px 12px; background: var(--bg); color: var(--text-primary); font: 12.5px/1.55 var(--font-mono); tab-size: 4; white-space: pre; overflow: auto; }
+.cc-ta.wrap { white-space: pre-wrap; word-break: break-word; }
+.cc-ta + .cc-ta { border-left: 1px solid var(--border-md); }
+.cc-ta::placeholder { color: var(--text-tertiary); }
+.cc-tbl { border-collapse: collapse; width: 100%; table-layout: fixed; font: 12.5px/1.5 var(--font-mono); tab-size: 4; }
+.cc-tbl.nowrap { table-layout: auto; width: max-content; min-width: 100%; }
+.cc-tbl td { padding: 0 6px; vertical-align: top; }
+.cc-tbl .cc-cd { white-space: pre-wrap; word-break: break-all; width: 50%; }
+.cc-tbl.nowrap .cc-cd { white-space: pre; word-break: normal; }
+.cc-ln { width: 46px; min-width: 46px; text-align: right; padding-right: 8px !important; color: var(--text-tertiary); user-select: none; background: var(--bg-secondary); font-size: 11.5px; }
+.cc-gt { width: 40px; min-width: 40px; text-align: center; background: var(--bg-secondary); white-space: nowrap; }
+.cc-gt button { border: 0; background: none; cursor: pointer; color: var(--text-secondary); padding: 0 2px; font-size: 14px; line-height: 1.5; }
+.cc-gt button:hover { color: var(--blue-mid); }
+.cc-cd.del { background: color-mix(in srgb, var(--red-mid) 13%, transparent); }
+.cc-cd.add { background: color-mix(in srgb, var(--green-mid) 16%, transparent); }
+.cc-cd.fill { background: repeating-linear-gradient(135deg, transparent 0 6px, color-mix(in srgb, var(--text-tertiary) 16%, transparent) 6px 7px); }
+.cc-cd mark { color: inherit; border-radius: 2px; }
+.cc-cd mark.d { background: color-mix(in srgb, var(--red-mid) 38%, transparent); }
+.cc-cd mark.a { background: color-mix(in srgb, var(--green-mid) 42%, transparent); }
+tr.cc-cur .cc-gt { background: color-mix(in srgb, var(--blue-mid) 28%, var(--bg-secondary)); }
+tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--blue-mid); }
+.cc-fold td { background: var(--bg-secondary); color: var(--text-tertiary); text-align: center; cursor: pointer; font-size: 11.5px; padding: 3px; border-block: 1px solid var(--border); }
+.cc-fold:hover td { color: var(--blue-mid); }
+.cc-same { margin: 24px auto; text-align: center; color: var(--green-dark); font-size: 13px; }
+.cc-kw, .cc-tg { color: var(--purple-dark); } .cc-st { color: var(--green-dark); } .cc-cm { color: var(--text-tertiary); font-style: italic; }
+.cc-nu { color: var(--blue-mid); } .cc-at, .cc-pr { color: var(--blue-dark); }
+@media (max-width: 700px) {
+  .cc-heads { grid-template-columns: 1fr; }
+  .cc-head + .cc-head { border-left: 0; border-top: 1px solid var(--border-md); }
+  .cc-edit { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; }
+  .cc-ta + .cc-ta { border-left: 0; border-top: 1px solid var(--border-md); }
+  .cc-ta { font-size: 16px; }
+  .cc-tbl { min-width: 760px; }
+  .cc-main { -webkit-overflow-scrolling: touch; }
+}
+
 </style>
 </head>
 <body>
@@ -2358,6 +2433,7 @@ mark.cbv-hl.cur { background: color-mix(in srgb, #ff9632 65%, transparent); outl
             <div class="more-menu-section" role="presentation">Utilities</div>
             <button class="btn" onclick="openJwtDecoder()" id="jwt-menu-btn" title="Decode a JWT token"><i class="ti ti-key"></i> JWT Decoder</button>
             <button class="btn" onclick="openB64Tool()" id="b64-menu-btn" title="Encode or decode Base64 for text and any file type"><i class="ti ti-binary"></i> Base64 Encoder / Decoder</button>
+            <button class="btn" onclick="openCodeCompare()" id="cc-menu-btn" title="Compare JS, HTML, SQL and other code side by side and transfer changes"><i class="ti ti-git-compare"></i> Code Compare</button>
           </div>
         </div>
       </div>
@@ -2788,6 +2864,40 @@ mark.cbv-hl.cur { background: color-mix(in srgb, #ff9632 65%, transparent); outl
       <div class="jwt-out" id="jwt-output"></div>
     </div>
   </div>
+</div>
+
+<!-- Utilities → Code Compare: full-screen side-by-side diff. "Lambda" checkbox in the header turns each side into a Lambda function → backup date → file picker. -->
+<div class="jwt-overlay cc-overlay hidden" id="cc-overlay" role="dialog" aria-modal="true" aria-label="Code Compare">
+  <div class="lm-head">
+    <div class="lm-title"><i class="ti ti-git-compare" style="font-size:18px;color:var(--blue-mid)"></i>Code Compare
+      <label class="cc-lam" title="Compare the backup files of two Lambda functions, file by file"><input type="checkbox" id="cc-lambda" onchange="ccSetLambda(this.checked)"> Lambda</label>
+    </div>
+    <button type="button" class="ttl-hdr-widget idle" onclick="ttlConsOpen(event)" title="Time tracker — click to start / pause tasks" aria-label="Open time tracker"><span class="ttl-hw-dot"></span><span class="ttl-hw-lbl">Worked</span><span class="ttl-hw-time">00:00:00</span></button>
+    <button type="button" class="btn-icon" onclick="closeCodeCompare()" title="Close (Esc)" aria-label="Close Code Compare"><i class="ti ti-x"></i></button>
+  </div>
+  <div class="cc-bar">
+    <button type="button" class="btn" id="cc-mode" onclick="ccToggleMode()" title="Switch between editing the two texts and the side-by-side comparison"><i class="ti ti-git-compare"></i> <span>Compare</span></button>
+    <button type="button" class="btn" onclick="ccGo(-1)" title="Previous difference (Shift+F7)" aria-label="Previous difference"><i class="ti ti-chevron-up"></i></button>
+    <span class="cc-pos" id="cc-pos">0 / 0</span>
+    <button type="button" class="btn" onclick="ccGo(1)" title="Next difference (F7)" aria-label="Next difference"><i class="ti ti-chevron-down"></i></button>
+    <span class="cc-stat" id="cc-stat"></span>
+    <span class="cc-sep"></span>
+    <label class="cc-chip" title="Ignore differences in spaces and tabs"><input type="checkbox" id="cc-o-ws" onchange="ccOpt()"> Ignore whitespace</label>
+    <label class="cc-chip" title="Ignore upper / lower case"><input type="checkbox" id="cc-o-ic" onchange="ccOpt()"> Ignore case</label>
+    <label class="cc-chip" title="Fold long runs of unchanged lines"><input type="checkbox" id="cc-o-collapse" onchange="ccOpt()"> Hide unchanged</label>
+    <label class="cc-chip" title="Wrap long lines"><input type="checkbox" id="cc-o-wrap" onchange="ccOpt()"> Wrap</label>
+    <label class="cc-chip" title="Highlight the changed words inside a line"><input type="checkbox" id="cc-o-word" onchange="ccOpt()"> Word diff</label>
+    <label class="cc-chip" id="cc-o-match-wrap" title="Lambda mode: picking a file on one side picks the same path on the other side"><input type="checkbox" id="cc-o-match" onchange="ccOpt()"> Match files</label>
+    <button type="button" class="btn" onclick="ccSwap()" title="Swap the two sides"><i class="ti ti-arrows-exchange"></i></button>
+    <button type="button" class="btn" id="cc-undo" onclick="ccUndo()" title="Undo the last transfer" disabled><i class="ti ti-arrow-back-up"></i></button>
+    <button type="button" class="btn" onclick="ccApplyAll('LR')" title="Make the right side equal to the left"><i class="ti ti-arrow-narrow-right"></i> All</button>
+    <button type="button" class="btn" onclick="ccApplyAll('RL')" title="Make the left side equal to the right"><i class="ti ti-arrow-narrow-left"></i> All</button>
+  </div>
+  <div class="cc-heads" id="cc-heads"></div>
+  <div class="cc-files hidden" id="cc-files"></div>
+  <div class="cc-main" id="cc-main"></div>
+  <input type="file" id="cc-file-L" hidden onchange="ccFilePicked('L',this)">
+  <input type="file" id="cc-file-R" hidden onchange="ccFilePicked('R',this)">
 </div>
 
 <!-- Utilities → Base64 Encoder / Decoder: full-screen split view like the JWT decoder. Encode: any file or text → Base64. Decode: Base64 / data URI → detected file with preview + download -->
@@ -25970,6 +26080,509 @@ function b64CopyDec(btn) {
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && b64IsOpen() && !ttlConsIsOpen()) { e.stopImmediatePropagation(); e.preventDefault(); closeB64Tool(); }
 }, true);
+
+// ── Utilities → Code Compare ──────────────────────────────────────────────────
+// Side-by-side line diff (Myers) with word-level highlights, syntax colours, change transfer (→ / ←) per block,
+// ignore whitespace / case, folding, next / previous difference. Lambda mode: each side picks a Lambda function from the
+// Code Backup folder (same folder the Code viewer reads), a backup date and a file; "Scan all files" lists which files differ.
+// Backup files are only ever read. Transfers change the in-memory text; use Copy / Download (or Save for files opened from disk).
+let _cc = null;
+const CC_OPT_KEY = 'ttl_code_compare_opts_v1';
+const CC_LANGS = [['auto','Auto'],['js','JavaScript'],['ts','TypeScript'],['html','HTML'],['css','CSS'],['sql','SQL'],['json','JSON'],['xml','XML'],['py','Python'],['java','Java'],['cs','C#'],['c','C / C++'],['go','Go'],['rs','Rust'],['php','PHP'],['sh','Shell'],['yaml','YAML / INI'],['md','Markdown'],['text','Plain text']];
+const CC_EXT = { js:'js', mjs:'js', cjs:'js', jsx:'js', ts:'ts', tsx:'ts', html:'html', htm:'html', vue:'html', xml:'xml', svg:'xml', xsd:'xml', xslt:'xml', csproj:'xml', config:'xml', css:'css', scss:'css', less:'css', sql:'sql', json:'json', jsonc:'json', py:'py', java:'java', kt:'java', cs:'cs', c:'c', h:'c', cpp:'c', hpp:'c', cc:'c', go:'go', rs:'rs', php:'php', sh:'sh', bash:'sh', zsh:'sh', ps1:'sh', yml:'yaml', yaml:'yaml', ini:'yaml', toml:'yaml', env:'yaml', md:'md', markdown:'md', txt:'text', log:'text', csv:'text' };
+const CC_GROUP = { js:'js', ts:'js', java:'clike', cs:'clike', c:'clike', go:'clike', rs:'clike', php:'clike' };
+const CC_KW = {
+  js: 'abstract|async|await|break|case|catch|class|const|continue|debugger|default|delete|do|else|enum|export|extends|false|finally|for|from|function|if|implements|import|in|instanceof|interface|let|new|null|of|private|protected|public|readonly|return|static|super|switch|this|throw|true|try|type|typeof|undefined|var|void|while|with|yield',
+  clike: 'abstract|as|auto|bool|break|byte|case|catch|char|class|const|continue|default|defer|do|double|else|enum|extern|false|final|finally|float|fn|for|foreach|func|go|if|impl|import|in|int|interface|let|long|match|mod|mut|namespace|new|nil|null|override|package|private|protected|pub|public|return|self|short|static|string|struct|super|switch|this|throw|throws|true|try|typedef|unsigned|use|using|var|virtual|void|volatile|while|yield',
+  py: 'and|as|assert|async|await|break|class|continue|def|del|elif|else|except|False|finally|for|from|global|if|import|in|is|lambda|None|nonlocal|not|or|pass|raise|return|self|True|try|while|with|yield',
+  sh: 'if|then|else|elif|fi|for|while|do|done|case|esac|function|in|return|export|local|echo|exit|set|unset|source|true|false',
+  sql: 'select|from|where|and|or|not|in|is|null|like|between|exists|insert|into|values|update|set|delete|create|alter|drop|table|view|index|database|schema|procedure|function|trigger|begin|end|declare|if|else|elsif|case|when|then|as|join|inner|left|right|full|outer|cross|on|using|group|by|order|having|limit|offset|top|distinct|union|all|with|primary|key|foreign|references|constraint|default|unique|check|identity|returns|return|exec|execute|grant|revoke|commit|rollback|transaction|varchar|nvarchar|char|int|integer|bigint|smallint|decimal|numeric|float|real|date|datetime|timestamp|text|boolean|bit|asc|desc|over|partition|count|sum|avg|min|max|cast|convert|coalesce|isnull|ifnull|nullif|true|false',
+  yaml: 'true|false|null|yes|no|on|off',
+  json: 'true|false|null'
+};
+const CC_NUM = /\b0x[\da-fA-F]+\b|\b\d[\d_]*(?:\.\d+)?(?:[eE][+-]?\d+)?\b/.source;
+const CC_STR = /"(?:[^"\\\n]|\\.)*"?|'(?:[^'\\\n]|\\.)*'?/.source;
+const CC_BLK = /\/\*[\s\S]*?(?:\*\/|$)/.source;
+const CC_RULES = {};
+function ccRules(g) {
+  if (g in CC_RULES) return CC_RULES[g];
+  const kw = k => ['kw', '\\b(?:' + CC_KW[k] + ')\\b'];
+  let r = null, flags = 'g';
+  if (g === 'js') r = [['cm', CC_BLK], ['cm', /\/\/[^\n]*/.source], ['st', /`(?:[^`\\]|\\[\s\S])*`?/.source], ['st', CC_STR], kw('js'), ['nu', CC_NUM]];
+  else if (g === 'clike') r = [['cm', CC_BLK], ['cm', /\/\/[^\n]*|#[^\n]*/.source], ['st', CC_STR], kw('clike'), ['nu', CC_NUM]];
+  else if (g === 'py') r = [['st', /"""[\s\S]*?(?:"""|$)|'''[\s\S]*?(?:'''|$)/.source], ['cm', /#[^\n]*/.source], ['st', CC_STR], kw('py'), ['nu', CC_NUM]];
+  else if (g === 'sh') r = [['cm', /#[^\n]*/.source], ['st', CC_STR], kw('sh'), ['nu', CC_NUM]];
+  else if (g === 'yaml') r = [['cm', /(?:^|\s)#[^\n]*/.source.replace('(?:^|\\s)', '')], ['st', CC_STR], ['at', /[\w.-]+(?=\s*[:=])/.source], kw('yaml'), ['nu', CC_NUM]];
+  else if (g === 'sql') { r = [['cm', CC_BLK], ['cm', /--[^\n]*/.source], ['st', /'(?:[^']|'')*'?|"[^"\n]*"?|\[[^\]\n]*\]/.source], kw('sql'), ['nu', CC_NUM], ['at', /[@#]{1,2}[\w$]+/.source]]; flags = 'gi'; }
+  else if (g === 'json') r = [['at', /"(?:[^"\\\n]|\\.)*"(?=\s*:)/.source], ['st', CC_STR], kw('json'), ['nu', /-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/.source]];
+  else if (g === 'css') r = [['cm', CC_BLK], ['st', CC_STR], ['kw', /@[\w-]+/.source], ['nu', /#[\da-fA-F]{3,8}\b|-?\d*\.?\d+(?:px|em|rem|%|vh|vw|s|ms|deg)?\b/.source], ['pr', /[\w-]+(?=\s*:)/.source]];
+  else if (g === 'html' || g === 'xml') r = [['cm', /<!--[\s\S]*?(?:-->|$)/.source], ['tg', /<\/?[A-Za-z][\w:.-]*|<![A-Za-z]+|<\?[\w-]+|\?>|\/?>/.source], ['st', /"[^"]*"|'[^']*'/.source], ['at', /[A-Za-z_:@][\w:.@-]*(?=\s*=)/.source]];
+  else if (g === 'md') { r = [['kw', /^#{1,6}[^\n]*/.source], ['st', /`[^`\n]*`/.source], ['cm', /^>[^\n]*/.source]]; flags = 'gm'; }
+  CC_RULES[g] = r ? { r, re: new RegExp(r.map(x => '(' + x[1] + ')').join('|'), flags) } : null;
+  return CC_RULES[g];
+}
+function ccTokenize(text, lang) {
+  const n = text.replace(/\r\n?/g, '\n'), lines = [[]];
+  const push = (c, t) => { if (!t) return; t.split('\n').forEach((p, i) => { if (i > 0) lines.push([]); if (p) lines[lines.length - 1].push({ c, t: p }); }); };
+  const R = n.length > 400000 ? null : ccRules(CC_GROUP[lang] || lang);
+  if (!R) { push('', n); return lines; }
+  const re = R.re; re.lastIndex = 0;
+  let pos = 0, m;
+  while ((m = re.exec(n))) {
+    if (!m[0]) { re.lastIndex++; continue; }
+    if (m.index > pos) push('', n.slice(pos, m.index));
+    let ci = 0; for (let g = 1; g < m.length; g++) if (m[g] !== undefined) { ci = g - 1; break; }
+    push(R.r[ci][0], m[0]); pos = re.lastIndex;
+  }
+  if (pos < n.length) push('', n.slice(pos));
+  return lines;
+}
+function ccGuess(t) {
+  const s = t.slice(0, 4000).trim(); if (!s) return 'text';
+  if (/^<!doctype html|^<html|<\/(div|body|script|head)>/i.test(s)) return 'html';
+  if (/^<\?xml|^<[\w:-]+[\s>]/.test(s)) return 'xml';
+  if (/^[\[{]/.test(s) && t.length < 600000) { try { JSON.parse(t); return 'json'; } catch (e) {} }
+  if (/^\s*(select|insert|update|delete|create|alter|drop|with|declare|use|exec)\b/im.test(s)) return 'sql';
+  if (/^\s*(def |from \w+ import|import \w+$)/m.test(s)) return 'py';
+  if (/\b(function|const|let|var|=>|require\(|module\.exports|export )/.test(s)) return 'js';
+  return 'text';
+}
+function ccLang(sd) {
+  if (sd.lang !== 'auto') return sd.lang;
+  const m = /\.([A-Za-z0-9]+)$/.exec(sd.name || '');
+  return (m && CC_EXT[m[1].toLowerCase()]) || ccGuess(sd.text);
+}
+function ccLangName(k) { const x = CC_LANGS.find(l => l[0] === k); return x ? x[1] : k; }
+
+// ── state ─────────────────────────────────────────────────────────────────────
+function ccNewSide() { return { text: '', name: '', lang: 'auto', handle: null, eol: '\n', msg: '', tok: 0, ftok: 0, fn: '', fnDir: null, dates: [], di: 0, files: [], filePath: '', lines: null, toks: null, toksLang: '' }; }
+function ccInit() {
+  if (_cc) return;
+  _cc = { mode: 'edit', lambda: false, o: { ws: false, ic: false, collapse: false, wrap: true, word: true, match: true }, L: ccNewSide(), R: ccNewSide(), fns: null, fnErr: '', needPerm: false, flt: { L: '', R: '' }, rows: [], blocks: [], cur: -1, exp: new Set(), undo: [], scan: null, scanBusy: false, scanMsg: '', scanF: 'all' };
+  try { const p = JSON.parse(localStorage.getItem(CC_OPT_KEY) || 'null'); if (p && typeof p === 'object') { Object.keys(_cc.o).forEach(k => { if (typeof p[k] === 'boolean') _cc.o[k] = p[k]; }); if (typeof p.lambda === 'boolean') _cc.lambda = p.lambda; } } catch (e) {}
+}
+function ccSaveOpts() { try { localStorage.setItem(CC_OPT_KEY, JSON.stringify(Object.assign({ lambda: _cc.lambda }, _cc.o))); } catch (e) {} }
+function ccTouch(sd) { sd.lines = null; sd.toks = null; }
+function ccLines(sd) { return sd.lines || (sd.lines = sd.text.split(/\r\n|\r|\n/)); }
+function ccToks(sd) {
+  const lg = ccLang(sd);
+  if (!sd.toks || sd.toksLang !== lg) { sd.toks = ccTokenize(sd.text, lg); sd.toksLang = lg; }
+  return sd.toks;
+}
+function ccSetText(S, text, name, handle) {
+  const sd = _cc[S]; sd.text = text; sd.name = name || ''; sd.handle = handle || null; sd.eol = /\r\n/.test(text) ? '\r\n' : '\n'; ccTouch(sd);
+}
+function ccHas(sd) { return !!(sd.text || sd.filePath || sd.name); }
+function ccIsOpen() { const el = document.getElementById('cc-overlay'); return !!(el && !el.classList.contains('hidden')); }
+
+// ── open / close ──────────────────────────────────────────────────────────────
+function openCodeCompare() {
+  try { closeMoreMenu(); } catch (e) {}
+  const el = document.getElementById('cc-overlay'); if (!el) return;
+  ccInit();
+  el.classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+  try { renderTtlHdrWidgets(); } catch (e) {}
+  document.getElementById('cc-lambda').checked = _cc.lambda;
+  ccSyncOptUi();
+  ccRenderHeads(); ccRenderFiles(); ccRender();
+  if (_cc.lambda && _cc.fns === null) ccLoadFns(false).then(() => { ccRenderHeads(); ccRenderFiles(); });
+}
+function closeCodeCompare() {
+  const el = document.getElementById('cc-overlay'); if (el) el.classList.add('hidden');
+  document.body.style.overflow = '';
+}
+document.addEventListener('keydown', (e) => {
+  if (!ccIsOpen()) return;
+  if (e.key === 'Escape' && !ttlConsIsOpen()) { e.stopImmediatePropagation(); e.preventDefault(); closeCodeCompare(); }
+  else if (e.key === 'F7') { e.preventDefault(); if (_cc.mode !== 'diff') ccSetMode('diff'); else ccGo(e.shiftKey ? -1 : 1); }
+}, true);
+
+// ── options / bar ─────────────────────────────────────────────────────────────
+function ccSyncOptUi() {
+  const o = _cc.o, set = (id, v) => { const e = document.getElementById(id); if (e) e.checked = !!v; };
+  set('cc-o-ws', o.ws); set('cc-o-ic', o.ic); set('cc-o-collapse', o.collapse); set('cc-o-wrap', o.wrap); set('cc-o-word', o.word); set('cc-o-match', o.match);
+  const mw = document.getElementById('cc-o-match-wrap'); if (mw) mw.style.display = _cc.lambda ? '' : 'none';
+}
+function ccOpt() {
+  const g = id => !!document.getElementById(id).checked, o = _cc.o;
+  o.ws = g('cc-o-ws'); o.ic = g('cc-o-ic'); o.collapse = g('cc-o-collapse'); o.wrap = g('cc-o-wrap'); o.word = g('cc-o-word'); o.match = g('cc-o-match');
+  ccSaveOpts(); _cc.exp.clear(); _cc.scan = null; ccRenderFiles(); ccRender(true);
+}
+function ccToggleMode() { ccSetMode(_cc.mode === 'diff' ? 'edit' : 'diff'); }
+function ccSetMode(m) { _cc.mode = m; ccRenderHeads(); ccRender(); }
+function ccFlash(btn, html) { if (!btn) return; const old = btn.innerHTML; btn.innerHTML = html; setTimeout(() => { btn.innerHTML = old; }, 1200); }
+function ccUpdateBar() {
+  const diff = _cc.mode === 'diff';
+  const mb = document.getElementById('cc-mode'); if (mb) mb.querySelector('span').textContent = diff ? 'Edit' : 'Compare';
+  if (mb) mb.querySelector('i').className = 'ti ' + (diff ? 'ti-edit' : 'ti-git-compare');
+  const n = _cc.blocks.length;
+  document.getElementById('cc-pos').textContent = diff ? (_cc.cur >= 0 ? (_cc.cur + 1) : 0) + ' / ' + n : '–';
+  document.getElementById('cc-stat').textContent = diff ? (n ? n + ' difference' + (n === 1 ? '' : 's') : 'No differences') + ' · ' + ccLines(_cc.L).length + ' / ' + ccLines(_cc.R).length + ' lines' : '';
+  const ub = document.getElementById('cc-undo'); if (ub) ub.disabled = !_cc.undo.length;
+}
+
+// ── diff engine ───────────────────────────────────────────────────────────────
+function ccMyers(a, b, limit) {
+  const n = a.length, m = b.length, max = n + m, off = max + 1, v = new Int32Array(2 * max + 3), trace = [];
+  let done = false;
+  for (let d = 0; d <= max && !done; d++) {
+    if (d > limit) return null;
+    trace.push(v.slice(off - d - 1, off + d + 2));
+    for (let k = -d; k <= d; k += 2) {
+      let x = (k === -d || (k !== d && v[off + k - 1] < v[off + k + 1])) ? v[off + k + 1] : v[off + k - 1] + 1, y = x - k;
+      while (x < n && y < m && a[x] === b[y]) { x++; y++; }
+      v[off + k] = x;
+      if (x >= n && y >= m) { done = true; break; }
+    }
+  }
+  const ops = []; let x = n, y = m;
+  for (let d = trace.length - 1; d >= 0; d--) {
+    const t = trace[d], g = k => t[k + d + 1], k = x - y;
+    const pk = (k === -d || (k !== d && g(k - 1) < g(k + 1))) ? k + 1 : k - 1, px = g(pk), py = px - pk;
+    while (x > px && y > py) { ops.push({ t: 'e', a: x - 1, b: y - 1 }); x--; y--; }
+    if (d > 0) ops.push(x === px ? { t: 'i', b: py } : { t: 'd', a: px });
+    x = px; y = py;
+  }
+  return ops.reverse();
+}
+function ccDiffLines(ka, kb) {
+  let p = 0; const n = ka.length, m = kb.length;
+  while (p < n && p < m && ka[p] === kb[p]) p++;
+  let s = 0; while (s < n - p && s < m - p && ka[n - 1 - s] === kb[m - 1 - s]) s++;
+  const ops = [];
+  for (let i = 0; i < p; i++) ops.push({ t: 'e', a: i, b: i });
+  const ma = ka.slice(p, n - s), mb = kb.slice(p, m - s);
+  let mid = (ma.length || mb.length) ? ((ma.length && mb.length) ? ccMyers(ma, mb, 4000) : null) : [];
+  if (!mid) { mid = []; ma.forEach((_, i) => mid.push({ t: 'd', a: i })); mb.forEach((_, i) => mid.push({ t: 'i', b: i })); }
+  mid.forEach(o => ops.push(o.t === 'e' ? { t: 'e', a: o.a + p, b: o.b + p } : o.t === 'd' ? { t: 'd', a: o.a + p } : { t: 'i', b: o.b + p }));
+  for (let i = 0; i < s; i++) ops.push({ t: 'e', a: n - s + i, b: m - s + i });
+  return ops;
+}
+function ccKey(s) { const o = _cc.o; if (o.ws) s = s.replace(/\s+/g, ' ').trim(); if (o.ic) s = s.toLowerCase(); return s; }
+function ccCompute() {
+  const a = ccLines(_cc.L), b = ccLines(_cc.R), ops = ccDiffLines(a.map(ccKey), b.map(ccKey));
+  const rows = [], blocks = []; let pa = 0, pb = 0, i = 0;
+  while (i < ops.length) {
+    if (ops[i].t === 'e') { rows.push({ k: 'e', l: ops[i].a, r: ops[i].b }); pa = ops[i].a + 1; pb = ops[i].b + 1; i++; continue; }
+    const dels = [], ins = [];
+    while (i < ops.length && ops[i].t !== 'e') { (ops[i].t === 'd' ? dels : ins).push(ops[i]); i++; }
+    const id = blocks.length, nn = Math.max(dels.length, ins.length);
+    blocks.push({ id, row0: rows.length, a0: pa, na: dels.length, b0: pb, nb: ins.length });
+    for (let q = 0; q < nn; q++) rows.push({ k: 'c', l: q < dels.length ? dels[q].a : -1, r: q < ins.length ? ins[q].b : -1, blk: id });
+    pa += dels.length; pb += ins.length;
+  }
+  _cc.rows = rows; _cc.blocks = blocks;
+  if (_cc.cur >= blocks.length) _cc.cur = blocks.length - 1;
+}
+const CC_TOK = /\w+|\s+|[^\w\s]/g;
+function ccInline(sa, sb) {
+  const ta = sa.match(CC_TOK) || [], tb = sb.match(CC_TOK) || [];
+  if (!ta.length || !tb.length || ta.length > 300 || tb.length > 300) return [[], []];
+  const ic = _cc.o.ic, ops = ccMyers(ta.map(t => ic ? t.toLowerCase() : t), tb.map(t => ic ? t.toLowerCase() : t), 600);
+  if (!ops) return [[], []];
+  const pa = [0], pb = [0]; ta.forEach(t => pa.push(pa[pa.length - 1] + t.length)); tb.forEach(t => pb.push(pb[pb.length - 1] + t.length));
+  const ra = [], rb = [], add = (r, s, e) => { const l = r[r.length - 1]; if (l && l[1] >= s) l[1] = e; else r.push([s, e]); };
+  ops.forEach(o => { if (o.t === 'd') add(ra, pa[o.a], pa[o.a + 1]); else if (o.t === 'i') add(rb, pb[o.b], pb[o.b + 1]); });
+  const sum = r => r.reduce((x, y) => x + y[1] - y[0], 0);
+  if (sum(ra) > sa.length * 0.8 && sum(rb) > sb.length * 0.8) return [[], []];   // lines that are wholly different: no noise
+  return [ra, rb];
+}
+function ccHtml(toks, rs, mk) {
+  let out = '', p = 0, ri = 0; rs = rs || [];
+  for (const k of toks) {
+    const t = k.t, L = t.length; let s = 0;
+    while (s < L) {
+      while (ri < rs.length && rs[ri][1] <= p + s) ri++;
+      const inM = ri < rs.length && rs[ri][0] <= p + s; let e = L;
+      if (ri < rs.length) e = Math.min(L, (inM ? rs[ri][1] : rs[ri][0]) - p);
+      if (e <= s) e = L;
+      const seg = esc(t.slice(s, e)), h = k.c ? '<span class="cc-' + k.c + '">' + seg + '</span>' : seg;
+      out += inM ? '<mark class="' + mk + '">' + h + '</mark>' : h;
+      s = e;
+    }
+    p += L;
+  }
+  return out || '\u200b';
+}
+
+// ── rendering ─────────────────────────────────────────────────────────────────
+function ccRender(keep) {
+  ccInit();
+  const main = document.getElementById('cc-main'); if (!main) return;
+  const st = keep ? main.scrollTop : 0, sl = keep ? main.scrollLeft : 0;
+  if (_cc.mode === 'edit') {
+    main.innerHTML = '<div class="cc-edit"><textarea class="cc-ta' + (_cc.o.wrap ? ' wrap' : '') + '" id="cc-ta-L" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" placeholder="Paste or open the first (left) code here…" oninput="ccTaInput(\'L\',this)"></textarea><textarea class="cc-ta' + (_cc.o.wrap ? ' wrap' : '') + '" id="cc-ta-R" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" placeholder="Paste or open the second (right) code here…" oninput="ccTaInput(\'R\',this)"></textarea></div>';
+    ['L', 'R'].forEach(S => {
+      const ta = document.getElementById('cc-ta-' + S); ta.value = _cc[S].text;
+      ta.addEventListener('dragover', e => { e.preventDefault(); });
+      ta.addEventListener('drop', e => { const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if (f) { e.preventDefault(); ccLoadFile(S, f, null); } });
+    });
+    _cc.blocks = []; _cc.rows = []; ccUpdateBar(); return;
+  }
+  ccCompute();
+  const rows = _cc.rows, n = rows.length, o = _cc.o, L = _cc.L, R = _cc.R, A = ccLines(L), B = ccLines(R), TA = ccToks(L), TB = ccToks(R);
+  const collapse = o.collapse || n > 4000, vis = new Uint8Array(n);
+  if (!collapse) vis.fill(1); else rows.forEach((r, i) => { if (r.k === 'c') for (let q = Math.max(0, i - 3); q <= Math.min(n - 1, i + 3); q++) vis[q] = 1; });
+  let h = '';
+  if (!_cc.blocks.length) h += '<div class="cc-same"><i class="ti ti-circle-check" style="font-size:22px;display:block;margin-bottom:4px"></i>' + ((A.join('\n') === B.join('\n')) ? 'The two sides are identical.' : 'No differences' + (o.ws || o.ic ? ' with the current ignore options.' : '.')) + '</div>';
+  h += '<table class="cc-tbl' + (o.wrap ? '' : ' nowrap') + '"><colgroup><col style="width:46px"><col><col style="width:40px"><col style="width:46px"><col></colgroup><tbody>';
+  const cell = (side, idx, row) => {
+    if (idx < 0) return '<td class="cc-ln"></td><td class="cc-cd fill"></td>';
+    const toks = (side === 'L' ? TA : TB)[idx] || [], ranges = row.ir ? row.ir[side === 'L' ? 0 : 1] : null;
+    const cls = row.k === 'c' ? (side === 'L' ? 'del' : 'add') : '';
+    return '<td class="cc-ln">' + (idx + 1) + '</td><td class="cc-cd ' + cls + '">' + ccHtml(toks, ranges, side === 'L' ? 'd' : 'a') + '</td>';
+  };
+  for (let i = 0; i < n; i++) {
+    if (!vis[i] && !_cc.exp.has(i)) {   // fold a run of unchanged lines
+      let e = i; while (e < n && !vis[e]) e++;
+      if (!_cc.exp.has(i)) { h += '<tr class="cc-fold" onclick="ccExpand(' + i + ')" title="Show these lines"><td colspan="5"><i class="ti ti-dots"></i> ' + (e - i) + ' unchanged line' + (e - i === 1 ? '' : 's') + '</td></tr>'; i = e - 1; continue; }
+    }
+    const r = rows[i];
+    if (r.k === 'c' && o.word && r.l >= 0 && r.r >= 0 && !r.ir) r.ir = ccInline(A[r.l], B[r.r]);
+    const first = r.k === 'c' && _cc.blocks[r.blk].row0 === i;
+    h += '<tr' + (r.k === 'c' ? ' data-blk="' + r.blk + '"' + (first ? ' id="cc-b' + r.blk + '"' : '') + (r.blk === _cc.cur ? ' class="cc-cur"' : '') : '') + '>' + cell('L', r.l, r)
+      + '<td class="cc-gt">' + (first ? '<button type="button" onclick="ccXfer(' + r.blk + ',\'LR\')" title="Apply this change to the right side" aria-label="Apply to right"><i class="ti ti-arrow-narrow-right"></i></button><button type="button" onclick="ccXfer(' + r.blk + ',\'RL\')" title="Apply this change to the left side" aria-label="Apply to left"><i class="ti ti-arrow-narrow-left"></i></button>' : '') + '</td>'
+      + cell('R', r.r, r) + '</tr>';
+  }
+  main.innerHTML = h + '</tbody></table>';
+  main.scrollTop = st; main.scrollLeft = sl;
+  ccUpdateBar();
+}
+function ccExpand(i) { _cc.exp.add(i); ccRender(true); }
+function ccGo(d) {
+  if (_cc.mode !== 'diff') { ccSetMode('diff'); }
+  const n = _cc.blocks.length; if (!n) return;
+  _cc.cur = _cc.cur < 0 ? (d > 0 ? 0 : n - 1) : (_cc.cur + d + n) % n;
+  document.querySelectorAll('#cc-main tr.cc-cur').forEach(t => t.classList.remove('cc-cur'));
+  const trs = document.querySelectorAll('#cc-main tr[data-blk="' + _cc.cur + '"]');
+  trs.forEach(t => t.classList.add('cc-cur'));
+  if (trs[0]) trs[0].scrollIntoView({ block: 'center' });
+  ccUpdateBar();
+}
+
+// ── editing / transfer ────────────────────────────────────────────────────────
+function ccTaInput(S, el) { const sd = _cc[S]; sd.text = el.value; ccTouch(sd); sd.dirty = true; }
+function ccPushUndo() { _cc.undo.push({ L: _cc.L.text, R: _cc.R.text }); if (_cc.undo.length > 50) _cc.undo.shift(); }
+function ccSetLines(S, lines) { const sd = _cc[S]; sd.text = lines.join(sd.eol); ccTouch(sd); sd.dirty = true; }
+function ccXfer(id, dir) {
+  const bl = _cc.blocks[id]; if (!bl) return;
+  const a = ccLines(_cc.L).slice(), b = ccLines(_cc.R).slice(); ccPushUndo();
+  if (dir === 'LR') { b.splice(bl.b0, bl.nb, ...a.slice(bl.a0, bl.a0 + bl.na)); ccSetLines('R', b); }
+  else { a.splice(bl.a0, bl.na, ...b.slice(bl.b0, bl.b0 + bl.nb)); ccSetLines('L', a); }
+  _cc.exp.clear(); ccRender(true);
+}
+function ccApplyAll(dir) {
+  if (_cc.mode !== 'diff') ccSetMode('diff');
+  ccPushUndo();
+  if (dir === 'LR') ccSetLines('R', ccLines(_cc.L).slice()); else ccSetLines('L', ccLines(_cc.R).slice());
+  _cc.exp.clear(); ccRender(true);
+}
+function ccUndo() { const u = _cc.undo.pop(); if (!u) return; ['L', 'R'].forEach(S => { _cc[S].text = u[S]; ccTouch(_cc[S]); }); _cc.exp.clear(); ccRender(true); }
+function ccSwap() {
+  const t = _cc.L; _cc.L = _cc.R; _cc.R = t; const f = _cc.flt.L; _cc.flt.L = _cc.flt.R; _cc.flt.R = f; _cc.scan = null;
+  ccRenderHeads(); ccRenderFiles(); ccRender(true);
+}
+function ccSetLang(S, v) { _cc[S].lang = v; _cc[S].toks = null; ccRenderHeads(); ccRender(true); }
+
+// ── local files ───────────────────────────────────────────────────────────────
+async function ccOpenLocal(S) {
+  if (window.showOpenFilePicker) {
+    try { const [h] = await window.showOpenFilePicker({ multiple: false }); await ccLoadFile(S, await h.getFile(), h); } catch (e) {}
+  } else document.getElementById('cc-file-' + S).click();
+}
+function ccFilePicked(S, inp) { const f = inp.files && inp.files[0]; if (f) ccLoadFile(S, f, null); inp.value = ''; }
+async function ccLoadFile(S, f, handle) {
+  if (f.size > 5e6) { _cc[S].msg = 'File is larger than 5 MB.'; ccRenderHeads(); return; }
+  const text = await f.text(); _cc[S].msg = '';
+  ccSetText(S, text, f.name, handle); _cc[S].lang = 'auto';
+  ccAfterLoad();
+}
+async function ccPaste(S) {
+  try { const t = await navigator.clipboard.readText(); ccSetText(S, t, '', null); ccAfterLoad(true); } catch (e) { if (_cc.mode !== 'edit') ccSetMode('edit'); const ta = document.getElementById('cc-ta-' + S); if (ta) ta.focus(); }
+}
+function ccClearSide(S) { ccSetText(S, '', '', null); _cc[S].msg = ''; ccRenderHeads(); ccRender(true); }
+function ccCopy(S, btn) {
+  const text = _cc[S].text, done = () => ccFlash(btn, '<i class="ti ti-check"></i> Copied');
+  const fb = () => { const ta = document.createElement('textarea'); ta.value = text; ta.style.cssText = 'position:fixed;opacity:0;top:0;left:0'; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); done(); } catch (e) {} ta.remove(); };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, fb); else fb();
+}
+function ccDownload(S) {
+  const sd = _cc[S], nm = (sd.name || '').split('/').pop() || (S === 'L' ? 'left.txt' : 'right.txt');
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([sd.text], { type: 'text/plain;charset=utf-8' })); a.download = nm;
+  document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+}
+async function ccSave(S, btn) {
+  const sd = _cc[S]; if (!sd.handle) return;
+  try {
+    if ((await sd.handle.queryPermission({ mode: 'readwrite' })) !== 'granted' && (await sd.handle.requestPermission({ mode: 'readwrite' })) !== 'granted') return;
+    const w = await sd.handle.createWritable(); await w.write(sd.text); await w.close(); sd.dirty = false; ccFlash(btn, '<i class="ti ti-check"></i> Saved');
+  } catch (e) { ccFlash(btn, '<i class="ti ti-alert-triangle"></i> Failed'); }
+}
+function ccAfterLoad(stayEdit) {
+  ccRenderHeads(); ccRenderFiles();
+  if (!stayEdit && ccHas(_cc.L) && ccHas(_cc.R)) _cc.mode = 'diff';
+  else if (stayEdit && _cc.mode === 'diff') _cc.mode = 'diff';
+  _cc.exp.clear(); _cc.cur = -1; ccRender();
+}
+
+// ── Lambda mode (Code Backup folder) ──────────────────────────────────────────
+async function ccLoadFns(ask) {
+  _cc.fnErr = ''; _cc.needPerm = false;
+  if (!cbkSupported()) { _cc.fnErr = 'Lambda compare needs Chrome or Edge on a desktop computer (it reads your Code Backup folder).'; _cc.fns = []; return; }
+  if (!_cbkHandle) { try { _cbkHandle = await cbkIdbGet(); } catch (e) {} }
+  if (!_cbkHandle) { _cc.fnErr = 'No Code Backup folder is selected yet.'; _cc.fns = []; return; }
+  if (!(await cbkPerm(_cbkHandle, !!ask))) { _cc.fnErr = 'Permission to read the Code Backup folder is needed.'; _cc.needPerm = true; _cc.fns = []; return; }
+  try {
+    _cc.fns = (await cbkSubdirs(_cbkHandle)).map(d => ({ name: d.name, h: d })).sort((x, y) => x.name.localeCompare(y.name, undefined, { numeric: true, sensitivity: 'base' }));
+    if (!_cc.fns.length) _cc.fnErr = 'The Code Backup folder has no function folders yet.';
+  } catch (e) { _cc.fnErr = 'Could not read the backup folder: ' + e.message; _cc.fns = []; }
+}
+async function ccSetLambda(on) {
+  ccInit(); _cc.lambda = !!on; ccSaveOpts(); ccSyncOptUi();
+  if (on) await ccLoadFns(true);
+  ccRenderHeads(); ccRenderFiles();
+}
+async function ccGrant() { await ccLoadFns(true); ccRenderHeads(); }
+async function ccPickBackup() { await cbkPick(); await ccLoadFns(true); ccRenderHeads(); }
+function ccFnOptions(S) {
+  const sd = _cc[S], q = (_cc.flt[S] || '').toLowerCase().trim();
+  const list = (_cc.fns || []).filter(f => !q || f.name.toLowerCase().includes(q) || f.name === sd.fn);
+  return '<option value="">Select Lambda function…</option>' + list.map(f => '<option value="' + esc(f.name) + '"' + (f.name === sd.fn ? ' selected' : '') + '>' + esc(f.name) + '</option>').join('');
+}
+function ccFilterFn(S, v) { _cc.flt[S] = v; const el = document.getElementById('cc-fn-' + S); if (el) el.innerHTML = ccFnOptions(S); }
+const ccNatural = (a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+async function ccSelectFn(S, name) {
+  const sd = _cc[S]; ++sd.tok; ++sd.ftok; sd.fn = name; sd.msg = ''; _cc.scan = null;
+  if (!name) { Object.assign(sd, { fnDir: null, dates: [], files: [], filePath: '', di: 0 }); ccSetText(S, '', ''); ccRenderHeads(); ccRenderFiles(); ccRender(true); return; }
+  const f = (_cc.fns || []).find(x => x.name === name); if (!f) return;
+  try {
+    let dates = (await cbkSubdirs(f.h)).map(h => ({ name: h.name, h, key: cbkDateKey(h.name) }));
+    dates.sort((a, b) => (b.key || '').localeCompare(a.key || '') || b.name.localeCompare(a.name, undefined, { numeric: true }));
+    if (!dates.length) dates = [{ name: '(files in function folder)', h: f.h, key: '' }];
+    sd.fnDir = f.h; sd.dates = dates;
+  } catch (e) { sd.msg = 'Could not read this function folder: ' + e.message; ccRenderHeads(); return; }
+  await ccSelectDate(S, 0);
+}
+async function ccSelectDate(S, i) {
+  const sd = _cc[S], tok = ++sd.tok; if (!sd.dates[i]) return;
+  sd.di = i; sd.msg = 'Loading…'; _cc.scan = null; ccRenderHeads();
+  let tree; try { tree = await cbvReadTree(sd.dates[i].h, '', 0); } catch (e) { sd.msg = 'Could not read this backup: ' + e.message; ccRenderHeads(); return; }
+  if (tok !== sd.tok) return;
+  sd.files = cbvFiles(tree, []).sort((a, b) => ccNatural(a.path, b.path)); sd.msg = '';
+  const O = _cc[S === 'L' ? 'R' : 'L'], has = p => p && sd.files.some(f => f.path === p), hasCI = p => p && sd.files.find(f => f.path.toLowerCase() === p.toLowerCase());
+  let want = has(sd.filePath) ? sd.filePath : (_cc.o.match && hasCI(O.filePath) ? hasCI(O.filePath).path : (sd.files[0] ? sd.files[0].path : ''));
+  await ccPickFile(S, want, false, true);
+  ccAfterLoad();
+}
+async function ccReadNode(n) {
+  const f = await n.h.getFile(); if (f.size > 3e6) throw new Error('File is larger than 3 MB.');
+  const buf = await f.arrayBuffer(); if (new Uint8Array(buf.slice(0, 8000)).indexOf(0) >= 0) throw new Error('Binary file – not shown.');
+  return new TextDecoder('utf-8').decode(buf);
+}
+async function ccPickFile(S, path, user, quiet) {
+  const sd = _cc[S], tok = ++sd.ftok; sd.filePath = path || '';
+  let text = '', msg = '';
+  if (path) { const n = sd.files.find(f => f.path === path); if (n) { try { text = await ccReadNode(n); } catch (e) { msg = e.message; } } }
+  if (tok !== sd.ftok) return;
+  sd.msg = msg; ccSetText(S, text, path || '', null); sd.lang = 'auto';
+  if (user && _cc.o.match && _cc.lambda && path) {
+    const OS = S === 'L' ? 'R' : 'L', O = _cc[OS], m = O.files.find(f => f.path.toLowerCase() === path.toLowerCase());
+    if (m && O.filePath !== m.path) await ccPickFile(OS, m.path, false, true);
+  }
+  if (!quiet) ccAfterLoad();
+}
+
+// ── Lambda: scan all files ────────────────────────────────────────────────────
+function ccNormText(t) {
+  t = t.replace(/\r\n?/g, '\n');
+  if (_cc.o.ws) t = t.split('\n').map(l => l.replace(/\s+/g, ' ').trim()).join('\n');
+  return _cc.o.ic ? t.toLowerCase() : t;
+}
+async function ccScan() {
+  const L = _cc.L, R = _cc.R; if (_cc.scanBusy || (!L.files.length && !R.files.length)) return;
+  _cc.scanBusy = true; _cc.scan = null;
+  const key = [L.fn, L.di, R.fn, R.di].join('|'), ml = new Map(L.files.map(f => [f.path.toLowerCase(), f])), mr = new Map(R.files.map(f => [f.path.toLowerCase(), f]));
+  const paths = [...new Set([...ml.keys(), ...mr.keys()])].sort(ccNatural), res = [];
+  for (let i = 0; i < paths.length; i++) {
+    const p = paths[i], a = ml.get(p), b = mr.get(p);
+    if (i % 4 === 0) { _cc.scanMsg = 'Scanning ' + (i + 1) + ' / ' + paths.length + '…'; ccRenderFiles(); await new Promise(r => setTimeout(r, 0)); }
+    if (key !== [L.fn, L.di, R.fn, R.di].join('|')) { _cc.scanBusy = false; return; }   // a side changed meanwhile
+    if (!b) res.push({ p: a.path, lp: a.path, rp: '', st: 'del' });
+    else if (!a) res.push({ p: b.path, lp: '', rp: b.path, st: 'add' });
+    else {
+      let st = 'same';
+      try { st = ccNormText(await ccReadNode(a)) === ccNormText(await ccReadNode(b)) ? 'same' : 'mod'; } catch (e) { st = 'skip'; }
+      res.push({ p: a.path, lp: a.path, rp: b.path, st });
+    }
+  }
+  _cc.scan = res; _cc.scanBusy = false; _cc.scanMsg = ''; ccRenderFiles();
+}
+async function ccOpenScan(i) {
+  const r = (_cc.scan || [])[i]; if (!r) return;
+  _cc.L.ftok++; _cc.R.ftok++;
+  await Promise.all([ccPickFile('L', r.lp, false, true), ccPickFile('R', r.rp, false, true)]);
+  _cc.L.msg = r.lp ? _cc.L.msg : 'Not present in this Lambda.'; _cc.R.msg = r.rp ? _cc.R.msg : 'Not present in this Lambda.';
+  _cc.L.name = r.lp; _cc.R.name = r.rp;
+  _cc.mode = 'diff'; _cc.exp.clear(); _cc.cur = -1; ccRenderHeads(); ccRenderFiles(); ccRender();
+}
+function ccScanIdx() { const p = (_cc.L.filePath || _cc.R.filePath || '').toLowerCase(); return (_cc.scan || []).findIndex(r => r.p.toLowerCase() === p); }
+function ccFileStep(d) {
+  const sc = _cc.scan || [], ch = sc.map((r, i) => (r.st === 'same' || r.st === 'skip') ? -1 : i).filter(i => i >= 0); if (!ch.length) return;
+  const cur = ccScanIdx(); let t = d > 0 ? ch.find(i => i > cur) : [...ch].reverse().find(i => i < cur);
+  if (t === undefined) t = d > 0 ? ch[0] : ch[ch.length - 1];
+  ccOpenScan(t);
+}
+function ccSetScanF(f) { _cc.scanF = f; ccRenderFiles(); }
+
+// ── headers / file panel ──────────────────────────────────────────────────────
+function ccHeadHtml(S) {
+  const sd = _cc[S], lam = _cc.lambda, title = S === 'L' ? 'Left' : 'Right';
+  const langSel = '<select class="lm-input cc-sel" style="flex:0 1 120px" onchange="ccSetLang(\'' + S + '\',this.value)" title="Language used for colouring">' + CC_LANGS.map(l => '<option value="' + l[0] + '"' + (sd.lang === l[0] ? ' selected' : '') + '>' + (l[0] === 'auto' ? 'Auto · ' + esc(ccLangName(ccLang(sd))) : l[1]) + '</option>').join('') + '</select>';
+  let h = '<div class="cc-head"><span class="cc-ttl">' + title + '</span>';
+  if (lam) {
+    if (_cc.fns === null) h += '<div class="cc-msg">Loading functions…</div>';
+    else if (_cc.fnErr) h += '<div class="cc-msg bad">' + esc(_cc.fnErr) + '</div><div class="cc-msg">' + (_cc.needPerm ? '<button type="button" class="btn" onclick="ccGrant()"><i class="ti ti-lock-open"></i> Allow access</button>' : '<button type="button" class="btn" onclick="ccPickBackup()"><i class="ti ti-folder-code"></i> Select backup folder</button>') + '</div>';
+    else {
+      h += '<input type="text" class="lm-input cc-sel cc-flt" placeholder="Filter…" value="' + esc(_cc.flt[S] || '') + '" oninput="ccFilterFn(\'' + S + '\',this.value)" aria-label="Filter functions">'
+        + '<select class="lm-input cc-sel" id="cc-fn-' + S + '" onchange="ccSelectFn(\'' + S + '\',this.value)" aria-label="Lambda function">' + ccFnOptions(S) + '</select>';
+      if (sd.dates.length) h += '<select class="lm-input cc-sel" id="cc-dt-' + S + '" onchange="ccSelectDate(\'' + S + '\',+this.value)" title="Backup date" aria-label="Backup date">' + sd.dates.map((d, i) => '<option value="' + i + '"' + (i === sd.di ? ' selected' : '') + '>' + esc(d.name) + (i === 0 ? ' (latest)' : '') + '</option>').join('') + '</select>';
+      if (sd.files.length) h += '<select class="lm-input cc-sel" style="flex:1 1 100%" id="cc-fl-' + S + '" onchange="ccPickFile(\'' + S + '\',this.value,true)" title="File in this backup" aria-label="File">' + sd.files.map(f => '<option value="' + esc(f.path) + '"' + (f.path === sd.filePath ? ' selected' : '') + '>' + esc(f.path) + '</option>').join('') + '</select>';
+    }
+  } else {
+    h += '<span class="cc-fname" title="' + esc(sd.name) + '">' + (sd.name ? esc(sd.name) : '<i style="color:var(--text-tertiary)">no file</i>') + '</span>'
+      + '<button type="button" class="btn" onclick="ccOpenLocal(\'' + S + '\')" title="Open a file from your computer (or drop one on the text)"><i class="ti ti-file-import"></i> Open</button>'
+      + '<button type="button" class="btn" onclick="ccPaste(\'' + S + '\')" title="Paste from the clipboard"><i class="ti ti-clipboard"></i> Paste</button>';
+  }
+  h += langSel + '<button type="button" class="btn" onclick="ccCopy(\'' + S + '\',this)" title="Copy this side"><i class="ti ti-clipboard-copy"></i></button>'
+    + '<button type="button" class="btn" onclick="ccDownload(\'' + S + '\')" title="Download this side as a file"><i class="ti ti-download"></i></button>';
+  if (!lam && sd.handle) h += '<button type="button" class="btn" onclick="ccSave(\'' + S + '\',this)" title="Save changes back to the opened file"><i class="ti ti-device-floppy"></i> Save</button>';
+  if (!lam) h += '<button type="button" class="btn" onclick="ccClearSide(\'' + S + '\')" title="Clear this side"><i class="ti ti-eraser"></i></button>';
+  if (sd.msg) h += '<div class="cc-msg' + (/not shown|larger|Could not|Not present/.test(sd.msg) ? ' bad' : '') + '">' + esc(sd.msg) + '</div>';
+  return h + '</div>';
+}
+function ccRenderHeads() { ccInit(); const el = document.getElementById('cc-heads'); if (el) el.innerHTML = ccHeadHtml('L') + ccHeadHtml('R'); ccSyncOptUi(); }
+function ccRenderFiles() {
+  const el = document.getElementById('cc-files'); if (!el) return;
+  if (!_cc.lambda || (!_cc.L.files.length && !_cc.R.files.length)) { el.classList.add('hidden'); el.innerHTML = ''; return; }
+  el.classList.remove('hidden');
+  const sc = _cc.scan, cnt = f => !sc ? 0 : sc.filter(r => f === 'all' ? true : f === 'chg' ? (r.st === 'mod') : f === 'add' ? r.st === 'add' : f === 'del' ? r.st === 'del' : f === 'same' ? r.st === 'same' : false).length;
+  let h = '<div class="cc-fhead"><button type="button" class="btn" onclick="ccScan()" ' + (_cc.scanBusy ? 'disabled' : '') + ' title="Read every file in both backups and list which ones differ"><i class="ti ti-list-search"></i> ' + (sc ? 'Re-scan' : 'Scan all files') + '</button>';
+  if (_cc.scanBusy) h += '<span>' + esc(_cc.scanMsg) + '</span>';
+  else if (!sc) h += '<span style="color:var(--text-tertiary)">Find out which files differ between the two Lambdas (' + _cc.L.files.length + ' left, ' + _cc.R.files.length + ' right).</span>';
+  else {
+    h += [['all', 'All'], ['chg', 'Modified'], ['del', 'Only left'], ['add', 'Only right'], ['same', 'Identical']].map(x => '<button type="button" class="cc-fchip' + (_cc.scanF === x[0] ? ' on' : '') + '" onclick="ccSetScanF(\'' + x[0] + '\')">' + x[1] + ' ' + cnt(x[0]) + '</button>').join('')
+      + '<button type="button" class="btn" onclick="ccFileStep(-1)" title="Previous changed file"><i class="ti ti-chevron-left"></i> File</button><button type="button" class="btn" onclick="ccFileStep(1)" title="Next changed file">File <i class="ti ti-chevron-right"></i></button>';
+  }
+  h += '</div>';
+  if (sc) {
+    const f = _cc.scanF, cur = ccScanIdx(), lab = { mod: 'Modified', add: 'Only right', del: 'Only left', same: 'Identical', skip: 'Skipped' };
+    sc.forEach((r, i) => { if (f === 'chg' && r.st !== 'mod') return; if (f === 'add' && r.st !== 'add') return; if (f === 'del' && r.st !== 'del') return; if (f === 'same' && r.st !== 'same') return;
+      h += '<div class="cc-frow' + (i === cur ? ' cur' : '') + '" onclick="ccOpenScan(' + i + ')" title="' + esc(r.p) + '"><span class="cc-badge ' + r.st + '">' + lab[r.st] + '</span><span class="p">' + esc(r.p) + '</span></div>'; });
+  }
+  el.innerHTML = h;
+}
+
 
 // ── Break timer ───────────────────────────────────────────────────────────────
 
