@@ -3317,6 +3317,7 @@ tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--vs-focus); color: var(--vs-ln
         <label class="cc-chip" id="jt-o-indent" title="Indentation">Indent <select id="jt-indent" onchange="jtRun()"><option value="2">2 spaces</option><option value="4">4 spaces</option><option value="tab">Tab</option></select></label>
         <label class="cc-chip" id="jt-o-sort" title="Sort object keys alphabetically"><input type="checkbox" id="jt-sort" onchange="jtRun()"> Sort keys</label>
         <label class="cc-chip" id="jt-o-delim" title="CSV delimiter (used for CSV input and output)">Delimiter <select id="jt-delim" onchange="jtRun()"><option value=",">Comma</option><option value=";">Semicolon</option><option value="&#9;">Tab</option><option value="|">Pipe</option></select></label>
+        <label class="cc-chip" id="jt-o-nested" title="Also convert string values that contain JSON into real objects / arrays"><input type="checkbox" id="jt-nested" onchange="jtRun()"> Expand nested JSON strings</label>
         <label class="cc-chip" id="jt-o-types" title="When reading CSV / XML, turn 123, true and null into numbers / booleans / null"><input type="checkbox" id="jt-types" checked onchange="jtRun()"> Detect types</label>
       </div>
       <div class="jwt-out" id="jt-out"></div>
@@ -32879,15 +32880,44 @@ function jtCtx(text, pos) {
   const col = p.col - 1, start = Math.max(0, col - 40), piece = text.slice(p.ls, le).replace(/\r$/, '').slice(start, col + 50).replace(/\t/g, ' '), pre = start > 0 ? '…' : '';
   return pre + piece + '\n' + ' '.repeat(pre.length + col - start) + '^';
 }
+// A JSON string that itself contains JSON ("{\"a\":1}"), even when it was stringified several times, is unwrapped layer by layer.
+function jtUnwrap(v) {
+  let cur = v, layers = 0;
+  while (typeof cur === 'string' && layers < 25) {
+    const t = cur.trim();
+    if (!/^[\[{"]/.test(t)) break;
+    try { cur = jtJsonParse(t, false).value; layers++; } catch (e) { break; }
+  }
+  return { value: layers ? cur : v, layers };
+}
+// Optional: also turn string values that hold JSON objects / arrays into real objects / arrays.
+function jtExpand(v, d) {
+  d = d || 0; if (d > 200) return v;
+  if (typeof v === 'string') {
+    const t = v.trim();
+    if (t.length > 1 && /^[\[{]/.test(t)) { try { const r = jtUnwrap(jtJsonParse(t, false).value).value; if (r !== null && typeof r === 'object') return jtExpand(r, d + 1); } catch (e) {} }
+    return v;
+  }
+  if (Array.isArray(v)) return v.map(x => jtExpand(x, d + 1));
+  if (jtIsObj(v)) { const o = Object.create(null); Object.keys(v).forEach(k => { o[k] = jtExpand(v[k], d + 1); }); return o; }
+  return v;
+}
 function jtParseInput() {
   const text = uEl('jt-input').value, from = uEl('jt-from').value, types = uEl('jt-types').checked;
   if (!text.trim()) return null;
   try {
     if (from === 'csv') { const d = uEl('jt-delim').value, v = jtCsvParse(text, d, types); return { ok: true, value: v, kind: 'CSV', note: v.length + (v.length === 1 ? ' row' : ' rows') + ' converted' }; }
     if (from === 'xml') return { ok: true, value: jtXmlParse(text, types), kind: 'XML', note: 'XML converted' };
-    const r = jtJsonParse(text, false);
-    return { ok: true, value: r.value, kind: 'JSON', dups: r.dups, lossy: r.lossy };
+    const r = jtJsonParse(text, false), u = jtUnwrap(r.value);
+    let val = u.value; if (uEl('jt-nested').checked) val = jtExpand(val);
+    return { ok: true, value: val, kind: 'JSON', dups: r.dups, lossy: r.lossy, layers: u.layers };
   } catch (e) {
+    if (from === 'json' && /^\s*[\[{]/.test(text) && /\\"/.test(text)) {   // escaped JSON pasted without its outer quotes: {\"a\":1}
+      try {
+        const u = jtUnwrap(jtJsonParse('"' + text.trim() + '"', false).value);
+        if (u.value !== null && typeof u.value === 'object') return { ok: true, value: uEl('jt-nested').checked ? jtExpand(u.value) : u.value, kind: 'JSON', layers: Math.max(1, u.layers), escaped: true };
+      } catch (x) {}
+    }
     const res = { ok: false, kind: from === 'json' ? 'JSON' : from.toUpperCase(), message: e.message, pos: typeof e.pos === 'number' ? e.pos : -1, text };
     if (from === 'json' && text.length < 4000000) { try { jtJsonParse(text, true); res.repairable = true; } catch (x) {} }
     return res;
@@ -32903,7 +32933,7 @@ function jtStatus(r) {
     if (r.dups && r.dups.length) warn.push('Duplicate key' + (r.dups.length > 1 ? 's' : '') + ': ' + Array.from(new Set(r.dups)).slice(0, 3).map(k => '"' + k + '"').join(', ') + ' — the last value wins');
     if (r.lossy) warn.push('Some numbers are too large or precise for JavaScript and will be rounded in the output');
     st.className = 'jt-status ' + (warn.length ? 'warn' : 'ok');
-    st.innerHTML = '<i class="ti ' + (warn.length ? 'ti-alert-triangle' : 'ti-circle-check') + '" style="font-size:15px"></i><span class="jt-msg"><b>' + (r.kind === 'JSON' ? 'Valid JSON' : r.note) + '</b> · ' + what + ' · ' + s.nodes.toLocaleString() + ' values · depth ' + s.depth + ' · ' + jtSizeLabel(new Blob([uEl('jt-input').value]).size)
+    st.innerHTML = '<i class="ti ' + (warn.length ? 'ti-alert-triangle' : 'ti-circle-check') + '" style="font-size:15px"></i><span class="jt-msg"><b>' + (r.kind === 'JSON' ? 'Valid JSON' + (r.layers ? ' · unwrapped ' + r.layers + (r.layers === 1 ? ' layer' : ' layers') + ' of string-encoded JSON' : '') : r.note) + '</b> · ' + what + ' · ' + s.nodes.toLocaleString() + ' values · depth ' + s.depth + ' · ' + jtSizeLabel(new Blob([uEl('jt-input').value]).size)
       + warn.map(w => '<br>' + uEsc(w)).join('') + '</span>';
     return;
   }
@@ -32931,7 +32961,7 @@ function jtRender() {
   const show = (id, on) => uEl(id).classList.toggle('jt-hide', !on);
   show('jt-o-indent', tab === 'format' || tab === 'xml' || tab === 'ts');
   show('jt-o-delim', tab === 'csv' || from === 'csv');
-  show('jt-o-types', from !== 'json');
+  show('jt-o-types', from !== 'json'); show('jt-o-nested', from === 'json');
   show('jt-opts', true);
   uEl('jt-input').placeholder = from === 'csv' ? 'Paste CSV here — the first row is the header…' : from === 'xml' ? 'Paste XML here…' : 'Paste JSON here — it is validated as you type…';
   const dis = on => { ['jt-copy', 'jt-dl', 'jt-apply'].forEach(id => { uEl(id).disabled = !on; }); };
