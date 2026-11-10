@@ -32902,6 +32902,32 @@ function jtExpand(v, d) {
   if (jtIsObj(v)) { const o = Object.create(null); Object.keys(v).forEach(k => { o[k] = jtExpand(v[k], d + 1); }); return o; }
   return v;
 }
+// Fallback for text that is not valid JSON but is clearly JSON that was escaped / copied badly: doubled backslashes (\\\" instead of \"),
+// escaped JSON without its outer quotes, and URLs that a chat or editor turned into Markdown links ([url](url)).
+function jtSalvage(text) {
+  const t0 = text.trim(), md = /\[(https?:[^\]\s]+)\]\(https?:[^)\s]+\)/g, noMd = t0.replace(md, '$1');
+  const bases = [[t0, false]]; if (noMd !== t0) bases.push([noMd, true]);
+  for (const base of bases) {
+    let c = base[0];
+    for (let k = 0; k <= 4; k++) {
+      for (const quoted of [false, true]) {
+        if (quoted && !/^[\[{]/.test(c)) continue;
+        try {
+          const u = jtUnwrap(jtJsonParse(quoted ? '"' + c + '"' : c, false).value);
+          if (u.value !== null && typeof u.value === 'object' && (u.layers || k || base[1])) {
+            const fixes = [];
+            if (k) fixes.push('collapsed doubled backslashes' + (k > 1 ? ' (' + k + '×)' : ''));
+            if (base[1]) fixes.push('removed Markdown link wrappers around URLs');
+            if (quoted) fixes.push('added the missing outer quotes');
+            return { value: u.value, layers: Math.max(1, u.layers), fixes };
+          }
+        } catch (e) {}
+      }
+      const n = c.replace(/\\\\/g, '\\'); if (n === c) break; c = n;
+    }
+  }
+  return null;
+}
 function jtParseInput() {
   const text = uEl('jt-input').value, from = uEl('jt-from').value, types = uEl('jt-types').checked;
   if (!text.trim()) return null;
@@ -32912,11 +32938,9 @@ function jtParseInput() {
     let val = u.value; if (uEl('jt-nested').checked) val = jtExpand(val);
     return { ok: true, value: val, kind: 'JSON', dups: r.dups, lossy: r.lossy, layers: u.layers };
   } catch (e) {
-    if (from === 'json' && /^\s*[\[{]/.test(text) && /\\"/.test(text)) {   // escaped JSON pasted without its outer quotes: {\"a\":1}
-      try {
-        const u = jtUnwrap(jtJsonParse('"' + text.trim() + '"', false).value);
-        if (u.value !== null && typeof u.value === 'object') return { ok: true, value: uEl('jt-nested').checked ? jtExpand(u.value) : u.value, kind: 'JSON', layers: Math.max(1, u.layers), escaped: true };
-      } catch (x) {}
+    if (from === 'json') {
+      const sv = jtSalvage(text);
+      if (sv) return { ok: true, value: uEl('jt-nested').checked ? jtExpand(sv.value) : sv.value, kind: 'JSON', layers: sv.layers, fixes: sv.fixes };
     }
     const res = { ok: false, kind: from === 'json' ? 'JSON' : from.toUpperCase(), message: e.message, pos: typeof e.pos === 'number' ? e.pos : -1, text };
     if (from === 'json' && text.length < 4000000) { try { jtJsonParse(text, true); res.repairable = true; } catch (x) {} }
@@ -32934,7 +32958,7 @@ function jtStatus(r) {
     if (r.lossy) warn.push('Some numbers are too large or precise for JavaScript and will be rounded in the output');
     st.className = 'jt-status ' + (warn.length ? 'warn' : 'ok');
     st.innerHTML = '<i class="ti ' + (warn.length ? 'ti-alert-triangle' : 'ti-circle-check') + '" style="font-size:15px"></i><span class="jt-msg"><b>' + (r.kind === 'JSON' ? 'Valid JSON' + (r.layers ? ' · unwrapped ' + r.layers + (r.layers === 1 ? ' layer' : ' layers') + ' of string-encoded JSON' : '') : r.note) + '</b> · ' + what + ' · ' + s.nodes.toLocaleString() + ' values · depth ' + s.depth + ' · ' + jtSizeLabel(new Blob([uEl('jt-input').value]).size)
-      + warn.map(w => '<br>' + uEsc(w)).join('') + '</span>';
+      + (r.fixes && r.fixes.length ? '<br>Input was repaired: ' + uEsc(r.fixes.join(', ')) : '') + warn.map(w => '<br>' + uEsc(w)).join('') + '</span>';
     return;
   }
   let where = '', ctx = '', btns = '';
