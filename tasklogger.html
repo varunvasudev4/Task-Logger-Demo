@@ -559,7 +559,22 @@ html.is-touch .search-btn { display: inline-flex; }
 
 /* ── Utilities → JSON Tool (format / validate / convert) ── */
 .jt-hide { display: none !important; }
-.jt-seg { display: flex; flex-wrap: wrap; gap: 0; margin: 0; }
+.jt-drop { position: absolute; inset: 0; z-index: 5; background: color-mix(in srgb, var(--blue-mid) 14%, var(--bg)); border: 3px dashed var(--blue-mid); display: flex; align-items: center; justify-content: center; pointer-events: none; font: 600 18px var(--font-ui); color: var(--blue-dark); }
+.jt-drop i { font-size: 34px; display: block; text-align: center; margin-bottom: 8px; }
+.jt-drop > div { text-align: center; }
+.jt-gridwrap { display: block; }
+.jt-grid { border-collapse: separate; border-spacing: 0; font: 12px var(--font-mono); width: max-content; min-width: 100%; }
+.jt-grid th, .jt-grid td { border-right: 1px solid var(--border-md); border-bottom: 1px solid var(--border-md); padding: 3px 9px; white-space: nowrap; max-width: 320px; overflow: hidden; text-overflow: ellipsis; text-align: left; }
+.jt-grid thead th { position: sticky; top: 0; z-index: 2; background: var(--bg-secondary); color: var(--text-secondary); font-weight: 600; text-align: center; border-top: 1px solid var(--border-md); }
+.jt-grid th.rn { position: sticky; left: 0; z-index: 1; background: var(--bg-secondary); color: var(--text-tertiary); font-weight: 500; text-align: center; min-width: 38px; border-left: 1px solid var(--border-md); }
+.jt-grid thead th.rn { z-index: 3; }
+.jt-grid tr.hd td { font-weight: 700; background: color-mix(in srgb, var(--blue-mid) 10%, var(--bg)); }
+.jt-grid td.num { text-align: right; color: var(--blue-mid); }
+.jt-grid td.nul { background: color-mix(in srgb, var(--text-tertiary) 6%, transparent); }
+.jt-grid tbody tr:hover td { background: color-mix(in srgb, var(--blue-mid) 8%, var(--bg)); }
+.jt-seg { display: flex; flex-wrap: nowrap; flex: 0 0 auto; margin: 0; }
+.jt-seg button { padding: 5px 8px; }
+#jt-overlay .jwt-pane-head { flex-wrap: wrap; row-gap: 4px; }
 .jt-seg.b64-seg { margin-left: 0; }
 .jt-opts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 6px 14px; border-bottom: 1px solid var(--border); background: var(--bg); }
 .jt-opts select { font: 12px var(--font-mono); background: var(--bg); color: var(--text-primary); border: 1px solid var(--border-md); border-radius: 4px; padding: 2px 4px; }
@@ -3281,6 +3296,7 @@ tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--vs-focus); color: var(--vs-ln
     <button type="button" class="ttl-hdr-widget idle" onclick="ttlConsOpen(event)" title="Time tracker — click to start / pause tasks" aria-label="Open time tracker"><span class="ttl-hw-dot"></span><span class="ttl-hw-lbl">Worked</span><span class="ttl-hw-time">00:00:00</span></button>
     <button type="button" class="btn-icon" onclick="closeJsonTool()" title="Close (Esc)" aria-label="Close JSON tool"><i class="ti ti-x"></i></button>
   </div>
+  <div class="jt-drop jt-hide" id="jt-drop"><div><i class="ti ti-upload"></i>Drop a .json, .xml or .csv file to load it</div></div>
   <div class="jwt-body">
     <div class="jwt-pane">
       <div class="jwt-pane-head">
@@ -3290,11 +3306,11 @@ tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--vs-focus); color: var(--vs-ln
         </select>
         <button type="button" class="btn" onclick="jtSample()" title="Insert a sample"><i class="ti ti-sparkles"></i> Sample</button>
         <button type="button" class="btn" onclick="uPaste('jt-input', jtRun)" title="Paste from the clipboard"><i class="ti ti-clipboard"></i> Paste</button>
-        <button type="button" class="btn" onclick="document.getElementById('jt-file').click()" title="Open a .json, .csv or .xml file"><i class="ti ti-file-import"></i> Open</button>
+        <button type="button" class="btn" onclick="document.getElementById('jt-file').click()" title="Open a .json, .csv or .xml file — or drag and drop one anywhere on this screen"><i class="ti ti-file-import"></i> Open</button>
         <button type="button" class="btn" onclick="jtClear()" title="Clear"><i class="ti ti-eraser"></i> Clear</button>
         <input type="file" id="jt-file" accept=".json,.csv,.tsv,.xml,.txt,text/*,application/json" hidden onchange="jtFilePicked(this)">
       </div>
-      <textarea class="jwt-in md-in" id="jt-input" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" placeholder="Paste JSON here — it is validated as you type…" oninput="jtRun()"></textarea>
+      <textarea class="jwt-in md-in" id="jt-input" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" placeholder="Paste JSON here, or drop a .json / .xml / .csv file — it is validated as you type…" oninput="jtRun()"></textarea>
       <div class="jt-status" id="jt-status"></div>
     </div>
     <div class="jwt-pane">
@@ -32785,21 +32801,46 @@ function jtFlatten(v, prefix, out) {
   } else out[prefix || 'value'] = v;
   return out;
 }
-function jtToCsv(v, d) {
-  const cell = x => {
-    let s = x === null || x === undefined ? '' : typeof x === 'object' ? JSON.stringify(x) : String(x);
-    if (s.indexOf(d) !== -1 || /["\r\n]/.test(s) || /^\s|\s$/.test(s)) s = '"' + s.replace(/"/g, '""') + '"';
-    return s;
-  };
+// Rows for the CSV tab: { rows: [[cell…]…], header: true when the first row holds the column names }
+function jtCsvMatrix(v) {
   const items = Array.isArray(v) ? v : [v];
-  if (items.length && items.every(Array.isArray)) return items.map(r => r.map(cell).join(d)).join('\n');
-  const keys = [], seen = new Set(), rows = items.map(it => {
+  if (items.length && items.every(Array.isArray)) return { rows: items, header: false };
+  const keys = [], seen = new Set(), flat = items.map(it => {
     const f = jtIsObj(it) ? jtFlatten(it, '', Object.create(null)) : { value: it };
     Object.keys(f).forEach(k => { if (!seen.has(k)) { seen.add(k); keys.push(k); } });
     return f;
   });
-  if (!keys.length) return '';
-  return [keys.map(cell).join(d)].concat(rows.map(r => keys.map(k => cell(r[k])).join(d))).join('\n');
+  if (!keys.length) return { rows: [], header: false };
+  return { rows: [keys].concat(flat.map(r => keys.map(k => r[k]))), header: true };
+}
+function jtCellText(x) { return x === null || x === undefined ? '' : typeof x === 'object' ? JSON.stringify(x) : String(x); }
+function jtToCsv(v, d) {
+  const cell = x => {
+    let s = jtCellText(x);
+    if (s.indexOf(d) !== -1 || /["\r\n]/.test(s) || /^\s|\s$/.test(s)) s = '"' + s.replace(/"/g, '""') + '"';
+    return s;
+  };
+  return jtCsvMatrix(v).rows.map(r => r.map(cell).join(d)).join('\n');
+}
+// Excel-style grid: column letters on top, row numbers on the left, first row bold when it is a header
+function jtColLetter(i) { let s = ''; for (i++; i > 0; i = Math.floor((i - 1) / 26)) s = String.fromCharCode(65 + (i - 1) % 26) + s; return s; }
+function jtGrid(m) {
+  if (!m.rows.length) return '<div class="jwt-empty"><i class="ti ti-table"></i>Nothing to show as a table.</div>';
+  const MAXR = 3000, MAXC = 200, cols = Math.min(MAXC, m.rows.reduce((a, r) => Math.max(a, r.length), 0)), rows = m.rows.slice(0, MAXR);
+  let h = '<div class="jt-gridwrap"><table class="jt-grid"><thead><tr><th class="rn"></th>';
+  for (let c = 0; c < cols; c++) h += '<th>' + jtColLetter(c) + '</th>';
+  h += '</tr></thead><tbody>';
+  rows.forEach((r, i) => {
+    h += '<tr' + (m.header && i === 0 ? ' class="hd"' : '') + '><th class="rn">' + (i + 1) + '</th>';
+    for (let c = 0; c < cols; c++) {
+      const x = r[c], t = jtCellText(x), cls = typeof x === 'number' ? ' class="num"' : x === null || x === undefined ? ' class="nul"' : '';
+      h += '<td' + cls + (t.length > 24 ? ' title="' + uEsc(t.slice(0, 500)) + '"' : '') + '>' + uEsc(t) + '</td>';
+    }
+    h += '</tr>';
+  });
+  h += '</tbody></table></div>';
+  const note = (m.rows.length > MAXR ? 'Showing the first ' + MAXR.toLocaleString() + ' of ' + m.rows.length.toLocaleString() + ' rows — Copy / Save include all rows.' : '') + (m.rows.reduce((a, r) => Math.max(a, r.length), 0) > MAXC ? ' Only the first ' + MAXC + ' columns are shown.' : '');
+  return h + (note ? '<div class="jwt-note" style="padding:6px 14px">' + uEsc(note) + '</div>' : '');
 }
 function jtXName(k) { let s = String(k).replace(/[^\w.\-\u00B7-\uFFFF]/g, '_'); if (!/^[A-Za-z_\u00C0-\uFFFF]/.test(s)) s = '_' + s; return s; }
 function jtXEsc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
@@ -32988,6 +33029,7 @@ function jtRender() {
   show('jt-o-types', from !== 'json'); show('jt-o-nested', from === 'json');
   show('jt-opts', true);
   uEl('jt-input').placeholder = from === 'csv' ? 'Paste CSV here — the first row is the header…' : from === 'xml' ? 'Paste XML here…' : 'Paste JSON here — it is validated as you type…';
+  out.style.padding = '';
   const dis = on => { ['jt-copy', 'jt-dl', 'jt-apply'].forEach(id => { uEl(id).disabled = !on; }); };
   if (!r || !r.ok) {
     _jt.outText = ''; dis(false);
@@ -32995,6 +33037,7 @@ function jtRender() {
       : '<div class="jwt-empty"><i class="ti ti-braces"></i>Paste or type on the left. JSON is validated live; use the tabs above to format, minify or convert it to YAML, CSV, XML or TypeScript.</div>';
     return;
   }
+  out.style.padding = tab === 'csv' ? '0' : '';
   let v = r.value; if (uEl('jt-sort').checked) v = jtSortDeep(v);
   const unit = jtUnit();
   let text = '', html = '';
@@ -33005,7 +33048,7 @@ function jtRender() {
     else if (tab === 'min') { text = JSON.stringify(v); html = '<pre class="jt-out-pre" style="white-space:pre-wrap;word-break:break-all">' + jtHl(text) + '</pre>'; }
     else {
       text = tab === 'yaml' ? jtToYaml(v) : tab === 'csv' ? jtToCsv(v, uEl('jt-delim').value) : tab === 'xml' ? jtToXml(v, unit) : jtToTs(v, unit === '\t' ? '\t' : unit);
-      html = '<pre class="jt-out-pre">' + uEsc(text) + '</pre>';
+      html = tab === 'csv' ? jtGrid(jtCsvMatrix(v)) : '<pre class="jt-out-pre">' + uEsc(text) + '</pre>';
     }
   } catch (e) { out.innerHTML = '<div class="jwt-err">Could not convert: ' + uEsc(e.message) + '</div>'; _jt.outText = ''; dis(false); return; }
   _jt.outText = text; out.innerHTML = html; dis(true);
@@ -33049,22 +33092,38 @@ function jtSample() {
   jtRun();
 }
 function jtClear() { uEl('jt-input').value = ''; jtRun(); uEl('jt-input').focus(); }
-function jtFilePicked(inp) {
-  const f = inp.files && inp.files[0]; inp.value = ''; if (!f) return;
-  if (f.size > 10 * 1024 * 1024) { uEl('jt-status').className = 'jt-status bad'; uEl('jt-status').textContent = 'That file is too large for this tool (limit 10 MB).'; return; }
+function jtFilePicked(inp) { const f = inp.files && inp.files[0]; inp.value = ''; if (f) jtLoadFile(f); }
+function jtLoadFile(f) {
+  const bad = m => { uEl('jt-status').className = 'jt-status bad'; uEl('jt-status').innerHTML = '<i class="ti ti-circle-x" style="font-size:15px"></i><span class="jt-msg">' + uEsc(m) + '</span>'; };
+  const ext = ((/\.([a-z0-9]+)$/i.exec(f.name) || [])[1] || '').toLowerCase();
+  if (f.size > 10 * 1024 * 1024) return bad('"' + f.name + '" is too large for this tool (limit 10 MB).');
+  if (!/^(json|xml|csv|tsv|txt|text|log|svg|geojson|jsonl)$/.test(ext) && !/^(text\/|application\/(json|xml))/.test(f.type)) return bad('"' + f.name + '" is not a JSON, XML or CSV file.');
   const r = new FileReader();
   r.onload = () => {
-    const ext = (/\.([a-z0-9]+)$/i.exec(f.name) || [])[1] || '';
-    uEl('jt-from').value = /^csv$/i.test(ext) ? 'csv' : /^tsv$/i.test(ext) ? 'csv' : /^xml$/i.test(ext) ? 'xml' : 'json';
-    if (/^tsv$/i.test(ext)) uEl('jt-delim').value = '\t';
-    uEl('jt-input').value = String(r.result || ''); jtRun();
+    const txt = String(r.result || ''), head = txt.replace(/^\uFEFF/, '').trimStart();
+    let kind = ext === 'csv' || ext === 'tsv' ? 'csv' : /^(xml|svg)$/.test(ext) ? 'xml' : /^(json|geojson)$/.test(ext) ? 'json' : /^</.test(head) ? 'xml' : /^[\[{"]/.test(head) ? 'json' : 'csv';
+    if (kind === 'csv') {   // pick the delimiter that appears most in the first line
+      const first = head.split(/\r?\n/)[0] || '', cnt = d => first.split(d).length - 1;
+      uEl('jt-delim').value = ext === 'tsv' ? '\t' : [',', ';', '\t', '|'].reduce((b, d) => cnt(d) > cnt(b) ? d : b, ',');
+    }
+    uEl('jt-from').value = kind; uEl('jt-input').value = txt; jtRun();
   };
+  r.onerror = () => bad('Could not read "' + f.name + '".');
   r.readAsText(f);
+}
+function jtWireDrop() {
+  const ov = uEl('jt-overlay'), dz = uEl('jt-drop'); let depth = 0;
+  const hasFiles = e => e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') !== -1;
+  const hide = () => { depth = 0; dz.classList.add('jt-hide'); };
+  ov.addEventListener('dragenter', e => { if (!hasFiles(e)) return; e.preventDefault(); depth++; dz.classList.remove('jt-hide'); });
+  ov.addEventListener('dragover', e => { if (!hasFiles(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
+  ov.addEventListener('dragleave', e => { if (!hasFiles(e)) return; if (--depth <= 0) hide(); });
+  ov.addEventListener('drop', e => { if (!hasFiles(e)) return; e.preventDefault(); e.stopPropagation(); hide(); const f = e.dataTransfer.files[0]; if (f) jtLoadFile(f); });
 }
 function openJsonTool() {
   if (!uOpen('jt-overlay', 'jt-input')) return;
   if (!_jt.wired) {
-    _jt.wired = true;
+    _jt.wired = true; jtWireDrop();
     uEl('jt-input').addEventListener('keydown', (e) => {
       if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); const t = e.target, s = t.selectionStart; t.value = t.value.slice(0, s) + '  ' + t.value.slice(t.selectionEnd); t.selectionStart = t.selectionEnd = s + 2; jtRun(); }
     });
