@@ -557,6 +557,36 @@ html.is-touch .search-btn { display: inline-flex; }
 .md-overlay .jwt-pane-head .btn:disabled, .rx-overlay .jwt-pane-head .btn:disabled, .rx-rep .btn:disabled { opacity: .45; cursor: not-allowed; }
 @media (max-width: 760px) { .case-lbl { flex-basis: 96px; } .rx-in { font-size: 16px; } .rx-ta, .rx-bdi { font-size: 16px; } .md-in { font-size: 16px; } }
 
+/* ── Utilities → JSON Tool (format / validate / convert) ── */
+.jt-hide { display: none !important; }
+.jt-seg { display: flex; flex-wrap: wrap; gap: 0; margin: 0; }
+.jt-seg.b64-seg { margin-left: 0; }
+.jt-opts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 6px 14px; border-bottom: 1px solid var(--border); background: var(--bg); }
+.jt-opts select { font: 12px var(--font-mono); background: var(--bg); color: var(--text-primary); border: 1px solid var(--border-md); border-radius: 4px; padding: 2px 4px; }
+.jt-opts label.cc-chip { padding: 2px 9px; }
+.jt-pane-head-sel { font: 12px var(--font-mono); background: var(--bg); color: var(--text-primary); border: 1px solid var(--border-md); border-radius: 4px; padding: 4px 6px; }
+.jt-status { display: flex; align-items: flex-start; gap: 8px; padding: 8px 14px; border-top: 1px solid var(--border); font: 12px/1.5 var(--font-mono); background: var(--bg-secondary); color: var(--text-secondary); flex-wrap: wrap; }
+.jt-status .jt-msg { flex: 1; min-width: 0; word-break: break-word; }
+.jt-status.ok { color: var(--green-dark); background: var(--green-bg); }
+.jt-status.bad { color: var(--red-mid); background: var(--red-bg); }
+.jt-status.warn { color: var(--amber-dark); }
+.jt-status .btn { padding: 2px 9px; font-size: 11px; }
+.jt-ctx { margin: 4px 0 0; padding: 6px 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; font: 12px/1.5 var(--font-mono); white-space: pre; overflow: auto; color: var(--text-primary); }
+.jt-out-pre { margin: 0; font: 12.5px/1.55 var(--font-mono); white-space: pre; tab-size: 4; color: var(--text-primary); }
+.jt-tree { font: 12.5px/1.6 var(--font-mono); }
+.jt-tree details { margin-left: 16px; }
+.jt-tree > details, .jt-tree > .jt-row { margin-left: 0; }
+.jt-tree summary { cursor: pointer; list-style: none; }
+.jt-tree summary::-webkit-details-marker { display: none; }
+.jt-tree summary::before { content: '▸'; display: inline-block; width: 14px; color: var(--text-tertiary); }
+.jt-tree details[open] > summary::before { content: '▾'; }
+.jt-tree .jt-row { margin-left: 30px; word-break: break-word; }
+.jt-tree .jt-sum { color: var(--text-tertiary); font-size: 11px; margin-left: 6px; }
+.jt-k { color: var(--purple-dark); } .jt-s { color: var(--green-dark); } .jt-n { color: var(--blue-mid); } .jt-b { color: var(--amber-dark); font-weight: 600; } .jt-null { color: var(--text-tertiary); font-style: italic; }
+@media (max-width: 760px) { .jt-pane-head-sel { font-size: 16px; } }
+
+.md-frame { flex: 1; width: 100%; min-height: 0; border: 0; background: #fff; }
+
 /* Task card */
 .task-card {
   background: var(--bg); border: 1px solid var(--border);
@@ -2699,9 +2729,10 @@ tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--vs-focus); color: var(--vs-ln
             <button class="btn" onclick="openB64Tool()" id="b64-menu-btn" title="Encode or decode Base64 for text and any file type"><i class="ti ti-binary"></i> Base64 Encoder / Decoder</button>
             <button class="btn" onclick="openTzConv()" id="tzc-menu-btn" title="Convert a date and time from one time zone to another"><i class="ti ti-world"></i> Time Zone Converter</button>
             <button class="btn" onclick="openCodeCompare()" id="cc-menu-btn" title="Compare JS, HTML, SQL and other code side by side and transfer changes"><i class="ti ti-git-compare"></i> Code Compare</button>
-            <button class="btn" onclick="openMdPreview()" id="md-menu-btn" title="Write Markdown and see it rendered live"><i class="ti ti-markdown"></i> Markdown Previewer</button>
+            <button class="btn" onclick="openMdPreview()" id="md-menu-btn" title="Write Markdown or HTML code on the left and see it rendered live on the right"><i class="ti ti-markdown"></i> Markdown / HTML Previewer</button>
             <button class="btn" onclick="openCaseConv()" id="case-menu-btn" title="Convert text between camelCase, snake_case, kebab-case and more"><i class="ti ti-letter-case"></i> Case Converter</button>
             <button class="btn" onclick="openRegexTester()" id="rx-menu-btn" title="Test a regular expression with live highlighting and capture groups"><i class="ti ti-regex"></i> Regex Tester</button>
+            <button class="btn" onclick="openJsonTool()" id="jt-menu-btn" title="Validate, format, minify and convert JSON (YAML, CSV, XML, TypeScript)"><i class="ti ti-braces"></i> JSON Formatter / Validator</button>
           </div>
         </div>
       </div>
@@ -3212,19 +3243,20 @@ tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--vs-focus); color: var(--vs-ln
 <!-- Utilities → Markdown Previewer: full-screen split view (Markdown on the left, rendered page on the right) -->
 <div class="jwt-overlay md-overlay hidden" id="md-overlay" role="dialog" aria-modal="true" aria-label="Markdown Previewer">
   <div class="lm-head">
-    <div class="lm-title"><i class="ti ti-markdown" style="font-size:18px;color:var(--blue-mid)"></i>Markdown Previewer</div>
+    <div class="lm-title"><i class="ti ti-markdown" style="font-size:18px;color:var(--blue-mid)"></i><span id="md-ttl">Markdown Previewer</span>
+      <div class="b64-seg" role="tablist" aria-label="Mode"><button type="button" id="md-seg-md" class="on" onclick="mdSetMode('md')">Markdown</button><button type="button" id="md-seg-html" onclick="mdSetMode('html')">HTML</button></div></div>
     <button type="button" class="ttl-hdr-widget idle" onclick="ttlConsOpen(event)" title="Time tracker — click to start / pause tasks" aria-label="Open time tracker"><span class="ttl-hw-dot"></span><span class="ttl-hw-lbl">Worked</span><span class="ttl-hw-time">00:00:00</span></button>
     <button type="button" class="btn-icon" onclick="closeMdPreview()" title="Close (Esc)" aria-label="Close Markdown previewer"><i class="ti ti-x"></i></button>
   </div>
   <div class="jwt-body">
     <div class="jwt-pane">
       <div class="jwt-pane-head">
-        <div class="jwt-pane-title">Markdown</div>
+        <div class="jwt-pane-title" id="md-pane-title">Markdown</div>
         <button type="button" class="btn" onclick="mdSample()" title="Insert a sample document"><i class="ti ti-sparkles"></i> Sample</button>
         <button type="button" class="btn" onclick="uPaste('md-input', mdRender)" title="Paste from the clipboard"><i class="ti ti-clipboard"></i> Paste</button>
-        <button type="button" class="btn" onclick="document.getElementById('md-file').click()" title="Open a .md or text file"><i class="ti ti-file-import"></i> Open</button>
+        <button type="button" class="btn" onclick="document.getElementById('md-file').click()" title="Open a .md, .html or text file"><i class="ti ti-file-import"></i> Open</button>
         <button type="button" class="btn" onclick="mdClear()" title="Clear"><i class="ti ti-eraser"></i> Clear</button>
-        <input type="file" id="md-file" accept=".md,.markdown,.txt,text/*" hidden onchange="mdFilePicked(this)">
+        <input type="file" id="md-file" accept=".md,.markdown,.html,.htm,.txt,text/*" hidden onchange="mdFilePicked(this)">
       </div>
       <textarea class="jwt-in md-in" id="md-input" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" placeholder="Type or paste Markdown here…" oninput="mdRender()"></textarea>
       <div class="b64-stat" id="md-stat"></div>
@@ -3232,10 +3264,62 @@ tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--vs-focus); color: var(--vs-ln
     <div class="jwt-pane">
       <div class="jwt-pane-head">
         <div class="jwt-pane-title">Preview</div>
+        <label class="cc-chip jt-hide" id="md-scripts-chip" title="Let JavaScript in the HTML run inside the preview (it is sandboxed and cannot reach this app)"><input type="checkbox" id="md-scripts" checked onchange="mdRender()"> Scripts</label>
         <button type="button" class="btn" id="md-copy" onclick="mdCopyHtml(this)" title="Copy the rendered HTML" disabled><i class="ti ti-clipboard-copy"></i> HTML</button>
         <button type="button" class="btn" id="md-dl" onclick="mdDownload()" title="Download the Markdown as document.md" disabled><i class="ti ti-download"></i> .md</button>
       </div>
       <div class="md-body" id="md-preview"></div>
+      <iframe class="md-frame jt-hide" id="md-frame" title="HTML preview" sandbox="allow-scripts allow-forms allow-modals allow-popups"></iframe>
+    </div>
+  </div>
+</div>
+
+<!-- Utilities → JSON Tool: validate, format, minify, repair and convert JSON (YAML / CSV / XML / TypeScript); CSV and XML can also be converted to JSON -->
+<div class="jwt-overlay jt-overlay hidden" id="jt-overlay" role="dialog" aria-modal="true" aria-label="JSON Formatter, Validator and Converter">
+  <div class="lm-head">
+    <div class="lm-title"><i class="ti ti-braces" style="font-size:18px;color:var(--blue-mid)"></i>JSON Formatter · Validator · Converter</div>
+    <button type="button" class="ttl-hdr-widget idle" onclick="ttlConsOpen(event)" title="Time tracker — click to start / pause tasks" aria-label="Open time tracker"><span class="ttl-hw-dot"></span><span class="ttl-hw-lbl">Worked</span><span class="ttl-hw-time">00:00:00</span></button>
+    <button type="button" class="btn-icon" onclick="closeJsonTool()" title="Close (Esc)" aria-label="Close JSON tool"><i class="ti ti-x"></i></button>
+  </div>
+  <div class="jwt-body">
+    <div class="jwt-pane">
+      <div class="jwt-pane-head">
+        <div class="jwt-pane-title">Input</div>
+        <select class="jt-pane-head-sel" id="jt-from" onchange="jtRun()" title="Format of the input" aria-label="Input format">
+          <option value="json">JSON</option><option value="csv">CSV → JSON</option><option value="xml">XML → JSON</option>
+        </select>
+        <button type="button" class="btn" onclick="jtSample()" title="Insert a sample"><i class="ti ti-sparkles"></i> Sample</button>
+        <button type="button" class="btn" onclick="uPaste('jt-input', jtRun)" title="Paste from the clipboard"><i class="ti ti-clipboard"></i> Paste</button>
+        <button type="button" class="btn" onclick="document.getElementById('jt-file').click()" title="Open a .json, .csv or .xml file"><i class="ti ti-file-import"></i> Open</button>
+        <button type="button" class="btn" onclick="jtClear()" title="Clear"><i class="ti ti-eraser"></i> Clear</button>
+        <input type="file" id="jt-file" accept=".json,.csv,.tsv,.xml,.txt,text/*,application/json" hidden onchange="jtFilePicked(this)">
+      </div>
+      <textarea class="jwt-in md-in" id="jt-input" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" placeholder="Paste JSON here — it is validated as you type…" oninput="jtRun()"></textarea>
+      <div class="jt-status" id="jt-status"></div>
+    </div>
+    <div class="jwt-pane">
+      <div class="jwt-pane-head">
+        <div class="b64-seg jt-seg" id="jt-tabs" role="tablist" aria-label="Output">
+          <button type="button" data-t="format" class="on" onclick="jtTab('format')">Format</button>
+          <button type="button" data-t="min" onclick="jtTab('min')">Minify</button>
+          <button type="button" data-t="tree" onclick="jtTab('tree')">Tree</button>
+          <button type="button" data-t="yaml" onclick="jtTab('yaml')">YAML</button>
+          <button type="button" data-t="csv" onclick="jtTab('csv')">CSV</button>
+          <button type="button" data-t="xml" onclick="jtTab('xml')">XML</button>
+          <button type="button" data-t="ts" onclick="jtTab('ts')" title="TypeScript interface">TS</button>
+        </div>
+        <span style="flex:1"></span>
+        <button type="button" class="btn" id="jt-apply" onclick="jtApply()" title="Replace the input with the formatted JSON" disabled><i class="ti ti-arrow-back-up"></i> Use as input</button>
+        <button type="button" class="btn" id="jt-copy" onclick="jtCopy(this)" title="Copy the output" disabled><i class="ti ti-clipboard-copy"></i> Copy</button>
+        <button type="button" class="btn" id="jt-dl" onclick="jtDownload()" title="Download the output" disabled><i class="ti ti-download"></i> Save</button>
+      </div>
+      <div class="jt-opts" id="jt-opts">
+        <label class="cc-chip" id="jt-o-indent" title="Indentation">Indent <select id="jt-indent" onchange="jtRun()"><option value="2">2 spaces</option><option value="4">4 spaces</option><option value="tab">Tab</option></select></label>
+        <label class="cc-chip" id="jt-o-sort" title="Sort object keys alphabetically"><input type="checkbox" id="jt-sort" onchange="jtRun()"> Sort keys</label>
+        <label class="cc-chip" id="jt-o-delim" title="CSV delimiter (used for CSV input and output)">Delimiter <select id="jt-delim" onchange="jtRun()"><option value=",">Comma</option><option value=";">Semicolon</option><option value="&#9;">Tab</option><option value="|">Pipe</option></select></label>
+        <label class="cc-chip" id="jt-o-types" title="When reading CSV / XML, turn 123, true and null into numbers / booleans / null"><input type="checkbox" id="jt-types" checked onchange="jtRun()"> Detect types</label>
+      </div>
+      <div class="jwt-out" id="jt-out"></div>
     </div>
   </div>
 </div>
@@ -32182,7 +32266,7 @@ function uPaste(id, cb) {
 }
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape' || ttlConsIsOpen()) return;
-  const tools = [['md-overlay', closeMdPreview], ['case-overlay', closeCaseConv], ['rx-overlay', closeRegexTester]];
+  const tools = [['md-overlay', closeMdPreview], ['case-overlay', closeCaseConv], ['rx-overlay', closeRegexTester], ['jt-overlay', closeJsonTool]];
   for (const t of tools) if (uIsOpen(t[0])) { e.stopImmediatePropagation(); e.preventDefault(); t[1](); return; }
 }, true);
 
@@ -32191,7 +32275,7 @@ document.addEventListener('keydown', (e) => {
 // harmless tags such as <br>, <kbd>, <sub> are honoured) and links / images are limited to safe schemes, so nothing in the
 // text can run script. Supports headings, emphasis, lists (nested + task lists), tables, code, quotes, links, images, rules.
 const MD_SAMPLE = '# Markdown preview\n\nWrite on the **left**, see it rendered on the *right* — with ~~no~~ live updates.\n\n## Lists\n\n- [x] Task lists\n- [ ] Nested items\n  - second level\n  - `inline code`\n\n1. Numbered\n2. Lists\n\n## Table\n\n| Tool | Shortcut | Notes |\n|:-----|:--------:|------:|\n| Preview | live | updates as you type |\n| Copy HTML | button | top right |\n\n## Code\n\n```js\nconst greet = (name) => `Hello, ${name}!`;\nconsole.log(greet("world"));\n```\n\n> Blockquotes work too.\n\nA [link](https://example.com), an auto-link https://example.com and a footnote-style [reference][docs].\n\n---\n\n[docs]: https://developer.mozilla.org "MDN"\n';
-let _md = { timer: 0, wired: false };
+let _md = { timer: 0, wired: false, mode: 'md', src: { md: '', html: '' } };
 function mdSafeUrl(u, img) {
   u = String(u).trim();
   if (img) return /^(https?:\/\/|data:image\/(png|jpe?g|gif|webp|avif|svg\+xml|bmp);base64,)/i.test(u);
@@ -32369,6 +32453,44 @@ function mdToHtml(src) {
   });
   return mdBlocks(lines, { refs, ids: {}, tight: false });
 }
+
+const MD_HTML_SAMPLE = [
+  '<!doctype html>', '<html lang="en">', '<head>', '  <meta charset="utf-8">', '  <title>Hello preview</title>', '  <style>',
+  '    body { font-family: system-ui, sans-serif; max-width: 560px; margin: 40px auto; padding: 0 16px; color: #1f2937; }',
+  '    h1 { color: #2563eb; }', '    button { padding: 8px 14px; border: 0; border-radius: 6px; background: #2563eb; color: #fff; cursor: pointer; }',
+  '    .card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 16px; margin-top: 16px; }', '  </style>', '</head>', '<body>',
+  '  <h1>HTML preview</h1>', '  <p>Edit the code on the <b>left</b> — this page updates on the <i>right</i>.</p>',
+  '  <div class="card">', '    <p>Clicked <span id="n">0</span> times</p>', '    <button onclick="n.textContent = +n.textContent + 1">Click me</button>', '  </div>', '</body>', '</html>', ''
+].join('\n');
+function mdSetMode(m) {
+  if (m === _md.mode) return;
+  const ta = uEl('md-input'), h = m === 'html';
+  _md.src[_md.mode] = ta.value; _md.mode = m; ta.value = _md.src[m];
+  uEl('md-seg-md').classList.toggle('on', !h); uEl('md-seg-html').classList.toggle('on', h);
+  uEl('md-ttl').textContent = h ? 'HTML Previewer' : 'Markdown Previewer';
+  uEl('md-overlay').setAttribute('aria-label', h ? 'HTML Previewer' : 'Markdown Previewer');
+  uEl('md-pane-title').textContent = h ? 'HTML code' : 'Markdown';
+  ta.placeholder = h ? 'Type or paste HTML here (a full page or just a snippet)…' : 'Type or paste Markdown here…';
+  uEl('md-scripts-chip').classList.toggle('jt-hide', !h);
+  uEl('md-preview').classList.remove('jt-hide'); uEl('md-frame').classList.add('jt-hide');
+  const c = uEl('md-copy'), d = uEl('md-dl');
+  c.innerHTML = h ? '<i class="ti ti-clipboard-copy"></i> Code' : '<i class="ti ti-clipboard-copy"></i> HTML';
+  c.title = h ? 'Copy the HTML code' : 'Copy the rendered HTML';
+  d.innerHTML = h ? '<i class="ti ti-download"></i> .html' : '<i class="ti ti-download"></i> .md';
+  d.title = h ? 'Download the code as page.html' : 'Download the Markdown as document.md';
+  mdRender();
+}
+// HTML mode: the code is shown in a sandboxed iframe (no same-origin access, so it cannot touch this app's data).
+function mdRenderHtml(t) {
+  const pv = uEl('md-preview'), fr = uEl('md-frame'), has = !!t.trim();
+  pv.classList.toggle('jt-hide', has); fr.classList.toggle('jt-hide', !has);
+  if (has) {
+    fr.setAttribute('sandbox', uEl('md-scripts').checked ? 'allow-scripts allow-forms allow-modals allow-popups' : 'allow-forms allow-popups');
+    fr.srcdoc = (/<!doctype/i.test(t) ? '' : '<!doctype html>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width,initial-scale=1">\n') + t;
+  } else { fr.removeAttribute('srcdoc'); pv.innerHTML = '<div class="jwt-empty"><i class="ti ti-code"></i>Type or paste HTML on the left — the page is shown here as you type.</div>'; }
+  uEl('md-stat').textContent = t.length.toLocaleString() + ' characters · ' + (t ? t.split('\n').length : 0) + ' lines';
+  uEl('md-copy').disabled = !has; uEl('md-dl').disabled = !has;
+}
 function openMdPreview() {
   if (!uOpen('md-overlay', 'md-input')) return;
   if (!_md.wired) {
@@ -32393,27 +32515,509 @@ function mdRender() {
   clearTimeout(_md.timer);
   const t = uEl('md-input').value;
   _md.timer = setTimeout(() => {
+    if (_md.mode === 'html') { mdRenderHtml(t); return; }
     const pv = uEl('md-preview');
     if (!t.trim()) { pv.innerHTML = '<div class="jwt-empty"><i class="ti ti-markdown"></i>Type or paste Markdown on the left — it is rendered here as you type.</div>'; }
     else { try { pv.innerHTML = mdToHtml(t); } catch (e) { pv.innerHTML = '<div class="jwt-err">Could not render: ' + uEsc(e.message) + '</div>'; } }
     const words = (t.trim().match(/\S+/g) || []).length;
     uEl('md-stat').textContent = words + ' words · ' + t.length.toLocaleString() + ' characters · ' + (t ? t.split('\n').length : 0) + ' lines' + (words > 150 ? ' · ~' + Math.max(1, Math.round(words / 220)) + ' min read' : '');
     uEl('md-copy').disabled = !t.trim(); uEl('md-dl').disabled = !t.trim();
-  }, t.length > 60000 ? 250 : 40);
+  }, (t.length > 60000 || _md.mode === 'html') ? 250 : 40);
 }
-function mdSample() { uEl('md-input').value = MD_SAMPLE; mdRender(); }
+function mdSample() { uEl('md-input').value = _md.mode === 'html' ? MD_HTML_SAMPLE : MD_SAMPLE; mdRender(); }
 function mdClear() { uEl('md-input').value = ''; mdRender(); uEl('md-input').focus(); }
-function mdCopyHtml(btn) { uCopy(uEl('md-preview').innerHTML.replace(/ id="mdp-[^"]*"/g, ''), btn); }
+function mdCopyHtml(btn) { if (_md.mode === 'html') { uCopy(uEl('md-input').value, btn); return; } uCopy(uEl('md-preview').innerHTML.replace(/ id="mdp-[^"]*"/g, ''), btn); }
 function mdDownload() {
-  const blob = new Blob([uEl('md-input').value], { type: 'text/markdown;charset=utf-8' }), a = document.createElement('a');
-  a.href = URL.createObjectURL(blob); a.download = 'document.md'; document.body.appendChild(a); a.click();
+  const isH = _md.mode === 'html', blob = new Blob([uEl('md-input').value], { type: isH ? 'text/html;charset=utf-8' : 'text/markdown;charset=utf-8' }), a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = isH ? 'page.html' : 'document.md'; document.body.appendChild(a); a.click();
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
 }
 function mdFilePicked(inp) {
   const f = inp.files && inp.files[0]; inp.value = ''; if (!f) return;
   if (f.size > 5 * 1024 * 1024) { uEl('md-stat').textContent = 'That file is too large for the previewer (limit 5 MB).'; return; }
+  if (/\.html?$/i.test(f.name)) mdSetMode('html'); else if (/\.(md|markdown)$/i.test(f.name)) mdSetMode('md');
   const r = new FileReader(); r.onload = () => { uEl('md-input').value = String(r.result || ''); mdRender(); }; r.readAsText(f);
 }
+
+// ── Utilities → JSON Tool ────────────────────────────────────────────────────────────────────────────
+// Validate (with line / column), format, minify, repair (lenient parse) and convert JSON to YAML / CSV / XML / TypeScript.
+// CSV and XML input can be converted to JSON. Everything runs locally in the browser; nothing is uploaded.
+const JT_NUM = /-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/y;
+const JT_NUML = /[+-]?(?:0[xX][0-9a-fA-F]+|Infinity|NaN|(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)/y;
+const JT_ESC = { '"': '"', '\\': '\\', '/': '/', b: '\b', f: '\f', n: '\n', r: '\r', t: '\t' };
+let _jt = { tab: 'format', res: null, outText: '', timer: 0, wired: false };
+
+// Own parser instead of JSON.parse: identical error wording / positions in every browser, duplicate-key and precision warnings,
+// and a lenient mode (comments, single quotes, trailing / missing commas, unquoted keys …) used by "Repair".
+function jtJsonParse(src, lenient) {
+  let i = 0; const n = src.length, dups = [], info = { lossy: false };
+  const fail = (m, p) => { const e = new Error(m); e.pos = p === undefined ? i : p; throw e; };
+  const show = c => c === undefined ? 'end of input' : c === '\n' ? 'a line break' : '"' + c + '"';
+  function ws() {
+    for (;;) {
+      const c = src[i];
+      if (c === ' ' || c === '\t' || c === '\n' || c === '\r' || (c === '\uFEFF' && i === 0)) i++;
+      else if (lenient && c === '/' && src[i + 1] === '/') { while (i < n && src[i] !== '\n') i++; }
+      else if (lenient && c === '/' && src[i + 1] === '*') { const e = src.indexOf('*/', i + 2); if (e < 0) fail('Unterminated comment', i); i = e + 2; }
+      else if (lenient && c === '\u00a0') i++;
+      else break;
+    }
+  }
+  function str(q) {
+    const st = i; i++; let out = '';
+    for (;;) {
+      if (i >= n) fail('Unterminated string — the closing quote is missing', st);
+      const c = src[i];
+      if (c === q) { i++; return out; }
+      if (c === '\\') {
+        const d = src[i + 1];
+        if (d !== undefined && JT_ESC[d] !== undefined) { out += JT_ESC[d]; i += 2; }
+        else if (d === 'u') {
+          const h = src.substr(i + 2, 4);
+          if (/^[0-9a-fA-F]{4}$/.test(h)) { out += String.fromCharCode(parseInt(h, 16)); i += 6; } else fail('Invalid \\u escape — 4 hex digits are required', i);
+        } else if (lenient && d !== undefined) { out += d; i += 2; }
+        else fail('Invalid escape sequence \\' + (d === undefined ? '' : d), i);
+      } else if (c < ' ' && !lenient) fail('Unescaped control character in a string — write it as \\n, \\t, …', i);
+      else { out += c; i++; }
+    }
+  }
+  function num() {
+    const st = i, re = lenient ? JT_NUML : JT_NUM; re.lastIndex = i;
+    const m = re.exec(src);
+    if (!m) fail('Invalid number', st);
+    i += m[0].length;
+    const s = m[0];
+    if (!lenient && /[\w.+\-]/.test(src[i] || '')) fail(/^-?0$/.test(s) && /\d/.test(src[i]) ? 'Leading zeros are not allowed in numbers' : 'Invalid number', st);
+    const v = Number(s);
+    if (!isFinite(v)) { info.lossy = true; return null; }
+    if (s.replace(/^[-+]?0*/, '').replace(/[eE].*$/, '').replace('.', '').length > 17) info.lossy = true;
+    return v;
+  }
+  function lit() {
+    const L = [['true', true], ['false', false], ['null', null]];
+    if (lenient) L.push(['True', true], ['False', false], ['None', null], ['undefined', null], ['NaN', null], ['Infinity', null]);
+    for (const w of L) if (src.startsWith(w[0], i) && !/[\w$]/.test(src[i + w[0].length] || '')) { i += w[0].length; return w[1]; }
+    const c = src[i];
+    if (c === "'") fail('Strings must use double quotes, not single quotes');
+    if (/[A-Za-z_$]/.test(c)) fail('Unexpected word — only true, false and null are allowed without quotes');
+    fail('Unexpected character ' + show(c));
+  }
+  function val(depth) {
+    if (depth > 400) fail('Nested too deeply');
+    ws(); const c = src[i];
+    if (c === undefined) fail('Unexpected end of input — a value is missing');
+    if (c === '{') return obj(depth);
+    if (c === '[') return arr(depth);
+    if (c === '"' || (lenient && c === "'")) return str(c);
+    if (c === '-' || (c >= '0' && c <= '9') || (lenient && (c === '+' || c === '.'))) return num();
+    return lit();
+  }
+  function obj(depth) {
+    const o = Object.create(null), st = i; i++; ws();
+    if (src[i] === '}') { i++; return o; }
+    for (;;) {
+      ws();
+      const c = src[i]; let k;
+      if (c === undefined) fail('Unterminated object — the closing "}" is missing', st);
+      if (c === '"' || (lenient && c === "'")) k = str(c);
+      else if (lenient && /[\w$]/.test(c)) { const m = /[\w$-]+/y; m.lastIndex = i; k = m.exec(src)[0]; i += k.length; }
+      else if (c === "'") fail('Property names must use double quotes');
+      else if (c === '}') fail('Trailing comma — a property name is expected before "}"');
+      else fail('Expected a property name in double quotes but found ' + show(c));
+      ws();
+      if (src[i] !== ':') fail('Expected ":" after the property name but found ' + show(src[i]));
+      i++;
+      const v = val(depth + 1);
+      if (k in o) dups.push(k);
+      o[k] = v; ws();
+      const d = src[i];
+      if (d === ',') {
+        const cp = i; i++; ws();
+        if (src[i] === '}') { if (lenient) { i++; return o; } fail('Trailing comma is not allowed in JSON', cp); }
+        continue;
+      }
+      if (d === '}') { i++; return o; }
+      if (d === undefined) fail('Unterminated object — the closing "}" is missing', st);
+      if (lenient) continue;
+      fail('Expected "," or "}" after the value but found ' + show(d));
+    }
+  }
+  function arr(depth) {
+    const a = [], st = i; i++; ws();
+    if (src[i] === ']') { i++; return a; }
+    for (;;) {
+      a.push(val(depth + 1)); ws();
+      const d = src[i];
+      if (d === ',') {
+        const cp = i; i++; ws();
+        if (src[i] === ']') { if (lenient) { i++; return a; } fail('Trailing comma is not allowed in JSON', cp); }
+        continue;
+      }
+      if (d === ']') { i++; return a; }
+      if (d === undefined) fail('Unterminated array — the closing "]" is missing', st);
+      if (lenient) continue;
+      fail('Expected "," or "]" after the value but found ' + show(d));
+    }
+  }
+  ws();
+  if (i >= n) fail('The input is empty', 0);
+  const v = val(0); ws();
+  if (i < n) fail('Unexpected ' + show(src[i]) + ' after the end of the JSON value' + (lenient ? '' : ' — only one value is allowed'));
+  return { value: v, dups, lossy: info.lossy };
+}
+
+function jtTyped(s, types) {
+  if (!types) return s;
+  if (s === 'true') return true; if (s === 'false') return false; if (s === 'null') return null;
+  if (/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(s) && s.replace(/^-/, '').replace(/[eE].*$/, '').replace('.', '').length <= 15) return Number(s);
+  return s;
+}
+function jtCsvParse(text, d, types) {
+  const rows = []; let row = [], cur = '', q = false, qs = 0, i = text.charCodeAt(0) === 0xFEFF ? 1 : 0;
+  const n = text.length;
+  for (; i < n; i++) {
+    const c = text[i];
+    if (q) { if (c === '"') { if (text[i + 1] === '"') { cur += '"'; i++; } else q = false; } else cur += c; }
+    else if (c === '"' && cur === '') { q = true; qs = i; }
+    else if (c === d) { row.push(cur); cur = ''; }
+    else if (c === '\n' || c === '\r') { if (c === '\r' && text[i + 1] === '\n') i++; row.push(cur); rows.push(row); row = []; cur = ''; }
+    else cur += c;
+  }
+  if (q) { const e = new Error('A quoted field is never closed — the closing " is missing'); e.pos = qs; throw e; }
+  if (cur !== '' || row.length) { row.push(cur); rows.push(row); }
+  const data = rows.filter(r => !(r.length === 1 && r[0].trim() === ''));
+  if (!data.length) return [];
+  const seen = {}, head = data[0].map((h, k) => {
+    let name = h.trim() || 'column' + (k + 1);
+    if (seen[name] !== undefined) { seen[name]++; name += '_' + seen[name]; } else seen[name] = 1;
+    return name;
+  });
+  return data.slice(1).map(r => {
+    const o = Object.create(null);
+    r.forEach((cell, k) => { o[k < head.length ? head[k] : 'column' + (k + 1)] = jtTyped(cell, types); });
+    for (let k = r.length; k < head.length; k++) o[head[k]] = '';
+    return o;
+  });
+}
+function jtXmlParse(text, types) {
+  const doc = new DOMParser().parseFromString(text, 'application/xml');
+  const pe = doc.getElementsByTagName('parsererror')[0];
+  if (pe) {
+    const raw = (pe.textContent || 'Invalid XML').replace(/Below is a rendering of the page up to the first error\./i, '').replace(/\s+/g, ' ').trim();
+    const e = new Error(raw.replace(/^(This page contains the following errors:|XML Parsing Error:)\s*/i, '').slice(0, 220));
+    const lc = /line(?: number)?\s*(\d+)[^\d]{1,20}?(\d+)/i.exec(raw);
+    if (lc) { const lines = text.split('\n'); let p = 0; for (let k = 0; k < +lc[1] - 1 && k < lines.length; k++) p += lines[k].length + 1; e.pos = Math.min(text.length, p + Math.max(0, +lc[2] - 1)); }
+    throw e;
+  }
+  function conv(el) {
+    const obj = Object.create(null), arrs = new Set(); let has = false, txt = '';
+    for (const a of Array.from(el.attributes)) { obj['@' + a.name] = jtTyped(a.value, types); has = true; }
+    for (const c of Array.from(el.childNodes)) {
+      if (c.nodeType === 1) {
+        const v = conv(c), k = c.nodeName; has = true;
+        if (k in obj) { if (!arrs.has(k)) { obj[k] = [obj[k]]; arrs.add(k); } obj[k].push(v); } else obj[k] = v;
+      } else if (c.nodeType === 3 || c.nodeType === 4) txt += c.nodeValue;
+    }
+    txt = txt.trim();
+    if (!has) return txt === '' ? null : jtTyped(txt, types);
+    if (txt) obj['#text'] = jtTyped(txt, types);
+    return obj;
+  }
+  const root = Object.create(null); root[doc.documentElement.nodeName] = conv(doc.documentElement);
+  return root;
+}
+
+// ── helpers / converters ─────────────────────────────────────────────────────────────────────────────
+function jtIsObj(v) { return v !== null && typeof v === 'object' && !Array.isArray(v); }
+function jtSortDeep(v) {
+  if (Array.isArray(v)) return v.map(jtSortDeep);
+  if (!jtIsObj(v)) return v;
+  const o = Object.create(null); Object.keys(v).sort((a, b) => a < b ? -1 : a > b ? 1 : 0).forEach(k => { o[k] = jtSortDeep(v[k]); }); return o;
+}
+function jtStats(v) {
+  let nodes = 0, depth = 0;
+  (function w(x, d) { nodes++; if (d > depth) depth = d; if (x && typeof x === 'object') { if (Array.isArray(x)) x.forEach(y => w(y, d + 1)); else for (const k in x) w(x[k], d + 1); } })(v, 1);
+  return { nodes, depth };
+}
+function jtHl(t) {
+  if (t.length > 800000) return uEsc(t);
+  const re = /("(?:\\.|[^"\\])*")(\s*:)?|\b(?:true|false)\b|\bnull\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g;
+  let o = '', last = 0, m;
+  while ((m = re.exec(t))) {
+    o += uEsc(t.slice(last, m.index)); last = re.lastIndex;
+    const s = m[0]; let c;
+    if (m[1] !== undefined) { if (m[2]) { o += '<span class="jt-k">' + uEsc(m[1]) + '</span>' + uEsc(m[2]); continue; } c = 'jt-s'; }
+    else c = s === 'null' ? 'jt-null' : (s === 'true' || s === 'false') ? 'jt-b' : 'jt-n';
+    o += '<span class="' + c + '">' + uEsc(s) + '</span>';
+  }
+  return o + uEsc(t.slice(last));
+}
+const JT_YRES = /^(?:true|false|null|yes|no|on|off|y|n|~)$/i;
+function jtYStr(s) { return /^[A-Za-z_][\w ./@-]*$/.test(s) && !JT_YRES.test(s) && !/\s$/.test(s) ? s : JSON.stringify(s); }
+function jtYScalar(v) { return v === null ? 'null' : typeof v === 'string' ? jtYStr(v) : String(v); }
+function jtYamlLines(v, ind) {
+  const pad = '  '.repeat(ind), out = [];
+  if (Array.isArray(v)) {
+    v.forEach(x => {
+      if (x !== null && typeof x === 'object' && Object.keys(x).length) { const sub = jtYamlLines(x, ind + 1); out.push(pad + '- ' + sub[0].slice(pad.length + 2)); for (let k = 1; k < sub.length; k++) out.push(sub[k]); }
+      else out.push(pad + '- ' + (x !== null && typeof x === 'object' ? (Array.isArray(x) ? '[]' : '{}') : jtYScalar(x)));
+    });
+  } else {
+    Object.keys(v).forEach(k => {
+      const x = v[k], key = jtYStr(k);
+      if (x !== null && typeof x === 'object' && Object.keys(x).length) { out.push(pad + key + ':'); jtYamlLines(x, ind + 1).forEach(l => out.push(l)); }
+      else out.push(pad + key + ': ' + (x !== null && typeof x === 'object' ? (Array.isArray(x) ? '[]' : '{}') : jtYScalar(x)));
+    });
+  }
+  return out;
+}
+function jtToYaml(v) {
+  if (v === null || typeof v !== 'object') return jtYScalar(v);
+  if (!Object.keys(v).length) return Array.isArray(v) ? '[]' : '{}';
+  return jtYamlLines(v, 0).join('\n');
+}
+function jtFlatten(v, prefix, out) {
+  if (jtIsObj(v)) {
+    const ks = Object.keys(v);
+    if (!ks.length && prefix) out[prefix] = '';
+    ks.forEach(k => jtFlatten(v[k], prefix ? prefix + '.' + k : k, out));
+  } else out[prefix || 'value'] = v;
+  return out;
+}
+function jtToCsv(v, d) {
+  const cell = x => {
+    let s = x === null || x === undefined ? '' : typeof x === 'object' ? JSON.stringify(x) : String(x);
+    if (s.indexOf(d) !== -1 || /["\r\n]/.test(s) || /^\s|\s$/.test(s)) s = '"' + s.replace(/"/g, '""') + '"';
+    return s;
+  };
+  const items = Array.isArray(v) ? v : [v];
+  if (items.length && items.every(Array.isArray)) return items.map(r => r.map(cell).join(d)).join('\n');
+  const keys = [], seen = new Set(), rows = items.map(it => {
+    const f = jtIsObj(it) ? jtFlatten(it, '', Object.create(null)) : { value: it };
+    Object.keys(f).forEach(k => { if (!seen.has(k)) { seen.add(k); keys.push(k); } });
+    return f;
+  });
+  if (!keys.length) return '';
+  return [keys.map(cell).join(d)].concat(rows.map(r => keys.map(k => cell(r[k])).join(d))).join('\n');
+}
+function jtXName(k) { let s = String(k).replace(/[^\w.\-\u00B7-\uFFFF]/g, '_'); if (!/^[A-Za-z_\u00C0-\uFFFF]/.test(s)) s = '_' + s; return s; }
+function jtXEsc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function jtToXml(v, unit) {
+  const lines = [];
+  function node(name, x, lvl) {
+    const pad = unit.repeat(lvl), nm = jtXName(name);
+    if (Array.isArray(x)) { if (!x.length) lines.push(pad + '<' + nm + '/>'); x.forEach(y => node(name, y, lvl)); return; }
+    if (jtIsObj(x)) {
+      let attrs = '', text = null; const kids = [];
+      Object.keys(x).forEach(k => {
+        if (k[0] === '@' && k.length > 1 && !jtIsObj(x[k]) && !Array.isArray(x[k])) attrs += ' ' + jtXName(k.slice(1)) + '="' + jtXEsc(x[k] === null ? '' : x[k]).replace(/"/g, '&quot;') + '"';
+        else if (k === '#text' && !jtIsObj(x[k]) && !Array.isArray(x[k])) text = x[k] === null ? '' : x[k];
+        else kids.push(k);
+      });
+      if (!kids.length) { lines.push(text === null ? pad + '<' + nm + attrs + '/>' : pad + '<' + nm + attrs + '>' + jtXEsc(text) + '</' + nm + '>'); return; }
+      lines.push(pad + '<' + nm + attrs + '>');
+      if (text !== null && text !== '') lines.push(pad + unit + jtXEsc(text));
+      kids.forEach(k => node(k, x[k], lvl + 1));
+      lines.push(pad + '</' + nm + '>'); return;
+    }
+    lines.push(x === null ? pad + '<' + nm + '/>' : pad + '<' + nm + '>' + jtXEsc(x) + '</' + nm + '>');
+  }
+  const keys = jtIsObj(v) ? Object.keys(v).filter(k => k[0] !== '@' && k !== '#text') : [];
+  if (jtIsObj(v) && keys.length === 1 && Object.keys(v).length === 1 && !Array.isArray(v[keys[0]])) node(keys[0], v[keys[0]], 0);
+  else node('root', Array.isArray(v) ? { item: v } : v, 0);
+  return '<?xml version="1.0" encoding="UTF-8"?>\n' + lines.join('\n');
+}
+function jtTsObj(objs, lvl, unit) {
+  const keys = [], seen = new Set();
+  objs.forEach(o => Object.keys(o).forEach(k => { if (!seen.has(k)) { seen.add(k); keys.push(k); } }));
+  if (!keys.length) return 'Record<string, unknown>';
+  const pad = unit.repeat(lvl + 1);
+  return '{\n' + keys.map(k => {
+    const vals = objs.filter(o => k in o).map(o => o[k]), types = [];
+    vals.forEach(x => { const t = jtTsType(x, lvl + 1, unit); if (types.indexOf(t) === -1) types.push(t); });
+    return pad + (/^[A-Za-z_$][\w$]*$/.test(k) ? k : JSON.stringify(k)) + (vals.length < objs.length ? '?' : '') + ': ' + types.join(' | ') + ';';
+  }).join('\n') + '\n' + unit.repeat(lvl) + '}';
+}
+function jtTsType(v, lvl, unit) {
+  if (v === null) return 'null';
+  if (Array.isArray(v)) {
+    if (!v.length) return 'unknown[]';
+    const objs = v.filter(jtIsObj), parts = [];
+    if (objs.length) parts.push(jtTsObj(objs, lvl, unit));
+    v.filter(x => !jtIsObj(x)).forEach(x => { const t = jtTsType(x, lvl, unit); if (parts.indexOf(t) === -1) parts.push(t); });
+    return parts.length > 1 ? '(' + parts.join(' | ') + ')[]' : parts[0] + '[]';
+  }
+  if (jtIsObj(v)) return jtTsObj([v], lvl, unit);
+  return typeof v;
+}
+function jtToTs(v, unit) {
+  return jtIsObj(v) ? 'export interface Root ' + jtTsObj([v], 0, unit) + '\n' : 'export type Root = ' + jtTsType(v, 0, unit) + ';\n';
+}
+function jtTree(v) {
+  const bud = { n: 0 };
+  const lab = k => k === undefined ? '' : (typeof k === 'number' ? '<span class="jt-n">' + k + '</span>' : '<span class="jt-k">' + uEsc(JSON.stringify(k)) + '</span>') + ': ';
+  const scal = x => x === null ? '<span class="jt-null">null</span>' : typeof x === 'string' ? '<span class="jt-s">' + uEsc(JSON.stringify(x)) + '</span>' : typeof x === 'boolean' ? '<span class="jt-b">' + x + '</span>' : '<span class="jt-n">' + x + '</span>';
+  function node(k, x, d) {
+    bud.n++;
+    if (x === null || typeof x !== 'object') return '<div class="jt-row">' + lab(k) + scal(x) + '</div>';
+    const arr = Array.isArray(x), keys = arr ? null : Object.keys(x), len = arr ? x.length : keys.length;
+    if (!len) return '<div class="jt-row">' + lab(k) + (arr ? '[]' : '{}') + '</div>';
+    let kids = '';
+    if (bud.n > 4000) kids = '<div class="jt-row jt-sum">… output limited to the first 4,000 nodes — use the Format tab for everything</div>';
+    else kids = arr ? x.map((y, i) => node(i, y, d + 1)).join('') : keys.map(q => node(q, x[q], d + 1)).join('');
+    return '<details' + (d < 2 && bud.n < 600 ? ' open' : '') + '><summary>' + lab(k) + (arr ? '[' : '{') + '<span class="jt-sum">' + len + (arr ? (len === 1 ? ' item' : ' items') : (len === 1 ? ' key' : ' keys')) + '</span></summary>' + kids + '</details>';
+  }
+  return '<div class="jt-tree">' + node(undefined, v, 0) + '</div>';
+}
+
+// ── UI ───────────────────────────────────────────────────────────────────────────────────────────────
+function jtUnit() { const s = uEl('jt-indent').value; return s === 'tab' ? '\t' : ' '.repeat(+s || 2); }
+function jtSizeLabel(n) { return n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : (n / 1048576).toFixed(2) + ' MB'; }
+function jtPosInfo(text, pos) { let line = 1, ls = 0; for (let k = text.indexOf('\n'); k !== -1 && k < pos; k = text.indexOf('\n', k + 1)) { line++; ls = k + 1; } return { line, col: pos - ls + 1, ls }; }
+function jtCtx(text, pos) {
+  const p = jtPosInfo(text, pos); let le = text.indexOf('\n', p.ls); if (le < 0) le = text.length;
+  const col = p.col - 1, start = Math.max(0, col - 40), piece = text.slice(p.ls, le).replace(/\r$/, '').slice(start, col + 50).replace(/\t/g, ' '), pre = start > 0 ? '…' : '';
+  return pre + piece + '\n' + ' '.repeat(pre.length + col - start) + '^';
+}
+function jtParseInput() {
+  const text = uEl('jt-input').value, from = uEl('jt-from').value, types = uEl('jt-types').checked;
+  if (!text.trim()) return null;
+  try {
+    if (from === 'csv') { const d = uEl('jt-delim').value, v = jtCsvParse(text, d, types); return { ok: true, value: v, kind: 'CSV', note: v.length + (v.length === 1 ? ' row' : ' rows') + ' converted' }; }
+    if (from === 'xml') return { ok: true, value: jtXmlParse(text, types), kind: 'XML', note: 'XML converted' };
+    const r = jtJsonParse(text, false);
+    return { ok: true, value: r.value, kind: 'JSON', dups: r.dups, lossy: r.lossy };
+  } catch (e) {
+    const res = { ok: false, kind: from === 'json' ? 'JSON' : from.toUpperCase(), message: e.message, pos: typeof e.pos === 'number' ? e.pos : -1, text };
+    if (from === 'json' && text.length < 4000000) { try { jtJsonParse(text, true); res.repairable = true; } catch (x) {} }
+    return res;
+  }
+}
+function jtStatus(r) {
+  const st = uEl('jt-status');
+  if (!r) { st.className = 'jt-status'; st.innerHTML = '<span class="jt-msg">Nothing to validate yet.</span>'; return; }
+  if (r.ok) {
+    const s = jtStats(r.value), v = r.value;
+    const what = Array.isArray(v) ? 'array of ' + v.length : jtIsObj(v) ? 'object with ' + Object.keys(v).length + (Object.keys(v).length === 1 ? ' key' : ' keys') : v === null ? 'null' : typeof v;
+    const warn = [];
+    if (r.dups && r.dups.length) warn.push('Duplicate key' + (r.dups.length > 1 ? 's' : '') + ': ' + Array.from(new Set(r.dups)).slice(0, 3).map(k => '"' + k + '"').join(', ') + ' — the last value wins');
+    if (r.lossy) warn.push('Some numbers are too large or precise for JavaScript and will be rounded in the output');
+    st.className = 'jt-status ' + (warn.length ? 'warn' : 'ok');
+    st.innerHTML = '<i class="ti ' + (warn.length ? 'ti-alert-triangle' : 'ti-circle-check') + '" style="font-size:15px"></i><span class="jt-msg"><b>' + (r.kind === 'JSON' ? 'Valid JSON' : r.note) + '</b> · ' + what + ' · ' + s.nodes.toLocaleString() + ' values · depth ' + s.depth + ' · ' + jtSizeLabel(new Blob([uEl('jt-input').value]).size)
+      + warn.map(w => '<br>' + uEsc(w)).join('') + '</span>';
+    return;
+  }
+  let where = '', ctx = '', btns = '';
+  if (r.pos >= 0) {
+    const p = jtPosInfo(r.text, r.pos); where = 'Line ' + p.line + ', column ' + p.col + ': ';
+    ctx = '<pre class="jt-ctx">' + uEsc(jtCtx(r.text, r.pos)) + '</pre>';
+    btns += '<button type="button" class="btn" onclick="jtGoto(' + r.pos + ')"><i class="ti ti-target-arrow"></i> Go to error</button> ';
+  }
+  if (r.repairable) btns += '<button type="button" class="btn" onclick="jtRepair()" title="Fix comments, single quotes, trailing or missing commas, unquoted keys and similar problems"><i class="ti ti-wand"></i> Repair &amp; format</button>';
+  st.className = 'jt-status bad';
+  st.innerHTML = '<i class="ti ti-circle-x" style="font-size:15px"></i><span class="jt-msg"><b>Invalid ' + r.kind + '</b> — ' + uEsc(where + r.message) + ctx + '</span><span>' + btns + '</span>';
+}
+function jtRun() {
+  clearTimeout(_jt.timer);
+  const len = uEl('jt-input').value.length;
+  _jt.timer = setTimeout(() => {
+    _jt.res = jtParseInput();
+    jtStatus(_jt.res);
+    jtRender();
+  }, len > 200000 ? 250 : 30);
+}
+function jtRender() {
+  const out = uEl('jt-out'), r = _jt.res, tab = _jt.tab, from = uEl('jt-from').value;
+  const show = (id, on) => uEl(id).classList.toggle('jt-hide', !on);
+  show('jt-o-indent', tab === 'format' || tab === 'xml' || tab === 'ts');
+  show('jt-o-delim', tab === 'csv' || from === 'csv');
+  show('jt-o-types', from !== 'json');
+  show('jt-opts', true);
+  uEl('jt-input').placeholder = from === 'csv' ? 'Paste CSV here — the first row is the header…' : from === 'xml' ? 'Paste XML here…' : 'Paste JSON here — it is validated as you type…';
+  const dis = on => { ['jt-copy', 'jt-dl', 'jt-apply'].forEach(id => { uEl(id).disabled = !on; }); };
+  if (!r || !r.ok) {
+    _jt.outText = ''; dis(false);
+    out.innerHTML = r ? '<div class="jwt-empty"><i class="ti ti-alert-triangle"></i>Fix the problem shown under the input to see the output.</div>'
+      : '<div class="jwt-empty"><i class="ti ti-braces"></i>Paste or type on the left. JSON is validated live; use the tabs above to format, minify or convert it to YAML, CSV, XML or TypeScript.</div>';
+    return;
+  }
+  let v = r.value; if (uEl('jt-sort').checked) v = jtSortDeep(v);
+  const unit = jtUnit();
+  let text = '', html = '';
+  try {
+    if (tab === 'format' || tab === 'tree') text = JSON.stringify(v, null, unit);
+    if (tab === 'format') html = '<pre class="jt-out-pre">' + jtHl(text) + '</pre>';
+    else if (tab === 'tree') html = jtTree(v);
+    else if (tab === 'min') { text = JSON.stringify(v); html = '<pre class="jt-out-pre" style="white-space:pre-wrap;word-break:break-all">' + jtHl(text) + '</pre>'; }
+    else {
+      text = tab === 'yaml' ? jtToYaml(v) : tab === 'csv' ? jtToCsv(v, uEl('jt-delim').value) : tab === 'xml' ? jtToXml(v, unit) : jtToTs(v, unit === '\t' ? '\t' : unit);
+      html = '<pre class="jt-out-pre">' + uEsc(text) + '</pre>';
+    }
+  } catch (e) { out.innerHTML = '<div class="jwt-err">Could not convert: ' + uEsc(e.message) + '</div>'; _jt.outText = ''; dis(false); return; }
+  _jt.outText = text; out.innerHTML = html; dis(true);
+  uEl('jt-apply').disabled = false;
+  if (tab === 'tree') uEl('jt-copy').title = 'Copy the formatted JSON';
+}
+function jtTab(t) {
+  _jt.tab = t;
+  document.querySelectorAll('#jt-tabs button').forEach(b => b.classList.toggle('on', b.getAttribute('data-t') === t));
+  jtRender();
+}
+function jtGoto(pos) {
+  const ta = uEl('jt-input'); ta.focus(); ta.setSelectionRange(pos, Math.min(ta.value.length, pos + 1));
+  const lh = parseFloat(getComputedStyle(ta).lineHeight) || 20;
+  ta.scrollTop = Math.max(0, (jtPosInfo(ta.value, pos).line - 1) * lh - ta.clientHeight / 3);
+}
+function jtRepair() {
+  try { const r = jtJsonParse(uEl('jt-input').value, true); uEl('jt-input').value = JSON.stringify(r.value, null, jtUnit()); } catch (e) { return; }
+  jtRun();
+}
+function jtApply() {
+  if (!_jt.res || !_jt.res.ok) return;
+  let v = _jt.res.value; if (uEl('jt-sort').checked) v = jtSortDeep(v);
+  uEl('jt-from').value = 'json'; uEl('jt-input').value = JSON.stringify(v, null, jtUnit()); jtRun();
+}
+function jtCopy(btn) { if (_jt.outText) uCopy(_jt.outText, btn); }
+function jtDownload() {
+  if (!_jt.outText) return;
+  const m = { format: ['json', 'application/json'], tree: ['json', 'application/json'], min: ['json', 'application/json'], yaml: ['yaml', 'text/yaml'], csv: ['csv', 'text/csv'], xml: ['xml', 'application/xml'], ts: ['ts', 'text/plain'] }[_jt.tab];
+  const blob = new Blob([_jt.outText], { type: m[1] + ';charset=utf-8' }), a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = 'data.' + m[0]; document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+}
+function jtSample() {
+  uEl('jt-from').value = 'json';
+  uEl('jt-input').value = JSON.stringify([
+    { id: 1, title: 'Write spec', hours: 2.5, done: true, project: { name: 'Task Logger', code: 'TL' }, tags: ['docs', 'planning'] },
+    { id: 2, title: 'Review pull request', hours: 1, done: false, project: { name: 'Task Logger', code: 'TL' }, tags: [], notes: null },
+    { id: 3, title: 'Fix "export" bug', hours: 3.25, done: true, project: { name: 'Billing', code: 'BL' }, tags: ['bug'] }
+  ], null, 2);
+  jtRun();
+}
+function jtClear() { uEl('jt-input').value = ''; jtRun(); uEl('jt-input').focus(); }
+function jtFilePicked(inp) {
+  const f = inp.files && inp.files[0]; inp.value = ''; if (!f) return;
+  if (f.size > 10 * 1024 * 1024) { uEl('jt-status').className = 'jt-status bad'; uEl('jt-status').textContent = 'That file is too large for this tool (limit 10 MB).'; return; }
+  const r = new FileReader();
+  r.onload = () => {
+    const ext = (/\.([a-z0-9]+)$/i.exec(f.name) || [])[1] || '';
+    uEl('jt-from').value = /^csv$/i.test(ext) ? 'csv' : /^tsv$/i.test(ext) ? 'csv' : /^xml$/i.test(ext) ? 'xml' : 'json';
+    if (/^tsv$/i.test(ext)) uEl('jt-delim').value = '\t';
+    uEl('jt-input').value = String(r.result || ''); jtRun();
+  };
+  r.readAsText(f);
+}
+function openJsonTool() {
+  if (!uOpen('jt-overlay', 'jt-input')) return;
+  if (!_jt.wired) {
+    _jt.wired = true;
+    uEl('jt-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); const t = e.target, s = t.selectionStart; t.value = t.value.slice(0, s) + '  ' + t.value.slice(t.selectionEnd); t.selectionStart = t.selectionEnd = s + 2; jtRun(); }
+    });
+  }
+  jtRun();
+}
+function closeJsonTool() { uClose('jt-overlay'); }
 
 // ── Utilities → Case Converter ───────────────────────────────────────────────────────────────────────
 const CASE_CAP = w => w.charAt(0).toUpperCase() + w.slice(1);
