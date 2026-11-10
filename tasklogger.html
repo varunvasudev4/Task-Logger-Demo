@@ -477,6 +477,86 @@ html.is-touch .search-btn { display: inline-flex; }
   .jwt-parts { max-height: 40%; }
 }
 
+/* ── Utilities → Code Compare: Format / Validate ── */
+.ccf-sel { flex: 0 1 104px; }
+.cc-msg.ccf-msg { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; color: var(--green-dark); }
+.cc-msg.ccf-msg.bad { color: var(--red-mid); }
+.ccf-msg i { font-size: 15px; }
+.ccf-go { border: 1px solid var(--red-mid); background: var(--red-bg); color: var(--red-mid); border-radius: 999px; padding: 0 9px; font: 600 11px var(--font-mono); cursor: pointer; }
+.cc-chip select { font: 12px var(--font-mono); background: var(--bg); color: var(--text-primary); border: 1px solid var(--border-md); border-radius: 4px; padding: 1px 4px; }
+
+/* ── Utilities → Markdown Previewer / Case Converter / Regex Tester (reuse the JWT split-view layout) ── */
+.md-in { word-break: normal; overflow-wrap: break-word; }
+.md-body { flex: 1; overflow: auto; padding: 16px 22px 30px; font: 14px/1.65 var(--font-ui); color: var(--text-primary); min-height: 0; }
+.md-body > :first-child { margin-top: 0; }
+.md-body h1, .md-body h2, .md-body h3, .md-body h4, .md-body h5, .md-body h6 { font-family: var(--font-head); line-height: 1.25; margin: 1.3em 0 .5em; }
+.md-body h1 { font-size: 1.9em; padding-bottom: .25em; border-bottom: 1px solid var(--border-md); }
+.md-body h2 { font-size: 1.5em; padding-bottom: .2em; border-bottom: 1px solid var(--border); }
+.md-body h3 { font-size: 1.25em; } .md-body h4 { font-size: 1.05em; } .md-body h5 { font-size: .95em; } .md-body h6 { font-size: .85em; color: var(--text-tertiary); }
+.md-body p, .md-body ul, .md-body ol, .md-body blockquote, .md-body pre, .md-body table, .md-body details { margin: 0 0 1em; }
+.md-body ul, .md-body ol { padding-left: 1.7em; }
+.md-body li { margin: .2em 0; }
+.md-body li > ul, .md-body li > ol { margin: .2em 0 .2em; }
+.md-body li.task { list-style: none; margin-left: -1.3em; }
+.md-body li.task input { margin-right: .45em; }
+.md-body blockquote { padding: 2px 14px; border-left: 4px solid var(--border-md); color: var(--text-secondary); }
+.md-body blockquote > :last-child { margin-bottom: 0; }
+.md-body code { font: .88em var(--font-mono); background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 4px; padding: .1em .35em; }
+.md-body pre { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px 14px; overflow: auto; }
+.md-body pre code { background: none; border: 0; padding: 0; font-size: 12.5px; line-height: 1.55; }
+.md-body a { color: var(--blue-mid); }
+.md-body hr { border: 0; border-top: 1px solid var(--border-md); margin: 1.4em 0; }
+.md-body table { border-collapse: collapse; display: block; overflow: auto; max-width: 100%; }
+.md-body th, .md-body td { border: 1px solid var(--border-md); padding: 6px 12px; }
+.md-body th { background: var(--bg-secondary); font-weight: 600; }
+.md-body img { max-width: 100%; height: auto; }
+.md-body kbd { font: .85em var(--font-mono); border: 1px solid var(--border-md); border-bottom-width: 2px; border-radius: 4px; padding: .05em .4em; background: var(--bg-secondary); }
+.md-body mark { background: var(--amber-bg); color: var(--text-primary); }
+.md-body del { opacity: .7; }
+.md-body summary { cursor: pointer; font-weight: 600; }
+.case-row { display: flex; align-items: flex-start; gap: 8px; padding: 8px 14px; border-bottom: 1px solid var(--border); }
+.case-lbl { flex: 0 0 122px; padding-top: 2px; font: 600 11.5px var(--font-mono); color: var(--text-tertiary); }
+.case-row.main .case-lbl { color: var(--blue-dark); }
+.case-val { flex: 1; min-width: 0; margin: 0; font: 13px/1.5 var(--font-mono); white-space: pre-wrap; word-break: break-all; color: var(--text-primary); }
+.case-row .btn-icon { width: 26px; height: 26px; font-size: 13px; flex: 0 0 auto; }
+#case-out { padding: 0; }
+.rx-bar { padding: 10px 14px 10px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
+.rx-pat { display: flex; align-items: center; gap: 6px; border: 1px solid var(--border-md); border-radius: var(--radius-md); padding: 0 10px; background: var(--bg); }
+.rx-pat:focus-within { border-color: var(--blue-mid); }
+.rx-sl { font: 600 15px var(--font-mono); color: var(--text-tertiary); }
+.rx-in { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text-primary); font: 14px var(--font-mono); padding: 8px 0; }
+.rx-flagtxt { font: 600 13px var(--font-mono); color: var(--blue-mid); min-width: 6px; }
+.rx-flags { display: flex; flex-wrap: wrap; gap: 6px; }
+.rx-err { color: var(--red-mid); font: 12px var(--font-mono); word-break: break-word; }
+.rx-err:empty { display: none; }
+.rx-wrap { position: relative; flex: 1; min-height: 110px; }
+.rx-bd { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.rx-bdi, .rx-ta { box-sizing: border-box; padding: 14px; font: 13px/1.6 var(--font-mono); white-space: pre-wrap; overflow-wrap: break-word; word-break: normal; tab-size: 4; letter-spacing: normal; }
+.rx-bdi { color: transparent; }
+.rx-bdi mark { color: transparent; border-radius: 2px; }
+.rx-m0 { background: color-mix(in srgb, var(--blue-mid) 30%, transparent); }
+.rx-m1 { background: color-mix(in srgb, var(--green-mid) 34%, transparent); }
+.rx-z { background: none; box-shadow: -2px 0 0 var(--red-mid); }
+.rx-ta { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; outline: 0; resize: none; background: transparent; color: var(--text-primary); overflow: auto; caret-color: var(--text-primary); }
+.rx-ta::placeholder { color: var(--text-tertiary); }
+.rx-card { border: 1px solid var(--border-md); border-radius: var(--radius-md); margin-bottom: 10px; overflow: hidden; }
+.rx-ch { display: flex; align-items: center; gap: 8px; padding: 4px 6px 4px 10px; background: var(--bg-secondary); border-bottom: 1px solid var(--border); font: 700 11px var(--font-mono); text-transform: uppercase; letter-spacing: .06em; color: var(--text-secondary); }
+.rx-ch .pos { flex: 1; min-width: 0; font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--text-tertiary); }
+.rx-ch .btn-icon { width: 24px; height: 24px; font-size: 13px; }
+.rx-mv { margin: 0; padding: 8px 12px; font: 12.5px/1.5 var(--font-mono); white-space: pre-wrap; word-break: break-word; }
+.rx-g { width: 100%; border-collapse: collapse; font-size: 12px; border-top: 1px solid var(--border); }
+.rx-g td { padding: 4px 10px; vertical-align: top; font-family: var(--font-mono); word-break: break-word; }
+.rx-g td:first-child { width: 1%; white-space: nowrap; color: var(--purple-dark); font-weight: 600; }
+.rx-g td .n { color: var(--text-tertiary); font-weight: 400; }
+.rx-g tr + tr td { border-top: 1px solid var(--border); }
+.rx-u { color: var(--text-tertiary); font-style: italic; }
+.rx-rep { border-top: 1px solid var(--border-md); padding: 8px 14px 10px; background: var(--bg-secondary); display: flex; flex-direction: column; gap: 6px; max-height: 36%; min-height: 0; }
+.rx-rep-row { display: flex; align-items: center; gap: 8px; font: 600 11px var(--font-mono); text-transform: uppercase; letter-spacing: .06em; color: var(--text-secondary); }
+.rx-rep-row input { flex: 1; min-width: 0; font: 12.5px var(--font-mono); background: var(--bg); color: var(--text-primary); border: 1px solid var(--border-md); border-radius: 4px; padding: 5px 8px; text-transform: none; letter-spacing: 0; }
+.rx-rep pre { margin: 0; overflow: auto; font: 12.5px/1.5 var(--font-mono); white-space: pre-wrap; word-break: break-word; border: 1px solid var(--border); background: var(--bg); padding: 6px 10px; border-radius: 4px; min-height: 30px; }
+.md-overlay .jwt-pane-head .btn:disabled, .rx-overlay .jwt-pane-head .btn:disabled, .rx-rep .btn:disabled { opacity: .45; cursor: not-allowed; }
+@media (max-width: 760px) { .case-lbl { flex-basis: 96px; } .rx-in { font-size: 16px; } .rx-ta, .rx-bdi { font-size: 16px; } .md-in { font-size: 16px; } }
+
 /* Task card */
 .task-card {
   background: var(--bg); border: 1px solid var(--border);
@@ -2461,6 +2541,103 @@ tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--blue-mid); }
   .cc-main { -webkit-overflow-scrolling: touch; }
 }
 
+/* ── Code Compare: VS Code-style look (Light+ / Dark+ palettes, follows the app's light / dark theme) ── */
+.cc-overlay {
+  --vs-font: "Cascadia Code", "Cascadia Mono", Consolas, "SF Mono", Menlo, Monaco, "DejaVu Sans Mono", "Courier New", monospace;
+  --vs-bg: #ffffff; --vs-fg: #1f1f1f; --vs-ln: #6e7681; --vs-ln-cur: #171184; --vs-widget: #f3f3f3; --vs-hid: #eaf0f6; --vs-hid-fg: #616161;
+  --vs-border: #e5e5e5; --vs-border-md: #c8c8c8; --vs-focus: #0078d4; --vs-hover: rgba(0,0,0,.05);
+  --vs-del-line: rgba(255,0,0,.12); --vs-del-gut: rgba(255,0,0,.20); --vs-del-text: rgba(255,0,0,.26); --vs-del-bar: rgba(229,20,0,.8);
+  --vs-add-line: rgba(155,185,85,.22); --vs-add-gut: rgba(155,185,85,.38); --vs-add-text: rgba(156,204,44,.42); --vs-add-bar: rgba(95,150,30,.9);
+  --vs-fill: rgba(34,34,34,.16);
+  --vs-kw: #0000ff; --vs-tg: #800000; --vs-st: #a31515; --vs-cm: #008000; --vs-nu: #098658; --vs-at: #e50000; --vs-pr: #0451a5;
+  background: var(--vs-bg); color: var(--vs-fg);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]):not([data-theme="dark"]) .cc-overlay {
+    --vs-bg: #1e1e1e; --vs-fg: #d4d4d4; --vs-ln: #858585; --vs-ln-cur: #c6c6c6; --vs-widget: #252526; --vs-hid: #2a2d2e; --vs-hid-fg: #9d9d9d;
+    --vs-border: #2b2b2b; --vs-border-md: #3c3c3c; --vs-focus: #3794ff; --vs-hover: rgba(255,255,255,.06);
+    --vs-del-line: rgba(255,0,0,.20); --vs-del-gut: rgba(255,0,0,.30); --vs-del-text: rgba(255,0,0,.32); --vs-del-bar: rgba(244,71,71,.85);
+    --vs-add-line: rgba(155,185,85,.20); --vs-add-gut: rgba(155,185,85,.32); --vs-add-text: rgba(156,204,44,.30); --vs-add-bar: rgba(115,201,145,.9);
+    --vs-fill: rgba(204,204,204,.20);
+    --vs-kw: #569cd6; --vs-tg: #569cd6; --vs-st: #ce9178; --vs-cm: #6a9955; --vs-nu: #b5cea8; --vs-at: #9cdcfe; --vs-pr: #9cdcfe;
+  }
+}
+:root[data-theme="dark"] .cc-overlay {
+  --vs-bg: #1e1e1e; --vs-fg: #d4d4d4; --vs-ln: #858585; --vs-ln-cur: #c6c6c6; --vs-widget: #252526; --vs-hid: #2a2d2e; --vs-hid-fg: #9d9d9d;
+  --vs-border: #2b2b2b; --vs-border-md: #3c3c3c; --vs-focus: #3794ff; --vs-hover: rgba(255,255,255,.06);
+  --vs-del-line: rgba(255,0,0,.20); --vs-del-gut: rgba(255,0,0,.30); --vs-del-text: rgba(255,0,0,.32); --vs-del-bar: rgba(244,71,71,.85);
+  --vs-add-line: rgba(155,185,85,.20); --vs-add-gut: rgba(155,185,85,.32); --vs-add-text: rgba(156,204,44,.30); --vs-add-bar: rgba(115,201,145,.9);
+  --vs-fill: rgba(204,204,204,.20);
+  --vs-kw: #569cd6; --vs-tg: #569cd6; --vs-st: #ce9178; --vs-cm: #6a9955; --vs-nu: #b5cea8; --vs-at: #9cdcfe; --vs-pr: #9cdcfe;
+}
+/* chrome: title bar, toolbar, file headers */
+.cc-overlay .lm-head, .cc-overlay .cc-top { background: var(--vs-widget); border-bottom: 1px solid var(--vs-border); }
+.cc-overlay .lm-title { color: var(--vs-fg); }
+.cc-overlay .cc-bar, .cc-overlay .cc-heads, .cc-overlay .cc-files { background: var(--vs-widget); border-color: var(--vs-border); }
+.cc-overlay .cc-head + .cc-head, .cc-overlay .cc-head-gap { border-color: var(--vs-border); }
+.cc-overlay .cc-ttl, .cc-overlay .cc-pos, .cc-overlay .cc-stat { color: var(--vs-hid-fg); }
+.cc-overlay .cc-fname { font: 13px var(--font-ui); color: var(--vs-fg); }
+.cc-overlay .btn, .cc-overlay .lm-input, .cc-overlay select, .cc-overlay .cc-chip { background: var(--vs-bg); color: var(--vs-fg); border: 1px solid var(--vs-border-md); border-radius: 3px; }
+.cc-overlay .btn:hover:not(:disabled), .cc-overlay .lm-input:hover:not(:disabled) { background: var(--vs-hover); border-color: var(--vs-focus); }
+.cc-overlay .btn.on, .cc-overlay .cc-chip:has(input:checked), .cc-overlay .cc-lam:has(input:checked), .cc-overlay .cc-fchip.on { border-color: var(--vs-focus); color: var(--vs-focus); }
+.cc-overlay .cc-opts { background: var(--vs-widget); border-color: var(--vs-border-md); }
+.cc-overlay .cc-frow:hover { background: var(--vs-hover); }
+.cc-overlay .cc-frow.cur { background: var(--vs-hover); box-shadow: inset 2px 0 0 var(--vs-focus); }
+/* syntax colours */
+.cc-overlay .cc-kw { color: var(--vs-kw); } .cc-overlay .cc-tg { color: var(--vs-tg); } .cc-overlay .cc-st { color: var(--vs-st); }
+.cc-overlay .cc-cm { color: var(--vs-cm); font-style: normal; } .cc-overlay .cc-nu { color: var(--vs-nu); }
+.cc-overlay .cc-at { color: var(--vs-at); } .cc-overlay .cc-pr { color: var(--vs-pr); }
+/* the differences view (aligned side-by-side table) */
+.cc-overlay .cc-main { background: var(--vs-bg); }
+.cc-tbl { font: 13px/20px var(--vs-font); color: var(--vs-fg); width: calc(100% - 14px); }
+.cc-tbl.nowrap { width: max-content; min-width: calc(100% - 14px); }
+.cc-tbl td { padding: 0 8px; }
+.cc-tbl .cc-cd { padding-left: 14px; color: var(--vs-fg); }
+.cc-ln { width: 52px; min-width: 52px; padding-right: 12px !important; background: var(--vs-bg); color: var(--vs-ln); font-size: 13px; text-align: right; }
+.cc-ln.del { background: var(--vs-del-gut); }
+.cc-ln.add { background: var(--vs-add-gut); }
+.cc-gt { width: 36px; min-width: 36px; background: var(--vs-bg); border-inline: 1px solid var(--vs-border); }
+.cc-gt button { width: 15px; height: 20px; padding: 0; color: var(--vs-ln); font-size: 14px; line-height: 20px; opacity: .55; transition: opacity .12s; }
+.cc-gt button:hover { color: var(--vs-focus); opacity: 1; }
+tr[data-blk]:hover .cc-gt button { opacity: 1; }
+.cc-cd.del { background: var(--vs-del-line); }
+.cc-cd.add { background: var(--vs-add-line); }
+.cc-cd mark.d { background: var(--vs-del-text); } .cc-cd mark.a { background: var(--vs-add-text); }
+.cc-cd mark { border-radius: 2px; }
+.cc-cd.fill, .cc-ln.fill {
+  background-color: var(--vs-bg);
+  background-image: linear-gradient(-45deg, var(--vs-fill) 12.5%, transparent 12.5%, transparent 50%, var(--vs-fill) 50%, var(--vs-fill) 62.5%, transparent 62.5%, transparent 100%);
+  background-size: 8px 8px;
+}
+tr.cc-cur .cc-gt { background: var(--vs-hover); }
+tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--vs-focus); color: var(--vs-ln-cur); }
+.cc-fold td { background: var(--vs-hid); color: var(--vs-hid-fg); text-align: center; height: 22px; padding: 0; font: 12px var(--font-ui); border-block: 1px solid var(--vs-border); }
+.cc-fold:hover td { color: var(--vs-fg); background: var(--vs-hover); }
+.cc-fold i { vertical-align: -1px; margin-right: 4px; }
+.cc-overlay .cc-same { color: var(--vs-hid-fg); }
+/* overview ruler (right edge) */
+.cc-ruler-wrap { position: sticky; top: 0; left: 0; width: 100%; height: 0; z-index: 6; pointer-events: none; }
+.cc-ruler { position: absolute; top: 0; right: 0; width: 14px; background: var(--vs-bg); border-left: 1px solid var(--vs-border); pointer-events: auto; }
+.cc-rk { position: absolute; width: 6px; min-height: 3px; cursor: pointer; opacity: .85; }
+.cc-rk.l { left: 1px; background: var(--vs-del-bar); } .cc-rk.r { right: 1px; background: var(--vs-add-bar); }
+.cc-rk.cur { opacity: 1; box-shadow: 0 0 0 1px var(--vs-focus); }
+.cc-rk:hover { opacity: 1; }
+/* live edit view uses the same palette */
+.cc-overlay .cc-pane { background: var(--vs-bg); }
+.cc-bdi, .cc-live .cc-ta { font: 13px/20px var(--vs-font); }
+.cc-bl { min-height: 20px; }
+.cc-live .cc-ta { color: var(--vs-fg); caret-color: var(--vs-fg); }
+.cc-live .cc-ta::selection { background: rgba(0,120,212,.3); }
+.cc-bl.del { background: var(--vs-del-line); } .cc-bl.add { background: var(--vs-add-line); }
+.cc-bl.cur.del { background: var(--vs-del-gut); } .cc-bl.cur.add { background: var(--vs-add-gut); }
+.cc-bdi mark.d { background: var(--vs-del-text); } .cc-bdi mark.a { background: var(--vs-add-text); }
+.cc-overlay .cc-gut { background: var(--vs-bg); border-color: var(--vs-border); }
+.cc-rb.del { fill: var(--vs-del-line); stroke: var(--vs-del-bar); }
+.cc-rb.add { fill: var(--vs-add-line); stroke: var(--vs-add-bar); }
+.cc-rb.chg { fill: rgba(0,120,212,.12); stroke: rgba(0,120,212,.55); }
+.cc-overlay .cc-xb { background: var(--vs-widget); border-color: var(--vs-border-md); color: var(--vs-ln); border-radius: 3px; }
+.cc-overlay .cc-xb:hover { color: var(--vs-focus); border-color: var(--vs-focus); }
+@media (max-width: 700px) { .cc-tbl, .cc-tbl.nowrap { min-width: 760px; } .cc-bdi, .cc-live .cc-ta { font-size: 16px; line-height: 24px; } .cc-bl { min-height: 24px; } }
 </style>
 </head>
 <body>
@@ -2522,6 +2699,9 @@ tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--blue-mid); }
             <button class="btn" onclick="openB64Tool()" id="b64-menu-btn" title="Encode or decode Base64 for text and any file type"><i class="ti ti-binary"></i> Base64 Encoder / Decoder</button>
             <button class="btn" onclick="openTzConv()" id="tzc-menu-btn" title="Convert a date and time from one time zone to another"><i class="ti ti-world"></i> Time Zone Converter</button>
             <button class="btn" onclick="openCodeCompare()" id="cc-menu-btn" title="Compare JS, HTML, SQL and other code side by side and transfer changes"><i class="ti ti-git-compare"></i> Code Compare</button>
+            <button class="btn" onclick="openMdPreview()" id="md-menu-btn" title="Write Markdown and see it rendered live"><i class="ti ti-markdown"></i> Markdown Previewer</button>
+            <button class="btn" onclick="openCaseConv()" id="case-menu-btn" title="Convert text between camelCase, snake_case, kebab-case and more"><i class="ti ti-letter-case"></i> Case Converter</button>
+            <button class="btn" onclick="openRegexTester()" id="rx-menu-btn" title="Test a regular expression with live highlighting and capture groups"><i class="ti ti-regex"></i> Regex Tester</button>
           </div>
         </div>
       </div>
@@ -3008,6 +3188,7 @@ tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--blue-mid); }
           <label class="cc-chip" title="Highlight the changed words inside a line"><input type="checkbox" id="cc-o-word" onchange="ccOpt()"> Word diff</label>
           <label class="cc-chip" title="Aligned view only: fold long runs of unchanged lines"><input type="checkbox" id="cc-o-collapse" onchange="ccOpt()"> Hide unchanged (aligned view)</label>
           <label class="cc-chip" id="cc-o-match-wrap" title="Lambda mode: picking a file on one side picks the same path on the other side"><input type="checkbox" id="cc-o-match" onchange="ccOpt()"> Match files</label>
+          <label class="cc-chip" title="Indentation used by Pretty-print (Format menu)">Indent <select id="ccf-indent" onchange="CCF.setIndent(this.value)"><option value="2">2 spaces</option><option value="4">4 spaces</option><option value="tab">Tab</option></select></label>
         </div>
       </div>
       <button type="button" class="btn" onclick="ccSwap()" title="Swap the two sides" aria-label="Swap sides"><i class="ti ti-arrows-exchange"></i></button>
@@ -3026,6 +3207,110 @@ tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--blue-mid); }
   <div class="cc-main" id="cc-main"></div>
   <input type="file" id="cc-file-L" hidden onchange="ccFilePicked('L',this)">
   <input type="file" id="cc-file-R" hidden onchange="ccFilePicked('R',this)">
+</div>
+
+<!-- Utilities → Markdown Previewer: full-screen split view (Markdown on the left, rendered page on the right) -->
+<div class="jwt-overlay md-overlay hidden" id="md-overlay" role="dialog" aria-modal="true" aria-label="Markdown Previewer">
+  <div class="lm-head">
+    <div class="lm-title"><i class="ti ti-markdown" style="font-size:18px;color:var(--blue-mid)"></i>Markdown Previewer</div>
+    <button type="button" class="ttl-hdr-widget idle" onclick="ttlConsOpen(event)" title="Time tracker — click to start / pause tasks" aria-label="Open time tracker"><span class="ttl-hw-dot"></span><span class="ttl-hw-lbl">Worked</span><span class="ttl-hw-time">00:00:00</span></button>
+    <button type="button" class="btn-icon" onclick="closeMdPreview()" title="Close (Esc)" aria-label="Close Markdown previewer"><i class="ti ti-x"></i></button>
+  </div>
+  <div class="jwt-body">
+    <div class="jwt-pane">
+      <div class="jwt-pane-head">
+        <div class="jwt-pane-title">Markdown</div>
+        <button type="button" class="btn" onclick="mdSample()" title="Insert a sample document"><i class="ti ti-sparkles"></i> Sample</button>
+        <button type="button" class="btn" onclick="uPaste('md-input', mdRender)" title="Paste from the clipboard"><i class="ti ti-clipboard"></i> Paste</button>
+        <button type="button" class="btn" onclick="document.getElementById('md-file').click()" title="Open a .md or text file"><i class="ti ti-file-import"></i> Open</button>
+        <button type="button" class="btn" onclick="mdClear()" title="Clear"><i class="ti ti-eraser"></i> Clear</button>
+        <input type="file" id="md-file" accept=".md,.markdown,.txt,text/*" hidden onchange="mdFilePicked(this)">
+      </div>
+      <textarea class="jwt-in md-in" id="md-input" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" placeholder="Type or paste Markdown here…" oninput="mdRender()"></textarea>
+      <div class="b64-stat" id="md-stat"></div>
+    </div>
+    <div class="jwt-pane">
+      <div class="jwt-pane-head">
+        <div class="jwt-pane-title">Preview</div>
+        <button type="button" class="btn" id="md-copy" onclick="mdCopyHtml(this)" title="Copy the rendered HTML" disabled><i class="ti ti-clipboard-copy"></i> HTML</button>
+        <button type="button" class="btn" id="md-dl" onclick="mdDownload()" title="Download the Markdown as document.md" disabled><i class="ti ti-download"></i> .md</button>
+      </div>
+      <div class="md-body" id="md-preview"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Utilities → Case Converter: text / identifiers in, every case style out (line by line) -->
+<div class="jwt-overlay case-overlay hidden" id="case-overlay" role="dialog" aria-modal="true" aria-label="Case Converter">
+  <div class="lm-head">
+    <div class="lm-title"><i class="ti ti-letter-case" style="font-size:18px;color:var(--blue-mid)"></i>Case Converter</div>
+    <button type="button" class="ttl-hdr-widget idle" onclick="ttlConsOpen(event)" title="Time tracker — click to start / pause tasks" aria-label="Open time tracker"><span class="ttl-hw-dot"></span><span class="ttl-hw-lbl">Worked</span><span class="ttl-hw-time">00:00:00</span></button>
+    <button type="button" class="btn-icon" onclick="closeCaseConv()" title="Close (Esc)" aria-label="Close Case converter"><i class="ti ti-x"></i></button>
+  </div>
+  <div class="jwt-body">
+    <div class="jwt-pane">
+      <div class="jwt-pane-head">
+        <div class="jwt-pane-title">Text or identifiers</div>
+        <button type="button" class="btn" onclick="uPaste('case-input', caseConvert)" title="Paste from the clipboard"><i class="ti ti-clipboard"></i> Paste</button>
+        <button type="button" class="btn" onclick="caseClear()" title="Clear"><i class="ti ti-eraser"></i> Clear</button>
+      </div>
+      <textarea class="jwt-in" id="case-input" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" placeholder="e.g. user first name, getUserID, HTTP_response-code …&#10;One item per line is converted line by line." oninput="caseConvert()"></textarea>
+    </div>
+    <div class="jwt-pane">
+      <div class="jwt-pane-head"><div class="jwt-pane-title">Converted</div></div>
+      <div class="jwt-out" id="case-out"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Utilities → Regex Tester: pattern + flags + test string with live match highlighting; matches, capture groups and a replace preview on the right -->
+<div class="jwt-overlay rx-overlay hidden" id="rx-overlay" role="dialog" aria-modal="true" aria-label="Regex Tester">
+  <div class="lm-head">
+    <div class="lm-title"><i class="ti ti-regex" style="font-size:18px;color:var(--blue-mid)"></i>Regex Tester</div>
+    <button type="button" class="ttl-hdr-widget idle" onclick="ttlConsOpen(event)" title="Time tracker — click to start / pause tasks" aria-label="Open time tracker"><span class="ttl-hw-dot"></span><span class="ttl-hw-lbl">Worked</span><span class="ttl-hw-time">00:00:00</span></button>
+    <button type="button" class="btn-icon" onclick="closeRegexTester()" title="Close (Esc)" aria-label="Close Regex tester"><i class="ti ti-x"></i></button>
+  </div>
+  <div class="jwt-body">
+    <div class="jwt-pane">
+      <div class="jwt-pane-head">
+        <div class="jwt-pane-title">Regular expression</div>
+        <button type="button" class="btn" onclick="rxSample()" title="Load an example pattern and text"><i class="ti ti-sparkles"></i> Sample</button>
+        <button type="button" class="btn" onclick="rxClearPattern()" title="Clear the pattern"><i class="ti ti-eraser"></i> Clear</button>
+      </div>
+      <div class="rx-bar">
+        <div class="rx-pat"><span class="rx-sl">/</span><input type="text" class="rx-in" id="rx-pattern" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" placeholder="pattern, e.g. (\d+)-(\d+)" oninput="rxRun()" aria-label="Regular expression"><span class="rx-sl">/</span><span class="rx-flagtxt" id="rx-flagtxt">g</span></div>
+        <div class="rx-flags" id="rx-flags">
+          <label class="cc-chip" title="global — find all matches"><input type="checkbox" data-f="g" checked onchange="rxRun()"> g</label>
+          <label class="cc-chip" title="ignore case"><input type="checkbox" data-f="i" onchange="rxRun()"> i</label>
+          <label class="cc-chip" title="multiline — ^ and $ match at every line"><input type="checkbox" data-f="m" onchange="rxRun()"> m</label>
+          <label class="cc-chip" title="dotAll — . also matches a newline"><input type="checkbox" data-f="s" onchange="rxRun()"> s</label>
+          <label class="cc-chip" title="unicode — full Unicode support, \p{…} classes"><input type="checkbox" data-f="u" onchange="rxRun()"> u</label>
+          <label class="cc-chip" title="sticky — match only at lastIndex"><input type="checkbox" data-f="y" onchange="rxRun()"> y</label>
+        </div>
+        <div class="rx-err" id="rx-err"></div>
+      </div>
+      <div class="jwt-pane-head">
+        <div class="jwt-pane-title">Test string</div>
+        <button type="button" class="btn" onclick="uPaste('rx-text', rxRun)" title="Paste from the clipboard"><i class="ti ti-clipboard"></i> Paste</button>
+        <button type="button" class="btn" onclick="rxClearText()" title="Clear the test string"><i class="ti ti-eraser"></i> Clear</button>
+      </div>
+      <div class="rx-wrap">
+        <div class="rx-bd" id="rx-bd"><div class="rx-bdi" id="rx-bdi"></div></div>
+        <textarea class="rx-ta" id="rx-text" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" placeholder="Paste the text to test here…" oninput="rxRun()" onscroll="rxSync()"></textarea>
+      </div>
+    </div>
+    <div class="jwt-pane">
+      <div class="jwt-pane-head">
+        <div class="jwt-pane-title">Matches &amp; groups <span id="rx-count" style="margin-left:6px;color:var(--blue-mid)"></span></div>
+        <button type="button" class="btn" id="rx-copy" onclick="rxCopyAll(this)" title="Copy every match, one per line" disabled><i class="ti ti-clipboard-copy"></i> Matches</button>
+      </div>
+      <div class="jwt-out" id="rx-out"></div>
+      <div class="rx-rep">
+        <div class="rx-rep-row"><span>Replace</span><input type="text" id="rx-repl" spellcheck="false" autocomplete="off" placeholder="replacement — $1, $&lt;name&gt;, $&amp;" oninput="rxRun()" aria-label="Replacement"><button type="button" class="btn" id="rx-repl-copy" onclick="uCopy(document.getElementById('rx-repl-out').textContent, this)" title="Copy the replaced text" disabled><i class="ti ti-clipboard-copy"></i></button></div>
+        <pre id="rx-repl-out"></pre>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- Utilities → Base64 Encoder / Decoder: full-screen split view like the JWT decoder. Encode: any file or text → Base64. Decode: Base64 / data URI → detected file with preview + download -->
@@ -26504,7 +26789,7 @@ function ccToks(sd) {
   return sd.toks;
 }
 function ccSetText(S, text, name, handle) {
-  const sd = _cc[S]; sd.text = text; sd.name = name || ''; sd.handle = handle || null; sd.eol = /\r\n/.test(text) ? '\r\n' : '\n'; ccTouch(sd);
+  const sd = _cc[S]; sd.fmt = null; sd.text = text; sd.name = name || ''; sd.handle = handle || null; sd.eol = /\r\n/.test(text) ? '\r\n' : '\n'; ccTouch(sd);
 }
 function ccHas(sd) { return !!(sd.text || sd.filePath || sd.name); }
 function ccIsOpen() { const el = document.getElementById('cc-overlay'); return !!(el && !el.classList.contains('hidden')); }
@@ -26562,6 +26847,7 @@ function ccUpdateBar() {
   document.getElementById('cc-pos').textContent = active ? (_cc.cur >= 0 ? (_cc.cur + 1) : 0) + ' / ' + n : '–';
   document.getElementById('cc-stat').textContent = active ? (n ? n + ' difference' + (n === 1 ? '' : 's') : 'No differences') + ' · ' + ccLines(_cc.L).length + ' / ' + ccLines(_cc.R).length + ' lines' : 'Add code on both sides to compare';
   const ub = document.getElementById('cc-undo'); if (ub) ub.disabled = !_cc.undo.length;
+  if (typeof ccvRulerCur === 'function') ccvRulerCur();
 }
 // ── diff engine ───────────────────────────────────────────────────────────────
 function ccMyers(a, b, limit) {
@@ -26819,17 +27105,17 @@ function ccRenderDiff(keep) {
   if (!collapse) vis.fill(1); else rows.forEach((r, i) => { if (r.k === 'c') for (let q = Math.max(0, i - 3); q <= Math.min(n - 1, i + 3); q++) vis[q] = 1; });
   let h = '';
   if (!_cc.blocks.length) h += '<div class="cc-same"><i class="ti ti-circle-check" style="font-size:22px;display:block;margin-bottom:4px"></i>' + ((A.join('\n') === B.join('\n')) ? 'The two sides are identical.' : 'No differences' + (o.ws || o.ic ? ' with the current ignore options.' : '.')) + '</div>';
-  h += '<table class="cc-tbl' + (o.wrap ? '' : ' nowrap') + '"><colgroup><col style="width:46px"><col><col style="width:40px"><col style="width:46px"><col></colgroup><tbody>';
+  h += '<table class="cc-tbl' + (o.wrap ? '' : ' nowrap') + '"><colgroup><col style="width:52px"><col><col style="width:36px"><col style="width:52px"><col></colgroup><tbody>';
   const cell = (side, idx, row) => {
-    if (idx < 0) return '<td class="cc-ln"></td><td class="cc-cd fill"></td>';
+    if (idx < 0) return '<td class="cc-ln fill"></td><td class="cc-cd fill"></td>';
     const toks = (side === 'L' ? TA : TB)[idx] || [], ranges = row.ir ? row.ir[side === 'L' ? 0 : 1] : null;
     const cls = row.k === 'c' ? (side === 'L' ? 'del' : 'add') : '';
-    return '<td class="cc-ln">' + (idx + 1) + '</td><td class="cc-cd ' + cls + '">' + ccHtml(toks, ranges, side === 'L' ? 'd' : 'a') + '</td>';
+    return '<td class="cc-ln ' + cls + '">' + (idx + 1) + '</td><td class="cc-cd ' + cls + '">' + ccHtml(toks, ranges, side === 'L' ? 'd' : 'a') + '</td>';
   };
   for (let i = 0; i < n; i++) {
     if (!vis[i] && !_cc.exp.has(i)) {   // fold a run of unchanged lines
       let e = i; while (e < n && !vis[e]) e++;
-      if (!_cc.exp.has(i)) { h += '<tr class="cc-fold" onclick="ccExpand(' + i + ')" title="Show these lines"><td colspan="5"><i class="ti ti-dots"></i> ' + (e - i) + ' unchanged line' + (e - i === 1 ? '' : 's') + '</td></tr>'; i = e - 1; continue; }
+      if (!_cc.exp.has(i)) { h += '<tr class="cc-fold" onclick="ccExpand(' + i + ')" title="Show these lines"><td colspan="5"><i class="ti ti-dots"></i> ' + (e - i) + ' hidden line' + (e - i === 1 ? '' : 's') + '</td></tr>'; i = e - 1; continue; }
     }
     const r = rows[i];
     if (r.k === 'c' && o.word && r.l >= 0 && r.r >= 0 && !r.ir) r.ir = ccInline(A[r.l], B[r.r]);
@@ -26840,7 +27126,7 @@ function ccRenderDiff(keep) {
   }
   main.innerHTML = h + '</tbody></table>';
   main.scrollTop = st; main.scrollLeft = sl;
-  ccUpdateBar();
+  ccUpdateBar(); ccvRuler();
 }
 function ccExpand(i) { _cc.exp.add(i); ccRender(true); }
 function ccGo(d) {
@@ -26854,8 +27140,8 @@ function ccGo(d) {
   ccUpdateBar();
 }
 // ── editing / transfer ────────────────────────────────────────────────────────
-function ccTaInput(S, el) { const sd = _cc[S]; sd.text = el.value; ccTouch(sd); sd.dirty = true; if (_cc.mode === 'live') ccLiveSchedule(); }
-function ccPushUndo() { _cc.undo.push({ L: _cc.L.text, R: _cc.R.text }); if (_cc.undo.length > 50) _cc.undo.shift(); }
+function ccTaInput(S, el) { const sd = _cc[S]; sd.text = el.value; ccTouch(sd); sd.dirty = true; if (sd.fmt) { sd.fmt = null; ccRenderHeads(); } if (_cc.mode === 'live') ccLiveSchedule(); }
+function ccPushUndo() { _cc.undo.push({ L: _cc.L.text, R: _cc.R.text }); if (_cc.undo.length > 50) _cc.undo.shift(); if (_cc.L.fmt || _cc.R.fmt) { _cc.L.fmt = _cc.R.fmt = null; setTimeout(ccRenderHeads, 0); } }
 function ccSetLines(S, lines) { const sd = _cc[S]; sd.text = lines.join(sd.eol); ccTouch(sd); sd.dirty = true; }
 function ccXfer(id, dir) {
   ccFlush();
@@ -26870,7 +27156,7 @@ function ccApplyAll(dir) {
   if (dir === 'LR') ccSetLines('R', ccLines(_cc.L).slice()); else ccSetLines('L', ccLines(_cc.R).slice());
   _cc.exp.clear(); ccRender(true);
 }
-function ccUndo() { const u = _cc.undo.pop(); if (!u) return; ['L', 'R'].forEach(S => { _cc[S].text = u[S]; ccTouch(_cc[S]); }); _cc.exp.clear(); ccRender(true); }
+function ccUndo() { const u = _cc.undo.pop(); if (!u) return; ['L', 'R'].forEach(S => { _cc[S].text = u[S]; ccTouch(_cc[S]); }); _cc.exp.clear(); ccRender(true); _cc.L.fmt = _cc.R.fmt = null; ccRenderHeads(); }
 function ccSwap() {
   const t = _cc.L; _cc.L = _cc.R; _cc.R = t; const f = _cc.flt.L; _cc.flt.L = _cc.flt.R; _cc.flt.R = f; _cc.scan = null;
   ccRenderHeads(); ccRenderFiles(); ccRender(true);
@@ -27050,10 +27336,11 @@ function ccHeadHtml(S) {
       + '<button type="button" class="btn" onclick="ccOpenLocal(\'' + S + '\')" title="Open a file from your computer (or drop one on the text)"><i class="ti ti-file-import"></i> Open</button>'
       + '<button type="button" class="btn" onclick="ccPaste(\'' + S + '\')" title="Paste from the clipboard"><i class="ti ti-clipboard"></i> Paste</button>';
   }
-  h += langSel + '<button type="button" class="btn" onclick="ccCopy(\'' + S + '\',this)" title="Copy this side"><i class="ti ti-clipboard-copy"></i></button>'
+  h += langSel + ccfSelHtml(S, sd) + '<button type="button" class="btn" onclick="ccCopy(\'' + S + '\',this)" title="Copy this side"><i class="ti ti-clipboard-copy"></i></button>'
     + '<button type="button" class="btn" onclick="ccDownload(\'' + S + '\')" title="Download this side as a file"><i class="ti ti-download"></i></button>';
   if (!lam && sd.handle) h += '<button type="button" class="btn" onclick="ccSave(\'' + S + '\',this)" title="Save changes back to the opened file"><i class="ti ti-device-floppy"></i> Save</button>';
   if (!lam) h += '<button type="button" class="btn" onclick="ccClearSide(\'' + S + '\')" title="Clear this side"><i class="ti ti-eraser"></i></button>';
+  if (sd.fmt) h += ccfMsgHtml(S, sd.fmt);
   if (sd.msg) h += '<div class="cc-msg' + (/not shown|larger|Could not|Not present/.test(sd.msg) ? ' bad' : '') + '">' + esc(sd.msg) + '</div>';
   return h + '</div>';
 }
@@ -30553,6 +30840,1752 @@ document.addEventListener("touchstart", (e) => {
 document.addEventListener("wheel", () => {
     if (_isLogFullscreenActive()) showFsChip();
 });
+</script>
+
+<script>
+// ══ Utilities added later: Formatter / Validator (Code Compare), Markdown Previewer, Case Converter, Regex Tester ══
+// ── Utilities → Formatter / Validator (used from Code Compare) ───────────────────────────────────────
+// Pretty-print, minify and validate JSON, XML, HTML, CSS, JavaScript and SQL. Everything runs in the browser.
+// Validation reports the line and column of the first problem. A format / minify is only applied when the
+// code validates, and the JS formatter double-checks that the token stream is unchanged.
+const CCF = (function () {
+  'use strict';
+  const LANGS = { json: 'JSON', xml: 'XML', html: 'HTML', css: 'CSS', js: 'JavaScript', sql: 'SQL' };
+  const IND_KEY = 'ttl_ccf_indent';
+  let indentUnit = '  ';
+
+  function setIndent(v) {
+    indentUnit = v === 'tab' ? '\t' : v === '4' ? '    ' : '  ';
+    try { if (typeof localStorage !== 'undefined') localStorage.setItem(IND_KEY, v); } catch (e) {}
+  }
+  function getIndentKey() { return indentUnit === '\t' ? 'tab' : indentUnit === '    ' ? '4' : '2'; }
+  try { if (typeof localStorage !== 'undefined') { const s = localStorage.getItem(IND_KEY); if (s) setIndent(s); } } catch (e) {}
+
+  function fail(pos, msg) { const e = new Error(msg); e.pos = pos; throw e; }
+  function lineCol(src, pos) {
+    let line = 1, last = -1;
+    for (let i = src.indexOf('\n'); i !== -1 && i < pos; i = src.indexOf('\n', i + 1)) { line++; last = i; }
+    return { line, col: pos - last };
+  }
+  function lineOf(src, pos) { return lineCol(src, pos).line; }
+
+  // ═════════════════════════════ JSON ═════════════════════════════
+  function jsonParse(src) {
+    const n = src.length; let i = 0;
+    const ws = () => { while (i < n) { const c = src.charCodeAt(i); if (c === 32 || c === 10 || c === 13 || c === 9) i++; else break; } };
+    function str() {
+      const start = i; i++;
+      for (;;) {
+        if (i >= n || src[i] === '\n') fail(start, 'Unterminated string — the closing " is missing');
+        const ch = src[i];
+        if (ch === '"') { i++; return src.slice(start, i); }
+        if (ch === '\\') {
+          const nx = src[i + 1];
+          if (nx === 'u') { if (!/^[0-9a-fA-F]{4}$/.test(src.substr(i + 2, 4))) fail(i, 'Invalid \\u escape — it needs 4 hex digits'); i += 6; continue; }
+          if (nx === undefined || '"\\/bfnrt'.indexOf(nx) === -1) fail(i, 'Invalid escape sequence "\\' + (nx === undefined ? '' : nx) + '"');
+          i += 2; continue;
+        }
+        if (ch.charCodeAt(0) < 0x20) fail(i, 'Control character inside a string — use an escape such as \\n');
+        i++;
+      }
+    }
+    const NUM = /-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/y;
+    function num() {
+      NUM.lastIndex = i; const m = NUM.exec(src);
+      if (!m) fail(i, 'Invalid number');
+      const end = i + m[0].length;
+      if (/[0-9]/.test(src[end] || '') && m[0].replace('-', '') === '0') fail(i, 'Numbers cannot have leading zeros');
+      if (/[.\w]/.test(src[end] || '')) fail(i, 'Invalid number');
+      i = end; return m[0];
+    }
+    function val() {
+      ws();
+      if (i >= n) fail(n, 'Unexpected end of JSON — a value is missing');
+      const c = src[i];
+      if (c === '{') return obj();
+      if (c === '[') return arr();
+      if (c === '"') return { t: 'p', raw: str() };
+      if (c === '-' || (c >= '0' && c <= '9')) return { t: 'p', raw: num() };
+      if (c === "'") fail(i, 'Strings must use double quotes, not single quotes');
+      if (c === '/') fail(i, 'Comments are not allowed in JSON');
+      const w = /^[A-Za-z]+/.exec(src.slice(i, i + 12));
+      if (w && (w[0] === 'true' || w[0] === 'false' || w[0] === 'null')) { i += w[0].length; return { t: 'p', raw: w[0] }; }
+      if (w) fail(i, 'Unexpected "' + w[0] + '" — only true, false, null, numbers, strings, arrays and objects are allowed');
+      fail(i, 'Unexpected character "' + c + '"');
+    }
+    function obj() {
+      const open = i; i++; const k = [];
+      ws();
+      if (src[i] === '}') { i++; return { t: 'o', k }; }
+      for (;;) {
+        ws();
+        if (i >= n) fail(open, 'Unclosed "{" — the closing "}" is missing');
+        if (src[i] !== '"') {
+          if (src[i] === '}') fail(i, 'Trailing comma is not allowed in JSON');
+          if (src[i] === "'") fail(i, 'Property names must use double quotes');
+          if (src[i] === '/') fail(i, 'Comments are not allowed in JSON');
+          fail(i, 'Expected a property name in double quotes');
+        }
+        const key = str(); ws();
+        if (src[i] !== ':') fail(i >= n ? open : i, i >= n ? 'Unclosed "{" — the closing "}" is missing' : 'Expected ":" after the property name');
+        i++;
+        const v = val(); k.push([key, v]); ws();
+        if (src[i] === ',') { i++; continue; }
+        if (src[i] === '}') { i++; return { t: 'o', k }; }
+        if (i >= n) fail(open, 'Unclosed "{" — the closing "}" is missing');
+        fail(i, 'Expected "," or "}" but found "' + (src[i] === '"' ? '"' : src[i]) + '" — a comma may be missing before it');
+      }
+    }
+    function arr() {
+      const open = i; i++; const v = [];
+      ws();
+      if (src[i] === ']') { i++; return { t: 'a', v }; }
+      for (;;) {
+        ws();
+        if (i >= n) fail(open, 'Unclosed "[" — the closing "]" is missing');
+        if (src[i] === ']') fail(i, 'Trailing comma is not allowed in JSON');
+        v.push(val()); ws();
+        if (src[i] === ',') { i++; continue; }
+        if (src[i] === ']') { i++; return { t: 'a', v }; }
+        if (i >= n) fail(open, 'Unclosed "[" — the closing "]" is missing');
+        fail(i, 'Expected "," or "]" but found "' + src[i] + '"');
+      }
+    }
+    const root = val(); ws();
+    if (i < n) fail(i, 'Unexpected content after the end of the JSON value');
+    return root;
+  }
+  function jsonEmit(nd, pretty, ind, lvl) {
+    if (nd.t === 'p') return nd.raw;
+    const pad = ind.repeat(lvl + 1), end = ind.repeat(lvl);
+    if (nd.t === 'a') {
+      if (!nd.v.length) return '[]';
+      const parts = nd.v.map(x => jsonEmit(x, pretty, ind, lvl + 1));
+      return pretty ? '[\n' + parts.map(p => pad + p).join(',\n') + '\n' + end + ']' : '[' + parts.join(',') + ']';
+    }
+    if (!nd.k.length) return '{}';
+    const parts = nd.k.map(kv => kv[0] + (pretty ? ': ' : ':') + jsonEmit(kv[1], pretty, ind, lvl + 1));
+    return pretty ? '{\n' + parts.map(p => pad + p).join(',\n') + '\n' + end + '}' : '{' + parts.join(',') + '}';
+  }
+  function doJson(src, act) {
+    const tree = jsonParse(src);
+    if (act === 'validate') return { msg: 'Valid JSON' };
+    return { text: jsonEmit(tree, act === 'pretty', indentUnit, 0) };
+  }
+
+  // ═════════════════════════════ XML / HTML ═════════════════════════════
+  const VOID = new Set('area base br col embed hr img input link meta param source track wbr'.split(' '));
+  const RAWTEXT = new Set(['script', 'style', 'textarea', 'title']);
+  const PRE = new Set(['pre', 'textarea']);
+  const OPT_END = new Set(['p', 'li', 'dt', 'dd', 'td', 'th', 'tr', 'thead', 'tbody', 'tfoot', 'option', 'optgroup', 'colgroup', 'head', 'body', 'html']);
+  const P_CLOSERS = new Set('address article aside blockquote details div dl fieldset figcaption figure footer form h1 h2 h3 h4 h5 h6 header hr main menu nav ol p pre section table ul'.split(' '));
+  const TD_CLOSERS = new Set(['td', 'th', 'tr', 'tbody', 'thead', 'tfoot']);
+  const AUTO = {
+    p: P_CLOSERS, li: new Set(['li']), dt: new Set(['dt', 'dd']), dd: new Set(['dt', 'dd']),
+    td: TD_CLOSERS, th: TD_CLOSERS, tr: new Set(['tr', 'tbody', 'thead', 'tfoot']),
+    thead: new Set(['tbody', 'tfoot']), tbody: new Set(['tbody', 'tfoot', 'thead']),
+    option: new Set(['option', 'optgroup']), optgroup: new Set(['optgroup'])
+  };
+  const INLINE = new Set('a abbr b bdi bdo big br cite code data del dfn em font i img input ins kbd label mark q s samp small span strike strong sub sup time tt u var wbr button'.split(' '));
+
+  function parseMarkup(src, html) {
+    const n = src.length; let i = 0;
+    const root = { t: 'el', name: '#root', key: '#root', kids: [] };
+    const stack = [root];
+    let roots = 0;
+    const top = () => stack[stack.length - 1];
+    const add = nd => top().kids.push(nd);
+    function tagEnd(from) {
+      let q = '';
+      for (let j = from; j < n; j++) {
+        const c = src[j];
+        if (q) { if (c === q) q = ''; } else if (c === '"' || c === "'") q = c; else if (c === '>') return j;
+      }
+      return -1;
+    }
+    function text(s, pos) {
+      if (!html) {
+        if (stack.length === 1 && s.trim()) fail(pos + s.search(/\S/), 'Text is not allowed outside the root element');
+        const m = /&(?!(?:#\d+|#x[0-9a-fA-F]+|[A-Za-z_][\w.-]*);)/.exec(s);
+        if (m) fail(pos + m.index, 'Unescaped "&" — write &amp; (or a valid entity)');
+      }
+      if (s) add({ t: 'text', s });
+    }
+    function attrsOf(str, pos) {
+      let out = '', p = 0; const seen = new Set();
+      const RE = /([^\s"'<>\/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/y;
+      for (;;) {
+        const ws = /^\s*/.exec(str.slice(p))[0].length; p += ws;
+        if (p >= str.length) break;
+        if (ws === 0 && p > 0) fail(pos + p, 'Attributes must be separated by a space');
+        RE.lastIndex = p; const m = RE.exec(str);
+        if (!m) fail(pos + p, 'Malformed attribute');
+        const name = m[1];
+        if (!html) {
+          if (m[2] === undefined && m[3] === undefined) fail(pos + p, 'Attribute "' + name + '" needs a quoted value (name="value")');
+          if (seen.has(name)) fail(pos + p, 'Duplicate attribute "' + name + '"');
+          seen.add(name);
+        }
+        out += ' ' + name + (m[2] !== undefined ? '="' + m[2] + '"' : m[3] !== undefined ? "='" + m[3] + "'" : m[4] !== undefined ? '=' + m[4] : '');
+        p = RE.lastIndex;
+      }
+      return out;
+    }
+    function popTo(k, endPos) { while (stack.length > k) { const el = stack.pop(); if (el.end === undefined) el.end = endPos; } }
+    while (i < n) {
+      const lt = src.indexOf('<', i);
+      if (lt === -1) { text(src.slice(i), i); i = n; break; }
+      if (lt > i) text(src.slice(i, lt), i);
+      i = lt;
+      if (src.startsWith('<!--', i)) {
+        const e = src.indexOf('-->', i + 4);
+        if (e === -1) fail(i, 'Unterminated comment — "-->" is missing');
+        add({ t: 'comment', s: src.slice(i, e + 3) }); i = e + 3; continue;
+      }
+      if (src.startsWith('<![CDATA[', i)) {
+        const e = src.indexOf(']]>', i);
+        if (e === -1) fail(i, 'Unterminated CDATA section — "]]>" is missing');
+        add({ t: 'cdata', s: src.slice(i, e + 3) }); i = e + 3; continue;
+      }
+      if (src.startsWith('<?', i)) {
+        const e = src.indexOf('?>', i);
+        if (e === -1) fail(i, 'Unterminated processing instruction — "?>" is missing');
+        if (!html && /^<\?xml\s/i.test(src.slice(i, i + 6)) && (roots > 0 || top().kids.length || i > 0 && src.slice(0, i).trim())) fail(i, 'The XML declaration must be at the very start of the document');
+        add({ t: 'raw', s: src.slice(i, e + 2) }); i = e + 2; continue;
+      }
+      if (src.startsWith('<!', i)) {
+        const e = tagEnd(i + 2);
+        if (e === -1) fail(i, 'Unterminated declaration — ">" is missing');
+        add({ t: 'raw', s: src.slice(i, e + 1) }); i = e + 1; continue;
+      }
+      if (src[i + 1] === '/') {
+        const RE = /<\/([A-Za-z_:][\w:.-]*)\s*>/y; RE.lastIndex = i;
+        const m = RE.exec(src);
+        if (!m) fail(i, src.indexOf('>', i) === -1 ? 'Unterminated closing tag — ">" is missing' : 'Malformed closing tag');
+        const name = m[1], key = html ? name.toLowerCase() : name;
+        let k = stack.length - 1;
+        while (k > 0 && stack[k].key !== key) k--;
+        if (k === 0) fail(i, 'Closing tag </' + name + '> has no matching opening tag');
+        if (k !== stack.length - 1) {
+          for (let q = stack.length - 1; q > k; q--) {
+            if (!html || !OPT_END.has(stack[q].key)) fail(i, 'Expected </' + stack[q].name + '> (opened on line ' + lineOf(src, stack[q].start) + ') but found </' + name + '>');
+          }
+        }
+        const el = stack[k]; popTo(k, i);
+        el.end = i + m[0].length; el.closeStart = i; i = el.end; continue;
+      }
+      if (/[A-Za-z_:]/.test(src[i + 1] || '')) {
+        const e = tagEnd(i + 1);
+        if (e === -1) fail(i, 'Unterminated tag — ">" or a closing quote is missing');
+        let inner = src.slice(i + 1, e), self = false;
+        if (/\/\s*$/.test(inner)) { self = true; inner = inner.replace(/\/\s*$/, ''); }
+        const m = /^([A-Za-z_:][\w:.-]*)([\s\S]*)$/.exec(inner);
+        const name = m[1], key = html ? name.toLowerCase() : name;
+        const attrs = attrsOf(m[2], i + 1 + name.length);
+        if (html) {
+          while (stack.length > 1 && AUTO[top().key] && AUTO[top().key].has(key)) popTo(stack.length - 1, i);
+        } else if (stack.length === 1) {
+          roots++;
+          if (roots > 1) fail(i, 'Only one root element is allowed — extra content found here');
+        }
+        const el = { t: 'el', name, key, attrs, self, kids: [], start: i, openEnd: e + 1 };
+        add(el);
+        i = e + 1;
+        if (self || (html && VOID.has(key))) { el.end = i; el.void = !self && html; continue; }
+        if (html && RAWTEXT.has(key)) {
+          const cr = new RegExp('</' + key + '\\s*>', 'ig'); cr.lastIndex = i;
+          const cm = cr.exec(src);
+          if (!cm) fail(el.start, '<' + name + '> is never closed');
+          const content = src.slice(i, cm.index);
+          if (content) el.kids.push({ t: 'rawtext', s: content });
+          el.closeStart = cm.index; el.end = cm.index + cm[0].length; i = el.end; continue;
+        }
+        stack.push(el);
+        continue;
+      }
+      if (!html) fail(i, 'Unescaped "<" — write &lt; (or start a valid tag)');
+      text('<', i); i++;
+    }
+    for (let q = stack.length - 1; q > 0; q--) {
+      if (!html || !OPT_END.has(stack[q].key)) fail(stack[q].start, '<' + stack[q].name + '> is never closed');
+    }
+    popTo(1, n);
+    if (!html && roots === 0) fail(0, 'No root element found');
+    return root;
+  }
+
+  const collapseWsText = s => s.replace(/\s+/g, ' ');
+  function openTag(el, html) { return '<' + el.name + el.attrs + (el.self ? (html ? ' />' : '/>') : '>'); }
+  function closeTag(el) { return '</' + el.name + '>'; }
+  function isInlineEl(nd, html) { return html && nd.t === 'el' && INLINE.has(nd.key); }
+  function isFlow(nd, html) {
+    if (nd.t === 'text') return true;
+    if (nd.t === 'el') return isInlineEl(nd, html) && nd.kids.every(k => isFlow(k, html));
+    return false;
+  }
+  function inlineStr(nd, html) {
+    if (nd.t === 'text') return collapseWsText(nd.s);
+    if (nd.self || nd.void) return openTag(nd, html);
+    return openTag(nd, html) + nd.kids.map(k => inlineStr(k, html)).join('') + closeTag(nd);
+  }
+  function wrapFlow(str, width, pad) {
+    // break only at spaces that are outside tags
+    const words = []; let cur = '', inTag = false, q = '';
+    for (let i = 0; i < str.length; i++) {
+      const c = str[i];
+      if (inTag) { cur += c; if (q) { if (c === q) q = ''; } else if (c === '"' || c === "'") q = c; else if (c === '>') inTag = false; continue; }
+      if (c === '<' && /[A-Za-z\/]/.test(str[i + 1] || '')) { inTag = true; cur += c; continue; }
+      if (c === ' ') { if (cur) words.push(cur); cur = ''; continue; }
+      cur += c;
+    }
+    if (cur) words.push(cur);
+    const lines = []; let line = '';
+    words.forEach(w => {
+      if (!line) line = w;
+      else if ((pad + line + ' ' + w).length <= width) line += ' ' + w;
+      else { lines.push(line); line = w; }
+    });
+    if (line) lines.push(line);
+    return lines;
+  }
+  function dedent(s) {
+    const lead = /^\s*\n/.test(s);
+    const lines = s.replace(/^\s*\n/, '').replace(/\s+$/, '').split('\n');
+    let min = Infinity;
+    lines.forEach((l, i) => { if (l.trim() && (lead || i > 0)) { const m = /^[ \t]*/.exec(l)[0].length; if (m < min) min = m; } });
+    if (!isFinite(min)) min = 0;
+    return lines.map(l => l.slice(min).replace(/\s+$/, ''));
+  }
+  function textOnly(el) { return el.kids.every(k => k.t === 'text' || k.t === 'cdata'); }
+
+  function prettyMarkup(root, src, html) {
+    const ind = indentUnit, W = 100, out = [];
+    const pad = d => ind.repeat(d);
+    function printKids(kids, d) {
+      let group = [];
+      const flush = () => {
+        if (!group.length) return;
+        let str = group.map(g => inlineStr(g, html)).join('').replace(/\s+/g, ' ').trim();
+        group = [];
+        if (!str) return;
+        wrapFlow(str, W, pad(d)).forEach(l => out.push(pad(d) + l));
+      };
+      kids.forEach(k => {
+        if (k.t === 'text') { group.push(k); return; }
+        if (k.t === 'el' && isFlow(k, html)) { group.push(k); return; }
+        flush();
+        printNode(k, d);
+      });
+      flush();
+    }
+    function printNode(nd, d) {
+      if (nd.t === 'comment' || nd.t === 'raw' || nd.t === 'cdata') { out.push(pad(d) + nd.s); return; }
+      if (nd.t === 'text') { const s = nd.s.trim(); if (s) out.push(pad(d) + s); return; }
+      if (nd.t !== 'el') return;
+      if (nd.self || nd.void) { out.push(pad(d) + openTag(nd, html)); return; }
+      if (html && PRE.has(nd.key)) { out.push(pad(d) + src.slice(nd.start, nd.end)); return; }
+      if (html && (nd.key === 'script' || nd.key === 'style')) {
+        const c = nd.kids[0] ? nd.kids[0].s : '';
+        if (!c.trim()) { out.push(pad(d) + openTag(nd, html) + closeTag(nd)); return; }
+        out.push(pad(d) + openTag(nd, html));
+        let body = null;
+        try {
+          const ty = /\btype\s*=\s*["']?([^"'\s>]*)/i.exec(nd.attrs);
+          const isJs = nd.key === 'script' && (!ty || /^(text|application)\/(javascript|ecmascript)$|^module$/i.test(ty[1]));
+          if (nd.key === 'style' && (!ty || /^text\/css$/i.test(ty[1]))) body = doCss(c.replace(/\r/g, ''), 'pretty').text.split('\n');
+          else if (isJs) { const r = doJs(c.replace(/\r/g, ''), 'pretty'); body = r.text.split('\n'); }
+        } catch (e) { body = null; }
+        (body || dedent(c)).forEach(l => out.push(l ? pad(d + 1) + l : ''));
+        out.push(pad(d) + closeTag(nd)); return;
+      }
+      if (html && nd.key === 'title') {
+        out.push(pad(d) + openTag(nd, html) + (nd.kids[0] ? collapseWsText(nd.kids[0].s).trim() : '') + closeTag(nd)); return;
+      }
+      if (!nd.kids.length) { out.push(pad(d) + openTag(nd, html) + closeTag(nd)); return; }
+      if (!html) {
+        const hasEl = nd.kids.some(k => k.t === 'el');
+        const hasText = nd.kids.some(k => (k.t === 'text' && k.s.trim()) || k.t === 'cdata');
+        if (textOnly(nd) || (hasEl && hasText)) { out.push(pad(d) + src.slice(nd.start, nd.end)); return; }   // text / mixed content stays exactly as written
+        out.push(pad(d) + openTag(nd, html));
+        printKids(nd.kids.filter(k => !(k.t === 'text' && !k.s.trim())), d + 1);
+        out.push(pad(d) + closeTag(nd)); return;
+      }
+      if (nd.kids.every(k => isFlow(k, html))) {
+        const str = nd.kids.map(k => inlineStr(k, html)).join('').replace(/\s+/g, ' ').trim();
+        const one = pad(d) + openTag(nd, html) + str + closeTag(nd);
+        if (one.length <= W) { out.push(one); return; }
+        out.push(pad(d) + openTag(nd, html));
+        wrapFlow(str, W, pad(d + 1)).forEach(l => out.push(pad(d + 1) + l));
+        out.push(pad(d) + closeTag(nd)); return;
+      }
+      out.push(pad(d) + openTag(nd, html));
+      printKids(nd.kids, d + 1);
+      out.push(pad(d) + closeTag(nd));
+    }
+    printKids(root.kids, 0);
+    return out.join('\n');
+  }
+  function minifyMarkup(root, src, html) {
+    function ser(nd, parentBlock) {
+      if (nd.t === 'comment') return /^<!--\[if|^<!--\s*<!\[endif/i.test(nd.s) ? nd.s : '';
+      if (nd.t === 'raw' || nd.t === 'cdata') return nd.s;
+      if (nd.t === 'text') return nd.s;
+      if (nd.self || nd.void) return '<' + nd.name + nd.attrs + (nd.self ? '/>' : '>');
+      if (html && (PRE.has(nd.key) || nd.key === 'script' || nd.key === 'style')) return src.slice(nd.start, nd.end);
+      const inner = serKids(nd.kids, html ? !isInlineEl(nd, html) : false, nd);
+      return '<' + nd.name + nd.attrs + '>' + inner + '</' + nd.name + '>';
+    }
+    function serKids(kids, block, parent) {
+      if (!html) {
+        const hasText = kids.some(k => (k.t === 'text' && k.s.trim()) || k.t === 'cdata');
+        if (!hasText) return kids.filter(k => k.t !== 'text').map(k => ser(k, true)).join('');
+        return kids.map(k => ser(k, false)).join('');
+      }
+      const blockish = k => !k || k.t === 'comment' || k.t === 'raw' || (k.t === 'el' && !INLINE.has(k.key));
+      let o = '';
+      kids.forEach((k, idx) => {
+        if (k.t !== 'text') { o += ser(k, block); return; }
+        const prev = kids[idx - 1], next = kids[idx + 1];
+        let s = collapseWsText(k.s);
+        const startEdge = !prev || blockish(prev), endEdge = !next || blockish(next);
+        if (!s.trim()) { o += (prev && next && !blockish(prev) && !blockish(next)) ? ' ' : ''; return; }
+        if (startEdge && (!prev ? block : true)) s = s.replace(/^ /, '');
+        if (endEdge && (!next ? block : true)) s = s.replace(/ $/, '');
+        o += s;
+      });
+      return o;
+    }
+    return serKids(root.kids, true, root);
+  }
+  function doMarkup(src, act, html) {
+    const root = parseMarkup(src, html);
+    const label = html ? 'HTML' : 'XML';
+    if (act === 'validate') return { msg: html ? 'HTML structure is OK — all tags are opened and closed correctly' : 'Valid XML — the document is well-formed' };
+    return { text: act === 'pretty' ? prettyMarkup(root, src, html) : minifyMarkup(root, src, html).trim(), label };
+  }
+
+  // ═════════════════════════════ CSS ═════════════════════════════
+  function cssScan(src) {
+    const n = src.length, ev = [];
+    let buf = '', bs = -1, i = 0, paren = 0; const stack = [], pp = [];
+    const put = (s, pos) => { if (bs < 0 && s.trim()) bs = pos + s.search(/\S/); buf += s; };
+    const clear = () => { buf = ''; bs = -1; };
+    while (i < n) {
+      const c = src[i];
+      if (c === '/' && src[i + 1] === '*') {
+        const e = src.indexOf('*/', i + 2);
+        if (e === -1) fail(i, 'Unterminated comment — "*/" is missing');
+        const cm = src.slice(i, e + 2);
+        if (buf.trim()) buf += cm; else ev.push({ k: 'comment', s: cm });
+        i = e + 2; continue;
+      }
+      if (c === '"' || c === "'") {
+        let j = i + 1;
+        for (;;) {
+          if (j >= n || src[j] === '\n') fail(i, 'Unterminated string — the closing ' + c + ' is missing');
+          if (src[j] === '\\') { j += 2; continue; }
+          if (src[j] === c) break;
+          j++;
+        }
+        put(src.slice(i, j + 1), i); i = j + 1; continue;
+      }
+      if (c === '(') { paren++; pp.push(i); put(c, i); i++; continue; }
+      if (c === ')') { if (!paren) fail(i, 'Unexpected ")" — there is no matching "("'); paren--; pp.pop(); put(c, i); i++; continue; }
+      if (paren) { put(c, i); i++; continue; }
+      if (c === '{' && buf.endsWith('#')) {
+        let d = 1, j = i + 1;
+        while (j < n && d) { if (src[j] === '{') d++; else if (src[j] === '}') d--; j++; }
+        if (d) fail(i, 'Unclosed "#{" interpolation');
+        put(src.slice(i, j), i); i = j; continue;
+      }
+      if (c === '{') { ev.push({ k: 'open', s: buf.trim() }); stack.push(i); clear(); i++; continue; }
+      if (c === '}') {
+        if (!stack.length) fail(i, 'Unexpected "}" — there is no matching "{"');
+        if (buf.trim()) ev.push({ k: 'decl', s: buf.trim() });
+        clear(); stack.pop(); ev.push({ k: 'close' }); i++; continue;
+      }
+      if (c === ';') { if (buf.trim()) ev.push({ k: stack.length ? 'decl' : 'at', s: buf.trim() }); clear(); i++; continue; }
+      put(c, i); i++;
+    }
+    if (paren) fail(pp[pp.length - 1], 'Unclosed "(" — the closing ")" is missing');
+    if (stack.length) fail(stack[stack.length - 1], 'Unclosed "{" — the closing "}" is missing');
+    if (buf.trim()) fail(bs, 'Unexpected text at the end — a ";" or a "{ … }" block is missing');
+    return ev;
+  }
+  // collapse whitespace outside strings
+  function collapseWs(s) {
+    let o = '', q = '', sp = false;
+    for (let i = 0; i < s.length; i++) {
+      const c = s[i];
+      if (q) { o += c; if (c === '\\') { o += s[++i] || ''; } else if (c === q) q = ''; continue; }
+      if (c === '"' || c === "'") { if (sp) { o += ' '; sp = false; } q = c; o += c; continue; }
+      if (/\s/.test(c)) { sp = true; continue; }
+      if (sp) { o += ' '; sp = false; }
+      o += c;
+    }
+    return o.trim();
+  }
+  // split on top-level commas (outside strings, parens, brackets)
+  function splitTop(s) {
+    const parts = []; let cur = '', q = '', p = 0, b = 0;
+    for (let i = 0; i < s.length; i++) {
+      const c = s[i];
+      if (q) { cur += c; if (c === '\\') cur += s[++i] || ''; else if (c === q) q = ''; continue; }
+      if (c === '"' || c === "'") { q = c; cur += c; continue; }
+      if (c === '(') p++; else if (c === ')') p--; else if (c === '[') b++; else if (c === ']') b--;
+      if (c === ',' && !p && !b) { parts.push(cur.trim()); cur = ''; continue; }
+      cur += c;
+    }
+    parts.push(cur.trim());
+    return parts;
+  }
+  function colonIndex(s) {
+    let q = '', p = 0;
+    for (let i = 0; i < s.length; i++) {
+      const c = s[i];
+      if (q) { if (c === '\\') i++; else if (c === q) q = ''; continue; }
+      if (c === '"' || c === "'") q = c; else if (c === '(') p++; else if (c === ')') p--; else if (c === ':' && !p) return i;
+    }
+    return -1;
+  }
+  function declFmt(s, min) {
+    s = collapseWs(s);
+    if (/^[@$]/.test(s) && colonIndex(s) < 0) return s;
+    const ci = colonIndex(s);
+    if (ci < 0) return s;
+    let prop = s.slice(0, ci).trim(), val = s.slice(ci + 1).trim();
+    val = val.replace(/\s*!\s*important/ig, min ? '!important' : ' !important');
+    if (min) val = minSpaces(val, ',');
+    return prop + (min ? ':' : ': ') + val;
+  }
+  // remove spaces around given chars (outside strings)
+  function minSpaces(s, chars) {
+    let o = '', q = '';
+    for (let i = 0; i < s.length; i++) {
+      const c = s[i];
+      if (q) { o += c; if (c === '\\') o += s[++i] || ''; else if (c === q) q = ''; continue; }
+      if (c === '"' || c === "'") { q = c; o += c; continue; }
+      if (c === ' ') {
+        const nx = s[i + 1];
+        if ((nx && chars.indexOf(nx) !== -1) || (o && chars.indexOf(o[o.length - 1]) !== -1)) continue;
+      }
+      o += c;
+    }
+    return o;
+  }
+  function minSel(s) {
+    s = collapseWs(s);
+    if (s[0] === '@') return minSpaces(s, ',');
+    let o = '', q = '', p = 0, b = 0;
+    for (let i = 0; i < s.length; i++) {
+      const c = s[i];
+      if (q) { o += c; if (c === '\\') o += s[++i] || ''; else if (c === q) q = ''; continue; }
+      if (c === '"' || c === "'") { q = c; o += c; continue; }
+      if (c === '(') p++; else if (c === ')') p--; else if (c === '[') b++; else if (c === ']') b--;
+      if (c === ' ' && !p && !b) {
+        const nx = s[i + 1], pv = o[o.length - 1];
+        if ((nx && ',>+~'.indexOf(nx) !== -1) || (pv && ',>+~'.indexOf(pv) !== -1)) continue;
+      }
+      o += c;
+    }
+    return o;
+  }
+  function prettyCss(ev) {
+    const out = []; let d = 0; const pad = x => indentUnit.repeat(x);
+    let skip = -1;
+    ev.forEach((e, idx) => {
+      if (idx === skip) return;
+      if (e.k === 'open') {
+        const pre = e.s ? (e.s[0] === '@' ? [collapseWs(e.s)] : splitTop(e.s).map(collapseWs)) : [''];
+        const empty = ev[idx + 1] && ev[idx + 1].k === 'close';
+        pre.forEach((p, j) => out.push(pad(d) + p + (j < pre.length - 1 ? ',' : (p ? ' {' : '{') + (empty ? '}' : ''))));
+        if (empty) { skip = idx + 1; if (d === 0 && idx + 1 < ev.length - 1) out.push(''); } else d++;
+      } else if (e.k === 'decl') out.push(pad(d) + declFmt(e.s, false) + ';');
+      else if (e.k === 'at') out.push(pad(d) + collapseWs(e.s) + ';');
+      else if (e.k === 'close') { d--; out.push(pad(d) + '}'); if (d === 0 && idx < ev.length - 1) out.push(''); }
+      else {
+        const ls = e.s.split('\n');
+        out.push(pad(d) + ls[0]);
+        for (let q = 1; q < ls.length; q++) out.push(ls[q].replace(/^\s+/, ' ' + pad(d).replace(/\t/g, '')).replace(/^ (\*)/, pad(d) + ' $1'));
+      }
+    });
+    return out.join('\n');
+  }
+  function minifyCss(ev) {
+    let o = '';
+    ev.forEach(e => {
+      if (e.k === 'open') o += minSel(e.s) + '{';
+      else if (e.k === 'decl') o += declFmt(e.s, true) + ';';
+      else if (e.k === 'at') o += minSpaces(collapseWs(e.s), ',') + ';';
+      else if (e.k === 'close') { if (o.endsWith(';')) o = o.slice(0, -1); o += '}'; }
+      else if (/^\/\*!/.test(e.s)) o += e.s;
+    });
+    return o;
+  }
+  function doCss(src, act) {
+    const ev = cssScan(src);
+    if (act === 'validate') return { msg: 'CSS looks fine — braces, brackets, quotes and comments are balanced' };
+    return { text: act === 'pretty' ? prettyCss(ev) : minifyCss(ev) };
+  }
+
+  // ═════════════════════════════ JavaScript ═════════════════════════════
+  const KW_BEFORE_RE = new Set(['return', 'typeof', 'instanceof', 'in', 'of', 'new', 'delete', 'void', 'throw', 'case', 'do', 'else', 'yield', 'await']);
+  const PUNCT = ['>>>=', '...', '===', '!==', '**=', '<<=', '>>=', '>>>', '&&=', '||=', '??=', '=>', '==', '!=', '<=', '>=', '&&', '||', '??', '?.', '++', '--', '+=', '-=', '*=', '/=', '%=', '&=', '|=', '^=', '<<', '>>', '**'];
+  const NUM_RE = /0[xX][\da-fA-F_]+n?|0[bB][01_]+n?|0[oO][0-7_]+n?|(?:\d[\d_]*\.?[\d_]*|\.\d[\d_]*)(?:[eE][+-]?\d+)?n?/y;
+  const WORD_RE = /[#@]?[A-Za-z_$\u00a1-\uffff][\w$\u00a1-\uffff]*/y;
+  const OPEN_OF = { '(': ')', '[': ']', '{': '}' };
+  const BIN_OPS = new Set(['=', '==', '===', '!=', '!==', '<', '>', '<=', '>=', '+', '-', '*', '/', '%', '**', '&&', '||', '??', '&', '|', '^', '<<', '>>', '>>>', '+=', '-=', '*=', '/=', '%=', '**=', '&&=', '||=', '??=', '&=', '|=', '^=', '<<=', '>>=', '>>>=', '=>']);
+  const KW_PAREN = new Set(['if', 'for', 'while', 'switch', 'catch', 'with', 'return', 'typeof', 'void', 'delete', 'await', 'yield', 'case', 'in', 'of', 'instanceof', 'new', 'function', 'async', 'else', 'do', 'throw', 'extends']);
+  const KW_CONTROL = new Set(['if', 'for', 'while', 'switch', 'catch', 'with']);
+  const KW_UNARY_PREV = new Set(['return', 'typeof', 'case', 'in', 'of', 'instanceof', 'new', 'delete', 'void', 'throw', 'yield', 'await', 'else', 'do']);
+  const INLINE_PREV_W = new Set(['import', 'export', 'return', 'yield', 'await', 'const', 'let', 'var']);
+  const isCodeTok = t => t.t !== 'lc' && t.t !== 'bc';
+
+  function jsTokenize(src) {
+    const n = src.length, toks = []; let i = 0, nlc = 0, pendNl = false;
+    function skipStr(j) {
+      const q = src[j], st = j; j++;
+      for (;;) {
+        if (j >= n || src[j] === '\n') fail(st, 'Unterminated string — the closing ' + q + ' is missing');
+        if (src[j] === '\\') { j += 2; continue; }
+        if (src[j] === q) return j + 1;
+        j++;
+      }
+    }
+    function scanTpl(j) {
+      const st = j; j++;
+      for (;;) {
+        if (j >= n) fail(st, 'Unterminated template literal — the closing ` is missing');
+        const c = src[j];
+        if (c === '\\') { j += 2; continue; }
+        if (c === '`') return j + 1;
+        if (c === '$' && src[j + 1] === '{') { j = scanExpr(j + 2, j); continue; }
+        j++;
+      }
+    }
+    function scanExpr(j, st) {
+      let d = 1;
+      while (j < n) {
+        const c = src[j];
+        if (c === '"' || c === "'") { j = skipStr(j); continue; }
+        if (c === '`') { j = scanTpl(j); continue; }
+        if (c === '/' && src[j + 1] === '/') { const e = src.indexOf('\n', j); j = e === -1 ? n : e; continue; }
+        if (c === '/' && src[j + 1] === '*') { const e = src.indexOf('*/', j + 2); j = e === -1 ? n : e + 2; continue; }
+        if (c === '{') d++;
+        else if (c === '}') { d--; if (!d) return j + 1; }
+        j++;
+      }
+      fail(st, 'Unclosed "${" in a template literal');
+    }
+    function regexAllowed() {
+      let p = null;
+      for (let q = toks.length - 1; q >= 0; q--) { if (isCodeTok(toks[q])) { p = toks[q]; break; } }
+      if (!p) return true;
+      if (p.t === 'w') return KW_BEFORE_RE.has(p.s);
+      if (p.t === 'n' || p.t === 's' || p.t === 'tpl' || p.t === 're') return false;
+      return !(p.s === ')' || p.s === ']' || p.s === '}');
+    }
+    function push(t, s, pos) { toks.push({ t, s, pos, nl: nlc > 0 || pendNl, bl: nlc > 1 }); nlc = 0; pendNl = false; }
+    if (src.startsWith('#!')) { let e = src.indexOf('\n'); if (e === -1) e = n; push('lc', src.slice(0, e), 0); i = e; }
+    while (i < n) {
+      const c = src[i];
+      if (c === '\n') { nlc++; i++; continue; }
+      if (/\s/.test(c)) { i++; continue; }
+      if (c === '/' && src[i + 1] === '/') { let e = src.indexOf('\n', i); if (e === -1) e = n; push('lc', src.slice(i, e), i); i = e; continue; }
+      if (c === '/' && src[i + 1] === '*') {
+        const e = src.indexOf('*/', i + 2);
+        if (e === -1) fail(i, 'Unterminated comment — "*/" is missing');
+        const s = src.slice(i, e + 2); push('bc', s, i); if (s.indexOf('\n') !== -1) pendNl = true; i = e + 2; continue;
+      }
+      if (c === '"' || c === "'") { const e = skipStr(i); push('s', src.slice(i, e), i); i = e; continue; }
+      if (c === '`') { const e = scanTpl(i); push('tpl', src.slice(i, e), i); i = e; continue; }
+      if (c === '/' && regexAllowed()) {
+        let j = i + 1, cls = false;
+        for (;;) {
+          if (j >= n || src[j] === '\n') fail(i, 'Unterminated regular expression');
+          const ch = src[j];
+          if (ch === '\\') { j += 2; continue; }
+          if (ch === '[') cls = true; else if (ch === ']') cls = false; else if (ch === '/' && !cls) break;
+          j++;
+        }
+        j++; while (j < n && /[A-Za-z]/.test(src[j])) j++;
+        push('re', src.slice(i, j), i); i = j; continue;
+      }
+      if (/[0-9]/.test(c) || (c === '.' && /[0-9]/.test(src[i + 1] || ''))) {
+        NUM_RE.lastIndex = i; const m = NUM_RE.exec(src);
+        if (m) { push('n', m[0], i); i += m[0].length; continue; }
+      }
+      WORD_RE.lastIndex = i; const wm = WORD_RE.exec(src);
+      if (wm) { push('w', wm[0], i); i += wm[0].length; continue; }
+      let hit = '';
+      for (let q = 0; q < PUNCT.length; q++) { if (src.startsWith(PUNCT[q], i)) { hit = PUNCT[q]; break; } }
+      if (hit === '?.' && /[0-9]/.test(src[i + 2] || '')) hit = '';
+      if (!hit) hit = c;
+      push('p', hit, i); i += hit.length;
+    }
+    return toks;
+  }
+  function jsCheckBrackets(src, toks) {
+    const st = [];
+    toks.forEach(t => {
+      if (t.t !== 'p') return;
+      if (OPEN_OF[t.s]) st.push(t);
+      else if (t.s === ')' || t.s === ']' || t.s === '}') {
+        const o = st.pop();
+        if (!o) fail(t.pos, 'Unexpected "' + t.s + '" — there is no matching opening bracket');
+        if (OPEN_OF[o.s] !== t.s) fail(t.pos, 'Expected "' + OPEN_OF[o.s] + '" to close the "' + o.s + '" from line ' + lineOf(src, o.pos) + ', but found "' + t.s + '"');
+      }
+    });
+    if (st.length) { const o = st[st.length - 1]; fail(o.pos, 'Unclosed "' + o.s + '" — the closing "' + OPEN_OF[o.s] + '" is missing'); }
+  }
+  function looksJsx(toks) {
+    const c = toks.filter(isCodeTok);
+    for (let k = 1; k < c.length - 2; k++) {
+      const t = c[k], a = c[k + 1], p = c[k - 1], b = c[k + 2];
+      if (t.t === 'p' && t.s === '<' && a.t === 'w' && a.pos === t.pos + 1) {
+        const prevOk = p.t === 'p' ? !(p.s === ')' || p.s === ']' || p.s === '}') : (p.t === 'w' && KW_BEFORE_RE.has(p.s));
+        if (prevOk && ((b.t === 'p' && (b.s === '>' || b.s === '/')) || b.t === 'w')) return true;
+      }
+    }
+    return false;
+  }
+  // 'ok' | 'module' | 'skip' | <error message>
+  function jsEngineCheck(src, T) {
+    if (T && T.some((t, k) => t.t === 'w' && (t.s === 'export' || (t.s === 'import' && !(T[k + 1] && T[k + 1].t === 'p' && (T[k + 1].s === '(' || T[k + 1].s === '.')))))) return 'module';
+    let AsyncFn = null;
+    try { AsyncFn = Object.getPrototypeOf(async function () {}).constructor; } catch (e) { /* old engine */ }
+    try { new Function(src); return 'ok'; } catch (e1) {
+      if (!e1 || e1.name !== 'SyntaxError') return 'skip';
+      if (AsyncFn) { try { new AsyncFn(src); return 'ok'; } catch (e2) { /* fall through */ } }
+      return e1.message || 'Syntax error';
+    }
+  }
+  const jsSig = T => T.filter(isCodeTok).map(t => t.t + '\u0001' + t.s);
+  const sameSig = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
+
+  // shared helpers: previous / next code token index + bracket matching
+  function jsIndex(T) {
+    const prev = new Array(T.length).fill(-1), match = new Array(T.length).fill(-1), st = [];
+    let last = -1;
+    T.forEach((t, k) => {
+      prev[k] = last;
+      if (isCodeTok(t)) last = k;
+      if (t.t === 'p') {
+        if (OPEN_OF[t.s]) st.push(k);
+        else if (t.s === ')' || t.s === ']' || t.s === '}') { const o = st.pop(); if (o !== undefined) { match[o] = k; match[k] = o; } }
+      }
+    });
+    return { prev, match };
+  }
+
+  function jsBeautify(T) {
+    const ind = indentUnit;
+    const { prev: prevIdx, match } = jsIndex(T);
+    const nextCode = k => { for (let q = k + 1; q < T.length; q++) if (isCodeTok(T[q])) return q; return -1; };
+    const tokAt = k => (k >= 0 ? T[k] : null);
+
+    function canInline(k) {
+      const e = match[k]; if (e < 0) return false;
+      if (e === k + 1) return true;
+      const p = tokAt(prevIdx[k]);
+      if (!p) return false;
+      const ok = p.t === 'p' ? !(p.s === ')' || p.s === '=>' || p.s === ';' || p.s === '{' || p.s === '}') : (p.t === 'w' && INLINE_PREV_W.has(p.s));
+      if (!ok) return false;
+      if (T[e].pos + 1 - T[k].pos > 90) return false;
+      for (let q = k + 1; q < e; q++) {
+        const x = T[q];
+        if (x.nl || !isCodeTok(x)) return false;
+        if (x.t === 'p' && x.s === ';') return false;
+        if (x.t === 'w' && (x.s === 'function' || x.s === 'class')) return false;
+        if (x.t === 'p' && x.s === '{') { const pp = tokAt(prevIdx[q]); if (pp && (pp.s === ')' || pp.s === '=>' || (pp.t === 'w'))) return false; }
+      }
+      return true;
+    }
+    // unary / prefix classification
+    const unaryAt = new Array(T.length).fill(false);
+    T.forEach((t, k) => {
+      if (t.t !== 'p') return;
+      const p = tokAt(prevIdx[k]);
+      const prefixCtx = !p || (p.t === 'p' ? !(p.s === ')' || p.s === ']' || p.s === '}' || p.s === '++' || p.s === '--') : (p.t === 'w' && KW_UNARY_PREV.has(p.s)));
+      if (t.s === '+' || t.s === '-' || t.s === '++' || t.s === '--') unaryAt[k] = prefixCtx;
+      if (t.s === '!' || t.s === '~') unaryAt[k] = true;
+      if (t.s === '*') {
+        const pw = p && p.t === 'w' && (p.s === 'function' || p.s === 'yield' || p.s === 'static' || p.s === 'async');
+        unaryAt[k] = !!(pw || !p || (p.t === 'p' && (p.s === '{' || p.s === ';' || p.s === '}' || p.s === ',')));
+      }
+    });
+
+    let out = '', lineStart = true, depth = 0, extra = 0, stmtExtra = 0;
+    const frames = [], root = { s: '', tern: 0, inline: false };
+    const top = () => frames.length ? frames[frames.length - 1] : root;
+    const closed = new Array(T.length).fill(null);   // info about a closed frame, by closing token index
+    const caseColon = new Array(T.length).fill(false);
+    const write = s => { if (lineStart) { out += ind.repeat(Math.max(0, depth + stmtExtra + extra)) + s; lineStart = false; } else out += s; };
+    const newline = blank => { if (!lineStart) { out += '\n'; lineStart = true; } if (blank && out.length && !out.endsWith('\n\n')) out += '\n'; };
+
+    function space(pk, k) {
+      const p = T[pk], t = T[k], ps = p.s, s = t.s, pP = p.t === 'p', tP = t.t === 'p';
+      if (tP && (s === '.' || s === '?.')) return '';
+      if (pP && (ps === '.' || ps === '?.')) return '';
+      if (pP && (ps === '(' || ps === '[')) return '';
+      if (tP && (s === ')' || s === ']' || s === ',')) return '';
+      if (tP && s === ';') return '';
+      if (pP && ps === ',') return ' ';
+      if (pP && ps === ';') return (tP && (s === ')' || s === ';')) ? '' : ' ';
+      if (pP && ps === '...') return '';
+      if (pP && unaryAt[pk] && ps !== '*') return '';
+      if (pP && ps === '*' && unaryAt[pk]) return (tP && (s === '(' )) ? '' : ' ';
+      if (tP && (s === '++' || s === '--') && !unaryAt[k]) return '';
+      if (tP && s === '(') {
+        if (p.t === 'w') return KW_PAREN.has(ps) ? ' ' : '';
+        if (pP && (ps === ')' || ps === ']' || ps === '}')) return '';
+        if (p.t === 'tpl' || p.t === 's' || p.t === 'n' || p.t === 're') return '';
+        return ' ';
+      }
+      if (tP && s === '[') {
+        if (p.t === 'w') return (KW_PAREN.has(ps) || ps === 'of') ? ' ' : '';
+        if (pP && (ps === ')' || ps === ']' || ps === '}')) return '';
+        if (p.t === 'tpl' || p.t === 's' || p.t === 'n') return '';
+        return ' ';
+      }
+      if (t.t === 'tpl' && p.t === 'w' && !KW_BEFORE_RE.has(ps) && ps !== 'return') return '';
+      if (tP && s === '{') return ' ';
+      if (tP && s === '}') return ' ';
+      if (tP && s === ':') return top().tern > 0 ? ' ' : '';
+      if (tP && s === '*' && unaryAt[k] && p.t === 'w' && (ps === 'function' || ps === 'yield')) return '';
+      return ' ';
+    }
+
+    for (let k = 0; k < T.length; k++) {
+      const t = T[k], s = t.s;
+      if (!isCodeTok(t)) {
+        const pa = k > 0 ? T[k - 1] : null;
+        if (pa && (t.nl || pa.t === 'lc')) newline(t.bl && !(pa.t === 'p' && pa.s === '{'));
+        else if (!lineStart) out += ' ';
+        extra = 0;
+        if (t.t === 'bc' && t.s.indexOf('\n') !== -1) {
+          const ls = t.s.split('\n'), star = ls.slice(1).every(l => /^\s*\*/.test(l));
+          write(ls[0]);
+          for (let q = 1; q < ls.length; q++) out += '\n' + (star ? ind.repeat(depth) + ' ' + ls[q].trim() : ls[q]);
+        } else write(s);
+        if (t.t === 'lc') newline(false);
+        else { const nx = T[k + 1]; if (nx && nx.nl) newline(false); else if (nx) out += ' '; }
+        continue;
+      }
+      const pk = prevIdx[k], p = tokAt(pk);
+      const frP = top();                                   // frame that contains the previous token
+      let brk = false, blank = false, sp = '';
+      const isCloser = t.t === 'p' && (s === ')' || s === ']' || s === '}');
+      let f = null;
+      if (isCloser) {
+        f = frames.pop() || null;
+        if (f && f.ind) { depth -= 1 + (f.add || 0); stmtExtra = f.add || 0; }
+        if (f && f.caseOpen) depth--;
+        closed[k] = f;
+        if (s === '}') brk = !!(f && !f.inline && !(p && p.s === '{'));
+        else brk = !!(f && f.ind && t.nl);
+      }
+      const fr = top();
+      let caseLabel = false;
+      if (!isCloser && t.t === 'w' && (s === 'case' || s === 'default') && fr.sw && (!p || p.s === '{' || p.s === ';' || p.s === '}' || caseColon[pk])) {
+        if (fr.caseOpen) { depth--; fr.caseOpen = false; }
+        caseLabel = true; fr.inCaseHead = true; brk = true;
+      }
+      if (p && !isCloser) {
+        const ps = p.s, pP = p.t === 'p';
+        if (pP && ps === '{' && !frP.inline) brk = true;
+        else if (pP && ps === ';' && frP.s !== '(') brk = true;
+        else if (pP && ps === ',' && frP.s === '{' && !frP.inline) brk = true;
+        else if (pP && ps === '}') {
+          const cf = closed[pk];
+          const noBrk = (t.t === 'p' && (s === '(' || s === '[' || s === ':' || s === '?' || s === '.' || s === '?.' || s === ';' || s === ',' || BIN_OPS.has(s))) ||
+            (t.t === 'w' && (s === 'else' || s === 'catch' || s === 'finally' || s === 'instanceof' || s === 'in' || s === 'of')) ||
+            t.t === 'tpl' || (t.t === 'w' && s === 'while' && cf && cf.isDo);
+          if (!noBrk && !(cf && cf.inline)) brk = true;
+        } else if (pP && ps === ':' && caseColon[pk]) brk = true;
+        if (t.nl && !frP.inline && !brk) brk = true;
+        if (t.bl && brk && !(pP && ps === '{')) blank = true;
+      }
+      if (p && !brk) sp = space(pk, k);
+      if (p && !brk && isCloser && s === '}') sp = (f && f.inline && !(p.s === '{')) ? ' ' : '';
+      if (p && !brk && p.t === 'p' && p.s === '{' && frP.inline && !(isCloser && s === '}')) sp = ' ';
+      if (brk) newline(blank); else out += sp;
+      // continuation lines (wrapped expressions) stay one level in until the statement ends
+      extra = 0;
+      if (brk && p && !caseLabel && !isCloser) {
+        const ps = p.s, pP = p.t === 'p';
+        const lead = t.t === 'p' && (s === '.' || s === '?.' || s === '?' || (s === ':' && top().tern > 0) || (BIN_OPS.has(s) && s !== '=>' && !unaryAt[k]));
+        const trail = pP && (BIN_OPS.has(ps) || ps === '?' || (ps === ':' && !caseColon[pk]));
+        if ((lead || trail) && !(fr.s === '(' && fr.ind)) stmtExtra = 1;
+        else if (!(pP && ps === '{' && false)) stmtExtra = (fr.s === '(' || fr.s === '[') && !fr.ind ? stmtExtra : 0;
+      }
+      write(s);
+      extra = 0;
+      if (t.t !== 'p') continue;
+      if (OPEN_OF[s]) {
+        const nf = { s, ind: false, sw: false, caseOpen: false, inline: !!fr.inline, tern: 0, isDo: false, swParen: false, inCaseHead: false };
+        if (s === '{') {
+          if (!nf.inline && canInline(k)) nf.inline = true;
+          if (!nf.inline) { nf.ind = true; nf.add = stmtExtra; depth += 1 + stmtExtra; stmtExtra = 0; }
+          if (p && p.s === ')' && closed[pk] && closed[pk].swParen) nf.sw = true;
+          if (p && p.t === 'w' && p.s === 'do') nf.isDo = true;
+        } else {
+          if (s === '(' && p && p.t === 'w' && p.s === 'switch') nf.swParen = true;
+          const nx = tokAt(nextCode(k));
+          if (!nf.inline && nx && nx.nl && !(nx.t === 'p' && (nx.s === ')' || nx.s === ']'))) { nf.ind = true; nf.add = stmtExtra; depth += 1 + stmtExtra; stmtExtra = 0; }
+        }
+        frames.push(nf);
+      } else if (s === '?') top().tern++;
+      else if (s === ':') {
+        const tf = top();
+        if (tf.tern > 0) tf.tern--;
+        else if (tf.sw && tf.inCaseHead) { tf.inCaseHead = false; tf.caseOpen = true; depth++; caseColon[k] = true; }
+      }
+    }
+    return out.replace(/[ \t]+\n/g, '\n').replace(/\n+$/, '');
+  }
+
+  function jsMinify(T, aggressive) {
+    const { prev: prevIdx, match } = jsIndex(T);
+    const tokAt = k => (k >= 0 ? T[k] : null);
+    // does this "}" close a statement block (so a following statement needs no newline)?
+    function blockEnd(k) {
+      const o = match[k]; if (o < 0) return false;
+      const b = tokAt(prevIdx[o]);
+      if (!b) return true;
+      if (b.t === 'w' && (b.s === 'else' || b.s === 'try' || b.s === 'finally' || b.s === 'do')) return true;
+      if (b.t === 'p' && (b.s === ';' || b.s === '{' || b.s === '}')) return true;
+      if (b.t === 'p' && b.s === ')') {
+        const po = match[prevIdx[o]]; if (po < 0) return false;
+        const q = tokAt(prevIdx[po]); if (!q) return false;
+        if (q.t === 'w' && KW_CONTROL.has(q.s)) return true;
+        if (q.t === 'w') {
+          const qi = prevIdx[po]; let r = tokAt(prevIdx[qi]), ri = prevIdx[qi];
+          if (r && r.t === 'p' && r.s === '*') { ri = prevIdx[ri]; r = tokAt(ri); }
+          if (r && r.t === 'w' && r.s === 'function') {
+            let a = tokAt(prevIdx[ri]), ai = prevIdx[ri];
+            if (a && a.t === 'w' && a.s === 'async') { ai = prevIdx[ai]; a = tokAt(ai); }
+            return !a || (a.t === 'p' && (a.s === ';' || a.s === '{' || a.s === '}'));
+          }
+          if (!r || (r.t === 'p' && (r.s === '{' || r.s === '}' || r.s === ';')) || (r.t === 'w' && (r.s === 'static' || r.s === 'async' || r.s === 'get' || r.s === 'set'))) return aggressive;
+        }
+      }
+      return false;
+    }
+    const SAFE_END = new Set(['{', '(', '[', ',', ';', ':', '?', '.', '?.', '!', '~', '...']);
+    const SAFE_START = new Set(['}', ')', ']', ',', ';', '.', '?.', ':', '?']);
+    let o = '', pv = null, pvk = -1, carry = false;
+    T.forEach((t, k) => {
+      if (!isCodeTok(t)) {
+        if (t.t === 'bc' && t.s[2] === '!') { /* keep license comments */ if (pv) o += t.nl ? '\n' : ''; o += t.s; if (t.s.indexOf('\n') !== -1) o += '\n'; pv = { t: 'bc', s: '' }; pvk = k; carry = false; return; }
+        carry = carry || t.nl;
+        return;
+      }
+      const nl = t.nl || carry; carry = false;
+      if (pv && pv.t !== undefined && pvk >= 0 && isCodeTok(T[pvk])) {
+        const ps = pv.s, s = t.s;
+        let sepStr = '';
+        const lastC = ps[ps.length - 1], firstC = s[0];
+        const wordCh = /[\w$#@\u00a1-\uffff]/;
+        if (wordCh.test(lastC) && wordCh.test(firstC)) sepStr = ' ';
+        else if ((ps === '+' || ps === '++') && (firstC === '+')) sepStr = ' ';
+        else if ((ps === '-' || ps === '--') && (firstC === '-')) sepStr = ' ';
+        else if (lastC === '/' && firstC === '/') sepStr = ' ';
+        else if (pv.t === 'n' && /^\d+$/.test(ps) && s === '.') sepStr = ' ';
+        if (nl) {
+          const endSafe = pv.t === 'p' && (SAFE_END.has(ps) || BIN_OPS.has(ps)) && ps !== '++' && ps !== '--';
+          let startSafe = t.t === 'p' && (SAFE_START.has(s) || (BIN_OPS.has(s) && s !== '=>' ? true : s === '=>'));
+          if (t.t === 'p' && s === '{' && pv.t === 'p' && (ps === ')' || ps === '=>')) startSafe = true;
+          if (t.t === 'w' && pv.t === 'p' && ps === '}' && blockEnd(pvk)) startSafe = true;
+          if (t.t === 'p' && pv.t === 'p' && ps === '}' && blockEnd(pvk) && (s === '(' || s === '[')) startSafe = true;
+          if (t.t === 'w' && pv.t === 'p' && ps === ')' && /^(else)$/.test(s)) startSafe = true;
+          if (!endSafe && !startSafe) sepStr = '\n';
+        }
+        o += sepStr;
+      } else if (pv && pv.t === 'bc') { /* after a kept comment */ }
+      o += t.s; pv = t; pvk = k;
+    });
+    return o;
+  }
+  function doJs(src, act, lang) {
+    let T;
+    try { T = jsTokenize(src); } catch (e) {
+      if (e && typeof e.pos === 'number' && /regular expression/.test(e.message)) {
+        const ls = src.lastIndexOf('\n', e.pos) + 1, le = src.indexOf('\n', e.pos);
+        if (/<\/[A-Za-z]|\/>/.test(src.slice(ls, le === -1 ? src.length : le))) throw new Error('This looks like JSX, which is not plain JavaScript — the JavaScript formatter and validator do not support it');
+      }
+      throw e;
+    }
+    jsCheckBrackets(src, T);
+    const eng = jsEngineCheck(src, T);
+    if (eng !== 'ok' && eng !== 'module' && eng !== 'skip') {
+      const jsx = looksJsx(T);
+      const e = new Error('Syntax error: ' + eng + (jsx ? ' — this looks like JSX, which is not plain JavaScript' : '') + ' (the JavaScript engine does not report a line number for this)');
+      throw e;
+    }
+    if (act === 'validate') {
+      return { msg: eng === 'ok' ? 'JavaScript syntax is OK' : eng === 'module' ? 'Brackets, strings and comments are balanced (ES module syntax — the full syntax check is skipped)' : 'Brackets, strings and comments are balanced' };
+    }
+    if (looksJsx(T)) throw new Error('JSX is not supported by the formatter — it only handles plain JavaScript');
+    const before = jsSig(T);
+    const text = act === 'pretty' ? jsBeautify(T) : jsMinify(T, eng === 'ok');
+    let T2;
+    try { T2 = jsTokenize(text); } catch (e) { throw new Error('The formatter produced invalid code, so nothing was changed'); }
+    if (!sameSig(before, jsSig(T2))) throw new Error('The formatter could not safely re-format this code, so nothing was changed');
+    if (eng === 'ok' && jsEngineCheck(text, T2) !== 'ok') throw new Error('The formatter could not safely re-format this code, so nothing was changed');
+    return { text };
+  }
+
+  // ═════════════════════════════ SQL ═════════════════════════════
+  const SQL_PUNCT = ['<>', '<=', '>=', '!=', '||', '::', ':=', '->>', '->', '=>', '<<', '>>'];
+  function sqlTokenize(src) {
+    const n = src.length, toks = []; let i = 0, nl = false;
+    const push = (t, s, pos) => { const tk = { t, s, pos, nl }; toks.push(tk); nl = false; return tk; };
+    const WORD = /[A-Za-z_@#\u00a1-\uffff][\w@#$\u00a1-\uffff]*/y, NUM = /(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?/y;
+    while (i < n) {
+      const c = src[i];
+      if (c === '\n') { nl = true; i++; continue; }
+      if (/\s/.test(c)) { i++; continue; }
+      if (c === '-' && src[i + 1] === '-') { let e = src.indexOf('\n', i); if (e === -1) e = n; push('c', src.slice(i, e), i); i = e; continue; }
+      if (c === '/' && src[i + 1] === '*') {
+        const e = src.indexOf('*/', i + 2);
+        if (e === -1) fail(i, 'Unterminated comment — "*/" is missing');
+        push('c', src.slice(i, e + 2), i); i = e + 2; continue;
+      }
+      if (c === "'" || c === '"' || c === '`') {
+        let j = i + 1;
+        for (;;) {
+          if (j >= n) fail(i, 'Unterminated ' + (c === "'" ? 'string' : 'quoted name') + ' — the closing ' + c + ' is missing');
+          if (src[j] === c) { if (src[j + 1] === c) { j += 2; continue; } break; }
+          j++;
+        }
+        push(c === "'" ? 's' : 'q', src.slice(i, j + 1), i); i = j + 1; continue;
+      }
+      if (c === '[') {
+        const e = src.indexOf(']', i + 1), nlp = src.indexOf('\n', i + 1);
+        if (e !== -1 && (nlp === -1 || e < nlp) && /^[^\[\]]*$/.test(src.slice(i + 1, e)) && /[A-Za-z_ ]/.test(src[i + 1] || '') && !/^\d/.test(src.slice(i + 1, e))) { push('q', src.slice(i, e + 1), i); i = e + 1; continue; }
+      }
+      if (c === '$') {
+        const dm = /^\$([A-Za-z_]\w*)?\$/.exec(src.slice(i, i + 40));
+        if (dm) {
+          const e = src.indexOf(dm[0], i + dm[0].length);
+          if (e === -1) fail(i, 'Unterminated dollar-quoted string — the closing ' + dm[0] + ' is missing');
+          push('s', src.slice(i, e + dm[0].length), i); i = e + dm[0].length; continue;
+        }
+      }
+      if (/[0-9]/.test(c) || (c === '.' && /[0-9]/.test(src[i + 1] || ''))) {
+        NUM.lastIndex = i; const m = NUM.exec(src);
+        if (m) { push('n', m[0], i); i += m[0].length; continue; }
+      }
+      WORD.lastIndex = i; const wm = WORD.exec(src);
+      if (wm) {
+        const tk = push('w', wm[0], i);
+        if (wm[0].toUpperCase() === 'GO') {
+          const ls = src.lastIndexOf('\n', i - 1) + 1; let le = src.indexOf('\n', i); if (le === -1) le = n;
+          if (/^\s*go\s*;?\s*$/i.test(src.slice(ls, le))) tk.go = true;
+        }
+        i += wm[0].length; continue;
+      }
+      let hit = '';
+      for (let q = 0; q < SQL_PUNCT.length; q++) { if (src.startsWith(SQL_PUNCT[q], i)) { hit = SQL_PUNCT[q]; break; } }
+      if (!hit) hit = c;
+      push('p', hit, i); i += hit.length;
+    }
+    return toks;
+  }
+  function sqlCheckParens(src, T) {
+    const st = [];
+    T.forEach(t => {
+      if (t.t !== 'p') return;
+      if (t.s === '(') st.push(t);
+      else if (t.s === ')') { if (!st.pop()) fail(t.pos, 'Unexpected ")" — there is no matching "("'); }
+    });
+    if (st.length) fail(st[st.length - 1].pos, 'Unclosed "(" — the closing ")" is missing');
+  }
+  const SQL_JOIN_MOD = new Set(['INNER', 'LEFT', 'RIGHT', 'FULL', 'CROSS', 'NATURAL', 'OUTER']);
+  const SQL_CLAUSE = new Set(['SELECT', 'FROM', 'WHERE', 'HAVING', 'LIMIT', 'OFFSET', 'VALUES', 'SET', 'RETURNING', 'FETCH', 'WINDOW', 'QUALIFY', 'UPDATE', 'WITH', 'INTERSECT', 'EXCEPT', 'MINUS']);
+  const SQL_LIST = new Set(['SELECT', 'FROM', 'GROUP BY', 'ORDER BY', 'SET', 'VALUES', 'WITH', 'RETURNING']);
+  const SQL_SP_PAREN = new Set(['IN', 'VALUES', 'AS', 'ON', 'AND', 'OR', 'NOT', 'EXISTS', 'ANY', 'ALL', 'SOME', 'WHERE', 'WHEN', 'THEN', 'ELSE', 'SELECT', 'FROM', 'JOIN', 'USING', 'UNION', 'BETWEEN', 'LIKE', 'OVER', 'HAVING', 'BY', 'SET', 'DISTINCT', 'CASE', 'WITH', 'RETURNS', 'RETURN', 'IF', 'OFFSET', 'LIMIT', 'INTERSECT', 'EXCEPT', 'IS', 'NULL', 'TABLE', 'INTO']);
+  const SQL_KW_UNARY = new Set(['SELECT', 'WHERE', 'AND', 'OR', 'WHEN', 'THEN', 'ELSE', 'BETWEEN', 'IN', 'LIMIT', 'OFFSET', 'ON', 'SET', 'HAVING', 'BY', 'NOT', 'LIKE', 'IS']);
+
+  function sqlBeautify(T) {
+    const ind = indentUnit;
+    let out = '', lineStart = true, curLevel = 0, endStmt = false, lineCommentOpen = false;
+    const frames = [{ base: 0, clause: '', inline: false, between: false, listStart: false, closeLevel: 0 }];
+    const top = () => frames[frames.length - 1];
+    const word = k => (k >= 0 && k < T.length && T[k].t === 'w' ? T[k].s.toUpperCase() : '');
+    const nextCodeIdx = k => { for (let q = k + 1; q < T.length; q++) if (T[q].t !== 'c') return q; return -1; };
+    const prevCodeIdx = k => { for (let q = k - 1; q >= 0; q--) if (T[q].t !== 'c') return q; return -1; };
+    const nl = (level, blank) => {
+      if (!lineStart) { out += '\n'; lineStart = true; }
+      if (blank && out.length && !out.endsWith('\n\n')) out += '\n';
+      curLevel = level;
+    };
+    const emit = (s, sp) => { if (lineStart) { out += ind.repeat(curLevel) + s; lineStart = false; } else out += (sp || '') + s; };
+
+    for (let k = 0; k < T.length; k++) {
+      const t = T[k], s = t.s, U = word(k);
+      let f = top();
+      if (t.go) { nl(0, true); emit(s); nl(0, true); frames.length = 1; frames[0].clause = ''; continue; }
+      if (t.t === 'c') {
+        if (lineStart) emit(s); else if (t.nl || lineCommentOpen) { nl(f.inline ? f.base : f.base + (f.clause && f.clause !== '' && !SQL_CLAUSE.has(f.clause) ? 1 : 1)); emit(s); } else emit(s, ' ');
+        if (s.startsWith('--')) { lineCommentOpen = true; nl(curLevel); }
+        continue;
+      }
+      lineCommentOpen = false;
+      if (endStmt) { nl(0, true); endStmt = false; }
+      const p = prevCodeIdx(k) >= 0 ? T[prevCodeIdx(k)] : null, pU = p && p.t === 'w' ? p.s.toUpperCase() : '';
+      // ── break decisions ──
+      let broke = false;
+      if (!f.inline && t.t === 'w') {
+        const nxU = word(nextCodeIdx(k));
+        let clauseKey = '';
+        if (U === 'GROUP' && nxU === 'BY') clauseKey = 'GROUP BY';
+        else if (U === 'ORDER' && nxU === 'BY') clauseKey = 'ORDER BY';
+        else if (U === 'UNION' || U === 'INTERSECT' || U === 'EXCEPT' || U === 'MINUS') clauseKey = 'UNION';
+        else if (U === 'INSERT' && nxU === 'INTO') clauseKey = 'INSERT INTO';
+        else if (U === 'DELETE') clauseKey = 'DELETE';
+        else if ((SQL_JOIN_MOD.has(U) && !SQL_JOIN_MOD.has(pU)) || (U === 'JOIN' && !SQL_JOIN_MOD.has(pU))) {
+          let q = k, w = U;
+          while (SQL_JOIN_MOD.has(w)) { q = nextCodeIdx(q); w = word(q); }
+          if (w === 'JOIN') clauseKey = 'JOIN';
+        }
+        else if (SQL_CLAUSE.has(U) && !(U === 'SET' && f.clause === 'UPDATE_SET_SKIP')) {
+          if (!(U === 'WITH' && p && p.t === 'w' && !['AS'].includes(pU) && pU !== '')) clauseKey = U;
+          if (U === 'FROM' && pU === 'DELETE') clauseKey = '';
+        }
+        if (clauseKey && !(pU === 'DISTINCT' && U === 'FROM')) {
+          if (!(clauseKey === 'UNION' && (pU === 'UNION' && U === 'ALL'))) { nl(f.base); broke = true; }
+          f.clause = clauseKey === 'JOIN' ? 'JOIN' : clauseKey; f.between = false;
+          f.listStart = (clauseKey === 'SELECT');
+          emit(s); continue;
+        }
+        if ((U === 'AND' || U === 'OR') && (f.clause === 'WHERE' || f.clause === 'HAVING' || f.clause === 'JOIN' || f.clause === 'ON')) {
+          if (U === 'AND' && f.between) { f.between = false; emit(s, ' '); continue; }
+          nl(f.base + 1); emit(s); continue;
+        }
+        if (U === 'BETWEEN') f.between = true;
+        if (U === 'ON' && f.clause === 'JOIN') f.clause = 'ON';
+      } else if (t.t === 'w' && U === 'BETWEEN') f.between = true;
+      else if (t.t === 'w' && U === 'AND' && f.between) f.between = false;
+      // first item of a SELECT list goes on its own line
+      if (f.listStart && !f.inline) {
+        if (U === 'DISTINCT' || U === 'ALL') { emit(s, ' '); continue; }
+        if (U === 'TOP') { emit(s, ' '); const q = nextCodeIdx(k); if (q >= 0 && T[q].t === 'n') { k = q; emit(T[q].s, ' '); } continue; }
+        f.listStart = false; nl(f.base + 1);
+      }
+      // ── punctuation ──
+      if (t.t === 'p') {
+        if (s === ';') { emit(';'); endStmt = true; frames.length = 1; frames[0].clause = ''; frames[0].between = false; frames[0].listStart = false; continue; }
+        if (s === ',') {
+          emit(',');
+          if (!f.inline && SQL_LIST.has(f.clause)) { nl(f.clause === 'WITH' ? f.base : f.base + 1); }
+          continue;
+        }
+        if (s === '(') {
+          const q = nextCodeIdx(k), nxU = word(q);
+          const sub = nxU === 'SELECT' || nxU === 'WITH';
+          let sp = '';
+          if (p) {
+            if (p.t === 'w') sp = (SQL_SP_PAREN.has(pU) || (prevCodeIdx(prevCodeIdx(k)) >= 0 && ['INTO', 'TABLE', 'VIEW', 'INDEX', 'JOIN', 'FROM'].includes(word(prevCodeIdx(prevCodeIdx(k)))) && p.t === 'w')) ? ' ' : '';
+            else if (p.t === 'p') sp = (p.s === ')' || p.s === '.') ? (p.s === ')' ? ' ' : '') : (p.s === '(' ? '' : ' ');
+            else sp = ' ';
+          }
+          if (sub) {
+            emit(s, sp);
+            const lvl = curLevel;
+            frames.push({ base: lvl + 1, clause: '', inline: false, between: false, listStart: false, closeLevel: lvl });
+            nl(lvl + 1);
+          } else {
+            emit(s, sp);
+            frames.push({ base: f.base, clause: f.clause, inline: true, between: false, listStart: false, closeLevel: curLevel });
+          }
+          continue;
+        }
+        if (s === ')') {
+          const cf = frames.length > 1 ? frames.pop() : f;
+          if (!cf.inline && frames.length >= 1) { nl(cf.closeLevel); emit(')'); } else emit(')');
+          continue;
+        }
+        // tight punctuation
+        let sp = ' ';
+        if (s === '.' || s === '::' || s === ':') sp = '';
+        else if (p && p.t === 'p' && (p.s === '(' || p.s === '.' || p.s === '::' || p.s === ':' || p.s === '$')) sp = '';
+        else if ((s === '-' || s === '+') && false) sp = ' ';
+        emit(s, sp); continue;
+      }
+      // ── words, numbers, strings ──
+      let sp = ' ';
+      if (!p) sp = '';
+      else if (p.t === 'p' && (p.s === '(' || p.s === '.' || p.s === '::' || p.s === ':' || p.s === '$')) sp = '';
+      else if (p.t === 'p' && (p.s === '-' || p.s === '+')) {
+        const pp = prevCodeIdx(prevCodeIdx(k) >= 0 ? prevCodeIdx(k) : 0);
+        const before = prevCodeIdx(k) > 0 ? T[prevCodeIdx(prevCodeIdx(k))] : null;
+        const unary = !before || (before.t === 'p' && before.s !== ')') || (before.t === 'w' && SQL_KW_UNARY.has(before.s.toUpperCase()));
+        sp = unary ? '' : ' ';
+      }
+      emit(s, sp);
+    }
+    return out.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').replace(/\s+$/, '');
+  }
+  function sqlMinify(src, T, keepHints) {
+    let o = '', pv = null;
+    const tight = new Set([',', '(', ')', ';', '.', '::']);
+    T.forEach(t => {
+      if (t.t === 'c') { if (!(t.s.startsWith('/*') && /^\/\*[+!]/.test(t.s))) return; }
+      if (t.go) { o = o.replace(/\s+$/, '') + '\nGO\n'; pv = null; return; }
+      if (pv) {
+        const adjacent = pv.pos + pv.s.length === t.pos;
+        let sep = '';
+        if (!adjacent) sep = (tight.has(pv.s) || tight.has(t.s)) && pv.t === 'p' || (tight.has(t.s) && t.t === 'p') ? '' : ' ';
+        if (!adjacent && pv.t === 'p' && tight.has(pv.s)) sep = '';
+        if (!adjacent && t.t === 'p' && tight.has(t.s)) sep = '';
+        if (!adjacent && (pv.t === 'c' || t.t === 'c')) sep = ' ';
+        o += sep;
+      }
+      o += t.s; pv = t;
+    });
+    return o.trim();
+  }
+  function doSql(src, act) {
+    const T = sqlTokenize(src);
+    sqlCheckParens(src, T);
+    if (act === 'validate') return { msg: 'SQL brackets, quotes and comments are balanced (the SQL grammar itself is not checked)' };
+    const text = act === 'pretty' ? sqlBeautify(T) : sqlMinify(src, T);
+    return { text };
+  }
+
+
+  // best guess of the language for the Format menu when the side is on "Auto" (also works for code that has errors)
+  const HTML_NAMES = new Set('div p span a ul ol li table tr td th thead tbody tfoot form input button img h1 h2 h3 h4 h5 h6 section article header footer nav main script style link meta html head body br hr label select option textarea pre code strong em b i u small iframe svg canvas video audio aside figure figcaption details summary dl dt dd blockquote fieldset legend'.split(' '));
+  function guess(t) {
+    const s = String(t || '').slice(0, 20000).replace(/^\uFEFF/, '').trim();
+    if (!s) return '';
+    if (/^[\[{]/.test(s)) return 'json';
+    if (s[0] === '<') {
+      if (/^<\?xml/i.test(s)) return 'xml';
+      if (/^<!doctype html|^<html|^<head|^<body/i.test(s)) return 'html';
+      const m = /^<([A-Za-z][\w:.-]*)/.exec(s);
+      if (m) return HTML_NAMES.has(m[1].toLowerCase()) ? 'html' : 'xml';
+      return /^<!--/.test(s) ? 'html' : '';
+    }
+    if (/^(?:--[^\n]*\n|\s)*(select|insert|update|delete|with|create|alter|drop|merge|truncate)\b/i.test(s) && /\b(from|into|table|values|set|where|select|as|view|index)\b/i.test(s)) return 'sql';
+    if (/^(?:\/\*[\s\S]*?\*\/\s*)*@(media|import|font-face|keyframes|charset|supports|layer)\b/i.test(s)) return 'css';
+    if (!/^(function|class|if|for|while|const|let|var|return|switch|try|import|export|async|do|else)\b/.test(s) && /^[^{};=]*\{\s*[-\w]+\s*:/.test(s)) return 'css';
+    return '';
+  }
+
+  // ═════════════════════════════ entry point ═════════════════════════════
+  const IMPL = { json: doJson, xml: (s, a) => doMarkup(s, a, false), html: (s, a) => doMarkup(s, a, true), css: doCss, js: doJs, sql: doSql };
+  function run(lang, act, text) {
+    if (!IMPL[lang]) return { ok: false, unsupported: true, msg: 'Formatting and validation are available for JSON, XML, HTML, CSS, JavaScript and SQL.' };
+    const src = String(text || '').replace(/\r\n?/g, '\n');
+    if (!src.trim()) return { ok: false, msg: 'Nothing to ' + (act === 'pretty' ? 'format' : act) + ' — this side is empty.' };
+    try {
+      const r = IMPL[lang](src, act);
+      const name = LANGS[lang];
+      if (act === 'validate') return { ok: true, msg: r.msg || ('Valid ' + name) };
+      let out = r.text;
+      if (lang === 'html' || lang === 'xml' || lang === 'css' || lang === 'js' || lang === 'sql' || lang === 'json') out = String(out).replace(/[ \t]+$/gm, '');
+      if (act === 'pretty') {
+        const ik = getIndentKey();
+        return { ok: true, text: out, changed: out !== src, msg: (out === src ? 'Already formatted — no changes' : 'Pretty-printed ' + name + ' (' + (ik === 'tab' ? 'tab indent' : ik + ' spaces') + ')') };
+      }
+      const a = src.length, b = out.length, pct = a ? Math.round((1 - b / a) * 100) : 0;
+      return { ok: true, text: out, changed: out !== src, msg: 'Minified ' + name + ' — ' + a.toLocaleString() + ' → ' + b.toLocaleString() + ' characters' + (pct > 0 ? ' (−' + pct + '%)' : '') };
+    } catch (e) {
+      if (e && typeof e.pos === 'number') { const lc = lineCol(src, e.pos); return { ok: false, msg: e.message, line: lc.line, col: lc.col }; }
+      if (e instanceof RangeError) return { ok: false, msg: 'This is nested too deeply to process.' };
+      return { ok: false, msg: (e && e.message) || String(e) };
+    }
+  }
+  return { LANGS, run, guess, setIndent, getIndentKey, _t: { jsTokenize, jsBeautify, jsMinify, sqlTokenize, sqlBeautify, parseMarkup, jsonParse } };
+})();
+if (typeof module !== 'undefined') module.exports = CCF;
+
+// ── Code Compare: Format / Validate glue ─────────────────────────────────────────────────────────────
+// Each side gets a "Format" menu (Pretty-print / Minify / Validate). It works on the language shown in the side's
+// language box (Auto detects it), changes the text only when the code validates, and can be undone with the Undo button.
+function ccfLang(sd) {
+  if (sd.lang !== 'auto') return sd.lang;
+  const m = /\.([A-Za-z0-9]+)$/.exec(sd.name || '');
+  if (m && CC_EXT[m[1].toLowerCase()]) return CC_EXT[m[1].toLowerCase()];
+  return CCF.guess(sd.text) || ccLang(sd);
+}
+function ccfSelHtml(S, sd) {
+  const k = ccfLang(sd), ok = !!CCF.LANGS[k];
+  return '<select class="lm-input cc-sel ccf-sel" onchange="ccfPick(\'' + S + '\',this)" aria-label="Format or validate"' + (ok ? ' title="Pretty-print, minify or validate this side"' : ' disabled title="Format / validate works for JSON, XML, HTML, CSS, JavaScript and SQL — pick one of them as the language"') + '>'
+    + '<option value="">Format ▾</option><option value="pretty">Pretty-print</option><option value="minify">Minify</option><option value="validate">Validate</option></select>';
+}
+function ccfMsgHtml(S, f) {
+  const loc = f.line ? ' <button type="button" class="ccf-go" onclick="ccfGoto(\'' + S + '\')" title="Jump to the problem in the editor">Line ' + f.line + ', col ' + f.col + '</button>' : '';
+  return '<div class="cc-msg ccf-msg' + (f.ok ? '' : ' bad') + '"><i class="ti ' + (f.ok ? 'ti-circle-check' : 'ti-alert-triangle') + '"></i><span>' + esc(f.msg) + '</span>' + loc + '</div>';
+}
+function ccfPick(S, sel) { const v = sel.value; sel.value = ''; ccfAction(S, v); }
+function ccfAction(S, act) {
+  if (!act) return;
+  ccInit();
+  const sd = _cc[S], r = CCF.run(ccfLang(sd), act, sd.text);
+  if (r.ok && act !== 'validate' && r.changed) {
+    if (_cc.mode !== 'live') ccSetMode('live');
+    ccPushUndo();
+    ccSetLines(S, r.text.split('\n'));
+    _cc.exp.clear();
+  }
+  sd.fmt = { ok: r.ok, msg: r.msg, line: r.line, col: r.col };
+  ccRenderHeads();
+  if (r.ok && act !== 'validate' && r.changed) ccRender(true);
+  if (!r.ok && r.line) ccfGoto(S);
+}
+function ccfGoto(S) {
+  const f = _cc && _cc[S] && _cc[S].fmt; if (!f || !f.line) return;
+  if (_cc.mode !== 'live') ccSetMode('live');
+  const ta = document.getElementById('cc-ta-' + S); if (!ta) return;
+  const lines = ta.value.split('\n'); let start = 0;
+  for (let i = 0; i < f.line - 1 && i < lines.length; i++) start += lines[i].length + 1;
+  const len = (lines[f.line - 1] || '').length, col = Math.min(Math.max(0, (f.col || 1) - 1), len);
+  ta.focus();
+  if (col >= len) ta.setSelectionRange(start, start + len); else ta.setSelectionRange(start + col, start + col + 1);   // the offending character (or the whole line)
+  const lh = parseFloat(getComputedStyle(ta).lineHeight) || 19;
+  ta.scrollTop = Math.max(0, (f.line - 1) * lh - ta.clientHeight / 3);
+}
+function ccfSyncIndent() { const e = document.getElementById('ccf-indent'); if (e) e.value = CCF.getIndentKey(); }
+
+// ── shared helpers for the small utilities below ─────────────────────────────────────────────────────
+function uEl(id) { return document.getElementById(id); }
+function uEsc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+function uOpen(id, focusId) {
+  try { closeMoreMenu(); } catch (e) {}
+  const el = uEl(id); if (!el) return false;
+  el.classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+  try { renderTtlHdrWidgets(); } catch (e) {}
+  if (focusId && !document.documentElement.classList.contains('is-touch')) { const f = uEl(focusId); if (f) f.focus(); }
+  return true;
+}
+function uClose(id) { const el = uEl(id); if (el) el.classList.add('hidden'); document.body.style.overflow = ''; }
+function uIsOpen(id) { const el = uEl(id); return !!(el && !el.classList.contains('hidden')); }
+async function uCopy(text, btn) {
+  let ok = false;
+  try { await navigator.clipboard.writeText(text); ok = true; } catch (e) {
+    try { const ta = document.createElement('textarea'); ta.value = text; ta.style.cssText = 'position:fixed;opacity:0'; document.body.appendChild(ta); ta.select(); ok = document.execCommand('copy'); document.body.removeChild(ta); } catch (e2) {}
+  }
+  if (btn) {
+    const old = btn.innerHTML, lbl = btn.textContent.trim() ? ' ' + (ok ? 'Copied' : 'Failed') : '';
+    btn.innerHTML = '<i class="ti ' + (ok ? 'ti-check' : 'ti-x') + '"></i>' + lbl;
+    setTimeout(() => { btn.innerHTML = old; }, 1200);
+  }
+}
+function uPaste(id, cb) {
+  if (!navigator.clipboard || !navigator.clipboard.readText) return;
+  navigator.clipboard.readText().then(t => { const e = uEl(id); if (e) { e.value = t; if (cb) cb(); e.focus(); } }).catch(() => {});
+}
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || ttlConsIsOpen()) return;
+  const tools = [['md-overlay', closeMdPreview], ['case-overlay', closeCaseConv], ['rx-overlay', closeRegexTester]];
+  for (const t of tools) if (uIsOpen(t[0])) { e.stopImmediatePropagation(); e.preventDefault(); t[1](); return; }
+}, true);
+
+// ── Utilities → Markdown Previewer ───────────────────────────────────────────────────────────────────
+// Live split view: Markdown on the left, rendered page on the right. Raw HTML in the Markdown is shown as text (only a few
+// harmless tags such as <br>, <kbd>, <sub> are honoured) and links / images are limited to safe schemes, so nothing in the
+// text can run script. Supports headings, emphasis, lists (nested + task lists), tables, code, quotes, links, images, rules.
+const MD_SAMPLE = '# Markdown preview\n\nWrite on the **left**, see it rendered on the *right* — with ~~no~~ live updates.\n\n## Lists\n\n- [x] Task lists\n- [ ] Nested items\n  - second level\n  - `inline code`\n\n1. Numbered\n2. Lists\n\n## Table\n\n| Tool | Shortcut | Notes |\n|:-----|:--------:|------:|\n| Preview | live | updates as you type |\n| Copy HTML | button | top right |\n\n## Code\n\n```js\nconst greet = (name) => `Hello, ${name}!`;\nconsole.log(greet("world"));\n```\n\n> Blockquotes work too.\n\nA [link](https://example.com), an auto-link https://example.com and a footnote-style [reference][docs].\n\n---\n\n[docs]: https://developer.mozilla.org "MDN"\n';
+let _md = { timer: 0, wired: false };
+function mdSafeUrl(u, img) {
+  u = String(u).trim();
+  if (img) return /^(https?:\/\/|data:image\/(png|jpe?g|gif|webp|avif|svg\+xml|bmp);base64,)/i.test(u);
+  return /^(https?:|mailto:|tel:|#)/i.test(u);
+}
+function mdUnesc(s) { return s.replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&'); }
+function mdEmph(s) {
+  s = s.replace(/\*\*\*(?=\S)([\s\S]*?\S)\*\*\*/g, '<strong><em>$1</em></strong>');
+  s = s.replace(/\*\*(?=\S)([\s\S]*?\S)\*\*/g, '<strong>$1</strong>');
+  s = s.replace(/(^|[^\w])__(?=\S)([\s\S]*?\S)__(?!\w)/g, '$1<strong>$2</strong>');
+  s = s.replace(/\*(?=[^\s*])([^*]*?[^\s*])\*/g, '<em>$1</em>');
+  s = s.replace(/(^|[^\w])_(?=[^\s_])([^_]*?[^\s_])_(?!\w)/g, '$1<em>$2</em>');
+  s = s.replace(/~~(?=\S)([\s\S]*?\S)~~/g, '<del>$1</del>');
+  return s;
+}
+function mdInline(src, refs) {
+  const stash = [], hold = h => '\u0000' + (stash.push(h) - 1) + '\u0000';
+  let s = String(src).replace(/\u0000/g, '');
+  s = s.replace(/(`+)([\s\S]*?[^`])\1(?!`)/g, (m, a, b) => { let c = b.replace(/\n/g, ' '); if (/^ .* $/.test(c) && c.trim()) c = c.slice(1, -1); return hold('<code>' + uEsc(c) + '</code>'); });
+  s = s.replace(/\\\n/g, () => hold('<br>') + '\n');
+  s = s.replace(/\\([!"#$%&'()*+,\-.\/:;<=>?@\[\\\]^_`{|}~])/g, (m, c) => hold(uEsc(c)));
+  s = uEsc(s);
+  const mkLink = (text, url, title) => {
+    const u = mdUnesc(url);
+    if (!mdSafeUrl(u, false)) return hold(mdEmph(text));
+    return hold('<a href="' + url + '"' + (u[0] === '#' ? '' : ' target="_blank" rel="noopener noreferrer"') + (title ? ' title="' + title + '"' : '') + '>' + mdEmph(text) + '</a>');
+  };
+  s = s.replace(/!\[([^\]]*)\]\(\s*([^\s)]+)(?:\s+&quot;([^&]*?)&quot;)?\s*\)/g, (m, alt, url, title) => mdSafeUrl(mdUnesc(url), true) ? hold('<img src="' + url + '" alt="' + alt + '"' + (title ? ' title="' + title + '"' : '') + '>') : hold(alt));
+  s = s.replace(/\[([^\]]+)\]\(\s*([^\s)]+)(?:\s+&quot;([^&]*?)&quot;)?\s*\)/g, (m, text, url, title) => mkLink(text, url, title));
+  if (refs) {
+    s = s.replace(/\[([^\]]+)\]\[([^\]]*)\]/g, (m, text, r) => { const d = refs[(r || text).toLowerCase()]; return d ? mkLink(text, d.url, d.title) : m; });
+    s = s.replace(/\[([^\]\[]+)\](?![\[(:])/g, (m, text) => { const d = refs[text.toLowerCase()]; return d ? mkLink(text, d.url, d.title) : m; });
+  }
+  s = s.replace(/&lt;(https?:\/\/[^\s&]+?)&gt;/g, (m, u) => mkLink(u, u, ''));
+  s = s.replace(/&lt;([^\s@&]+@[^\s@&]+\.[^\s@&]+)&gt;/g, (m, u) => mkLink(u, 'mailto:' + u, ''));
+  s = s.replace(/(^|[\s(])(https?:\/\/[^\s<]+)/g, (m, pre, url) => {
+    const tail = /[.,;:!?)\]]+$/.exec(url); let t = '';
+    if (tail) { t = tail[0]; url = url.slice(0, url.length - t.length); }
+    return pre + mkLink(url, url, '') + t;
+  });
+  s = mdEmph(s);
+  s = s.replace(/ {2,}\n/g, '<br>\n');
+  s = s.replace(/&lt;(\/?)(br|kbd|sub|sup|b|i|u|mark|details|summary|ins|del|small|em|strong|code)\s*(\/?)&gt;/gi, '<$1$2$3>');
+  while (/\u0000\d+\u0000/.test(s)) s = s.replace(/\u0000(\d+)\u0000/g, (m, i) => stash[+i]);
+  return s;
+}
+function mdCells(line) {
+  let s = line.trim(); if (s[0] === '|') s = s.slice(1);
+  const cells = []; let cur = '';
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] === '\\' && s[i + 1] === '|') { cur += '|'; i++; } else if (s[i] === '|') { cells.push(cur.trim()); cur = ''; } else cur += s[i];
+  }
+  if (cur.trim() || !/\|\s*$/.test(line)) cells.push(cur.trim());
+  return cells;
+}
+function mdBlocks(lines, o) {
+  const out = [], refs = o.refs;
+  const reFence = /^ {0,3}(`{3,}|~{3,})[ \t]*([^\s`]*)[^`]*$/, reHr = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
+  const reAtx = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$/, reUl = /^( {0,3})([-*+])( +)(\S.*)$/, reOl = /^( {0,3})(\d{1,9})([.)])( +)(\S.*)$/;
+  const reQuote = /^ {0,3}>/, reSep = /^ {0,3}\|?[ \t]*:?-+:?[ \t]*(\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$/;
+  const blank = l => !l.trim();
+  const startsBlock = (l, interrupt) => reFence.test(l) || (/^ {0,3}#/.test(l) && reAtx.test(l)) || reHr.test(l) || reQuote.test(l) || reUl.test(l) || (interrupt ? /^ {0,3}1[.)] +\S/.test(l) : reOl.test(l)) || /^\s*<!--/.test(l);
+  let i = 0;
+  while (i < lines.length) {
+    const l = lines[i];
+    if (blank(l)) { i++; continue; }
+    let m = reFence.exec(l);
+    if (m) {
+      const ch = m[1][0], len = m[1].length, close = new RegExp('^ {0,3}' + (ch === '`' ? '`' : '~') + '{' + len + ',}[ \\t]*$'), buf = [];
+      i++;
+      while (i < lines.length && !close.test(lines[i])) { buf.push(lines[i]); i++; }
+      i++;
+      out.push('<pre><code' + (m[2] ? ' class="language-' + uEsc(m[2]) + '"' : '') + '>' + uEsc(buf.join('\n')) + '</code></pre>');
+      continue;
+    }
+    if (/^\s*<!--/.test(l)) { while (i < lines.length && lines[i].indexOf('-->') === -1) i++; i++; continue; }
+    if (reHr.test(l)) { out.push('<hr>'); i++; continue; }
+    m = /^ {0,3}#/.test(l) ? reAtx.exec(l) : null;
+    if (m) {
+      const inner = mdInline((m[2] || '').trim(), refs), n = m[1].length;
+      let slug = (inner.replace(/<[^>]*>/g, '').replace(/&[a-z#0-9]+;/gi, '').toLowerCase().replace(/[^\p{L}\p{N}\s_-]/gu, '').trim().replace(/\s/g, '-')) || 'section';
+      const c = o.ids[slug] = (o.ids[slug] || 0) + 1; if (c > 1) slug += '-' + (c - 1);
+      out.push('<h' + n + ' id="mdp-' + uEsc(slug) + '">' + inner + '</h' + n + '>');
+      i++; continue;
+    }
+    if (reQuote.test(l)) {
+      const buf = [];
+      while (i < lines.length && reQuote.test(lines[i])) { buf.push(lines[i].replace(/^ {0,3}> ?/, '')); i++; }
+      out.push('<blockquote>' + mdBlocks(buf, { refs, ids: o.ids, tight: false }) + '</blockquote>');
+      continue;
+    }
+    if (l.indexOf('|') !== -1 && i + 1 < lines.length && reSep.test(lines[i + 1]) && lines[i + 1].indexOf('-') !== -1) {
+      const head = mdCells(l), sep = mdCells(lines[i + 1]);
+      if (head.length === sep.length) {
+        const al = sep.map(c => (/^:-+:$/.test(c) ? 'center' : /^-+:$/.test(c) ? 'right' : /^:-+$/.test(c) ? 'left' : ''));
+        const td = (tag, cs) => '<tr>' + head.map((_, k) => '<' + tag + (al[k] ? ' style="text-align:' + al[k] + '"' : '') + '>' + mdInline(cs[k] || '', refs) + '</' + tag + '>').join('') + '</tr>';
+        let h = '<table><thead>' + td('th', head) + '</thead><tbody>';
+        i += 2;
+        while (i < lines.length && !blank(lines[i]) && !startsBlock(lines[i], true)) { h += td('td', mdCells(lines[i])); i++; }
+        out.push(h + '</tbody></table>');
+        continue;
+      }
+    }
+    const lm = reUl.exec(l) || reOl.exec(l);
+    if (lm) {
+      const ordered = !!reOl.exec(l) && !reUl.exec(l), re = ordered ? reOl : reUl;
+      const start = ordered ? parseInt(reOl.exec(l)[2], 10) : 1;
+      const items = []; let loose = false;
+      while (i < lines.length) {
+        const im = re.exec(lines[i]); if (!im) break;
+        const spaces = ordered ? im[4].length : im[3].length, mk = ordered ? im[2].length + 1 : 1;
+        const ci = im[1].length + mk + (spaces > 4 ? 1 : spaces), body = [ordered ? im[5] : im[4]];
+        i++;
+        let blankSeen = false, innerBlank = false;
+        while (i < lines.length) {
+          const cur = lines[i];
+          if (blank(cur)) {
+            let k = i; while (k < lines.length && blank(lines[k])) k++;
+            if (k < lines.length && /^ */.exec(lines[k])[0].length >= ci) { for (; i < k; i++) body.push(''); innerBlank = true; continue; }
+            blankSeen = k < lines.length && !!re.exec(lines[k]) && /^ */.exec(lines[k])[0].length < ci; i = k; break;
+          }
+          const ind = /^ */.exec(cur)[0].length;
+          if (ind >= ci) { body.push(cur.slice(ci)); i++; continue; }
+          if (re.exec(cur)) break;
+          if (body.length && !blank(body[body.length - 1]) && !startsBlock(cur, true)) { body.push(cur.trim()); i++; continue; }
+          break;
+        }
+        if (blankSeen) loose = true;
+        if (innerBlank && body.some((b, k) => !b.trim() && k < body.length - 1 && !/^\s*([-*+]|\d+[.)])\s/.test(body[k + 1] || ''))) loose = true;
+        items.push(body);
+        if (!(i < lines.length && re.exec(lines[i]) && /^ */.exec(lines[i])[0].length < 4 + (im[1].length))) { if (!(i < lines.length && re.exec(lines[i]))) break; }
+      }
+      let h = ordered ? '<ol' + (start !== 1 ? ' start="' + start + '"' : '') + '>' : '<ul>';
+      items.forEach(body => {
+        let task = '', first = body[0];
+        const tm = /^\[([ xX])\][ \t]+/.exec(first);
+        if (tm) { task = '<input type="checkbox" disabled' + (tm[1] !== ' ' ? ' checked' : '') + '> '; body[0] = first.slice(tm[0].length); }
+        h += '<li' + (tm ? ' class="task"' : '') + '>' + task + mdBlocks(body, { refs, ids: o.ids, tight: !loose }) + '</li>';
+      });
+      out.push(h + (ordered ? '</ol>' : '</ul>'));
+      continue;
+    }
+    // paragraph (or setext heading)
+    const buf = [l]; i++;
+    let setext = 0;
+    while (i < lines.length) {
+      const n = lines[i];
+      if (blank(n)) break;
+      const sm = /^ {0,3}(=+|-+)[ \t]*$/.exec(n);
+      if (sm) { setext = sm[1][0] === '=' ? 1 : 2; i++; break; }
+      if (startsBlock(n, true)) break;
+      buf.push(n); i++;
+    }
+    const txt = buf.map(x => x.replace(/^\s+/, '')).join('\n').replace(/\s+$/, '');
+    if (setext) {
+      const inner = mdInline(txt, refs);
+      let slug = inner.replace(/<[^>]*>/g, '').toLowerCase().replace(/[^\p{L}\p{N}\s_-]/gu, '').trim().replace(/\s/g, '-') || 'section';
+      const c = o.ids[slug] = (o.ids[slug] || 0) + 1; if (c > 1) slug += '-' + (c - 1);
+      out.push('<h' + setext + ' id="mdp-' + uEsc(slug) + '">' + inner + '</h' + setext + '>');
+    } else out.push(o.tight ? mdInline(txt, refs) : '<p>' + mdInline(txt, refs) + '</p>');
+  }
+  return out.join(o.tight ? '' : '\n');
+}
+function mdToHtml(src) {
+  const raw = String(src).replace(/\r\n?/g, '\n').split('\n').map(l => l.replace(/^[ \t]+/, w => w.replace(/\t/g, '    ')));
+  const refs = {}, lines = []; let fence = '';
+  raw.forEach(l => {
+    const fm = /^ {0,3}(`{3,}|~{3,})/.exec(l);
+    if (fm) { if (!fence) fence = fm[1][0]; else if (fm[1][0] === fence) fence = ''; }
+    if (!fence) {
+      const rm = /^ {0,3}\[([^\]]+)\]:[ \t]*<?(\S+?)>?(?:[ \t]+(?:"([^"]*)"|'([^']*)'|\(([^)]*)\)))?[ \t]*$/.exec(l);
+      if (rm && !fm) { refs[rm[1].toLowerCase()] = { url: uEsc(rm[2]), title: uEsc(rm[3] || rm[4] || rm[5] || '') }; return; }
+    }
+    lines.push(l);
+  });
+  return mdBlocks(lines, { refs, ids: {}, tight: false });
+}
+function openMdPreview() {
+  if (!uOpen('md-overlay', 'md-input')) return;
+  if (!_md.wired) {
+    _md.wired = true;
+    uEl('md-preview').addEventListener('click', (e) => {
+      const a = e.target.closest && e.target.closest('a'); if (!a) return;
+      const h = a.getAttribute('href') || '';
+      if (h[0] === '#') { e.preventDefault(); let id = h.slice(1); try { id = decodeURIComponent(id); } catch (x) {} const t = uEl('mdp-' + id.toLowerCase()); if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+    });
+    uEl('md-input').addEventListener('scroll', () => {
+      const a = uEl('md-input'), b = uEl('md-preview'), r = a.scrollHeight - a.clientHeight;
+      if (r > 0) b.scrollTop = (a.scrollTop / r) * (b.scrollHeight - b.clientHeight);
+    });
+    uEl('md-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); const t = e.target, s = t.selectionStart; t.value = t.value.slice(0, s) + '  ' + t.value.slice(t.selectionEnd); t.selectionStart = t.selectionEnd = s + 2; mdRender(); }
+    });
+  }
+  mdRender();
+}
+function closeMdPreview() { uClose('md-overlay'); }
+function mdRender() {
+  clearTimeout(_md.timer);
+  const t = uEl('md-input').value;
+  _md.timer = setTimeout(() => {
+    const pv = uEl('md-preview');
+    if (!t.trim()) { pv.innerHTML = '<div class="jwt-empty"><i class="ti ti-markdown"></i>Type or paste Markdown on the left — it is rendered here as you type.</div>'; }
+    else { try { pv.innerHTML = mdToHtml(t); } catch (e) { pv.innerHTML = '<div class="jwt-err">Could not render: ' + uEsc(e.message) + '</div>'; } }
+    const words = (t.trim().match(/\S+/g) || []).length;
+    uEl('md-stat').textContent = words + ' words · ' + t.length.toLocaleString() + ' characters · ' + (t ? t.split('\n').length : 0) + ' lines' + (words > 150 ? ' · ~' + Math.max(1, Math.round(words / 220)) + ' min read' : '');
+    uEl('md-copy').disabled = !t.trim(); uEl('md-dl').disabled = !t.trim();
+  }, t.length > 60000 ? 250 : 40);
+}
+function mdSample() { uEl('md-input').value = MD_SAMPLE; mdRender(); }
+function mdClear() { uEl('md-input').value = ''; mdRender(); uEl('md-input').focus(); }
+function mdCopyHtml(btn) { uCopy(uEl('md-preview').innerHTML.replace(/ id="mdp-[^"]*"/g, ''), btn); }
+function mdDownload() {
+  const blob = new Blob([uEl('md-input').value], { type: 'text/markdown;charset=utf-8' }), a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = 'document.md'; document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+}
+function mdFilePicked(inp) {
+  const f = inp.files && inp.files[0]; inp.value = ''; if (!f) return;
+  if (f.size > 5 * 1024 * 1024) { uEl('md-stat').textContent = 'That file is too large for the previewer (limit 5 MB).'; return; }
+  const r = new FileReader(); r.onload = () => { uEl('md-input').value = String(r.result || ''); mdRender(); }; r.readAsText(f);
+}
+
+// ── Utilities → Case Converter ───────────────────────────────────────────────────────────────────────
+const CASE_CAP = w => w.charAt(0).toUpperCase() + w.slice(1);
+const CASE_DEFS = [
+  { n: 'camelCase', main: true, f: w => w.map((x, i) => i ? CASE_CAP(x) : x).join('') },
+  { n: 'snake_case', main: true, f: w => w.join('_') },
+  { n: 'kebab-case', main: true, f: w => w.join('-') },
+  { n: 'PascalCase', f: w => w.map(CASE_CAP).join('') },
+  { n: 'CONSTANT_CASE', f: w => w.map(x => x.toUpperCase()).join('_') },
+  { n: 'Train-Case', f: w => w.map(CASE_CAP).join('-') },
+  { n: 'dot.case', f: w => w.join('.') },
+  { n: 'path/case', f: w => w.join('/') },
+  { n: 'Title Case', f: w => w.map(CASE_CAP).join(' ') },
+  { n: 'Sentence case', f: w => w.map((x, i) => i ? x : CASE_CAP(x)).join(' ') },
+  { n: 'UPPER CASE', raw: s => s.toUpperCase() },
+  { n: 'lower case', raw: s => s.toLowerCase() }
+];
+let _case = { results: [] };
+function caseWords(line) {
+  const m = line.replace(/['’]/g, '').match(/\p{Lu}+(?!\p{Ll})|\p{Lu}?\p{Ll}+\d*|\d+|\p{L}+/gu);
+  return m ? m.map(w => w.toLowerCase()) : [];
+}
+function openCaseConv() { if (uOpen('case-overlay', 'case-input')) caseConvert(); }
+function closeCaseConv() { uClose('case-overlay'); }
+function caseConvert() {
+  const text = uEl('case-input').value, out = uEl('case-out');
+  _case.results = [];
+  if (!text.trim()) { out.innerHTML = '<div class="jwt-empty"><i class="ti ti-letter-case"></i>Type or paste text or identifiers on the left. Each line is converted on its own, so you can paste a whole list.</div>'; return; }
+  const lines = text.split(/\r?\n/);
+  out.innerHTML = CASE_DEFS.map((d, i) => {
+    const res = lines.map(l => { if (d.raw) return d.raw(l); const w = caseWords(l); return w.length ? d.f(w) : l; }).join('\n');
+    _case.results.push(res);
+    return '<div class="case-row' + (d.main ? ' main' : '') + '"><div class="case-lbl">' + uEsc(d.n) + '</div><pre class="case-val">' + uEsc(res) + '</pre>'
+      + '<button type="button" class="btn-icon" onclick="caseCopy(' + i + ',this)" title="Copy" aria-label="Copy ' + uEsc(d.n) + '"><i class="ti ti-clipboard-copy"></i></button>'
+      + '<button type="button" class="btn-icon" onclick="caseApply(' + i + ')" title="Use this result as the input" aria-label="Use ' + uEsc(d.n) + ' as input"><i class="ti ti-arrow-back-up"></i></button></div>';
+  }).join('');
+}
+function caseCopy(i, btn) { uCopy(_case.results[i] || '', btn); }
+function caseApply(i) { uEl('case-input').value = _case.results[i] || ''; caseConvert(); }
+function caseClear() { uEl('case-input').value = ''; caseConvert(); uEl('case-input').focus(); }
+
+// ── Utilities → Regex Tester ─────────────────────────────────────────────────────────────────────────
+const RX_SAMPLE = { pattern: '(?<user>[\\w.+-]+)@(?<domain>[\\w-]+(?:\\.[\\w-]+)+)', flags: 'gi', text: 'Contact jane.doe@example.com or bob@mail.example.org.\nNot valid: @nope, nobody@, a@b\nSales: Sales.Team+eu@Example.co.uk\n', repl: '$<user> at $<domain>' };
+let _rx = { matches: [], names: [''] };
+function rxFlags() { return Array.from(document.querySelectorAll('#rx-flags input:checked')).map(c => c.getAttribute('data-f')).join(''); }
+function rxGroupNames(p) {
+  const names = ['']; let cls = false;
+  for (let i = 0; i < p.length; i++) {
+    const c = p[i];
+    if (c === '\\') { i++; continue; }
+    if (cls) { if (c === ']') cls = false; continue; }
+    if (c === '[') { cls = true; continue; }
+    if (c === '(') {
+      if (p[i + 1] !== '?') names.push('');
+      else { const m = /^\(\?<([A-Za-z_$][\w$]*)>/.exec(p.slice(i, i + 80)); if (m) names.push(m[1]); }
+    }
+  }
+  return names;
+}
+function openRegexTester() { if (uOpen('rx-overlay', 'rx-pattern')) rxRun(); }
+function closeRegexTester() { uClose('rx-overlay'); }
+function rxSync() {
+  const ta = uEl('rx-text'), bdi = uEl('rx-bdi'), bd = uEl('rx-bd');
+  if (!ta || !bdi) return;
+  bdi.style.width = ta.clientWidth + 'px';
+  bd.scrollTop = ta.scrollTop; bd.scrollLeft = ta.scrollLeft;
+}
+window.addEventListener('resize', () => { if (uIsOpen('rx-overlay')) rxSync(); });
+function rxRun() {
+  const pat = uEl('rx-pattern').value, text = uEl('rx-text').value, flags = rxFlags();
+  uEl('rx-flagtxt').textContent = flags;
+  const err = uEl('rx-err'); err.textContent = '';
+  let re = null;
+  if (pat) { try { re = new RegExp(pat, flags); } catch (e) { err.textContent = String(e.message).replace(/^Invalid regular expression: /, ''); } }
+  const ms = []; let note = '';
+  if (re) {
+    const t0 = performance.now();
+    re.lastIndex = 0;
+    if (!re.global) { const m = re.exec(text); if (m) ms.push(m); }
+    else {
+      let m;
+      while ((m = re.exec(text)) !== null) {
+        ms.push(m);
+        if (m[0] === '') re.lastIndex += (re.unicode && text.codePointAt(re.lastIndex) > 0xFFFF) ? 2 : 1;
+        if (ms.length >= 2000) { note = 'Showing the first 2,000 matches.'; break; }
+        if (performance.now() - t0 > 1500) { note = 'Stopped after 1.5 s — this pattern may be very slow on this text.'; break; }
+      }
+    }
+  }
+  _rx.matches = ms; _rx.names = rxGroupNames(pat);
+  // live highlight
+  let h = '', pos = 0;
+  ms.forEach((m, idx) => {
+    const s = m.index, e = s + m[0].length; if (s < pos) return;
+    h += uEsc(text.slice(pos, s));
+    h += m[0] === '' ? '<mark class="rx-z">\u200b</mark>' : '<mark class="rx-m' + (idx % 2) + '">' + uEsc(text.slice(s, e)) + '</mark>';
+    pos = e;
+  });
+  uEl('rx-bdi').innerHTML = h + uEsc(text.slice(pos)) + '\n\u200b';
+  rxSync();
+  // results
+  const out = uEl('rx-out'), cnt = uEl('rx-count');
+  uEl('rx-copy').disabled = !ms.length;
+  if (!pat) { cnt.textContent = ''; out.innerHTML = '<div class="jwt-empty"><i class="ti ti-regex"></i>Type a pattern above. Matches are highlighted live in the test string and listed here with their capture groups.</div>'; }
+  else if (!re) { cnt.textContent = ''; out.innerHTML = '<div class="jwt-err">The pattern is not valid — see the message under it.</div>'; }
+  else if (!ms.length) { cnt.textContent = 'No matches'; out.innerHTML = '<div class="jwt-empty"><i class="ti ti-mood-empty"></i>No matches in the test string.</div>'; }
+  else {
+    cnt.textContent = ms.length + (ms.length === 1 ? ' match' : ' matches');
+    const nls = []; for (let i = text.indexOf('\n'); i !== -1; i = text.indexOf('\n', i + 1)) nls.push(i);
+    const lineOf = idx => { let lo = 0, hi = nls.length; while (lo < hi) { const mid = (lo + hi) >> 1; if (nls[mid] < idx) lo = mid + 1; else hi = mid; } return lo + 1; };
+    out.innerHTML = (note ? '<div class="jwt-note" style="margin-bottom:8px">' + uEsc(note) + '</div>' : '') + ms.slice(0, 200).map((m, i) => {
+      let g = '';
+      for (let q = 1; q < m.length; q++) {
+        const nm = _rx.names[q];
+        g += '<tr><td>' + (nm ? uEsc(nm) + ' <span class="n">$' + q + '</span>' : '$' + q) + '</td><td>' + (m[q] === undefined ? '<span class="rx-u">undefined</span>' : m[q] === '' ? '<span class="rx-u">""</span>' : uEsc(m[q])) + '</td></tr>';
+      }
+      return '<div class="rx-card"><div class="rx-ch"><span>Match ' + (i + 1) + '</span><span class="pos">index ' + m.index + '–' + (m.index + m[0].length) + ' · line ' + lineOf(m.index) + '</span>'
+        + '<button type="button" class="btn-icon" onclick="rxCopyMatch(' + i + ',this)" title="Copy this match" aria-label="Copy match ' + (i + 1) + '"><i class="ti ti-clipboard-copy"></i></button></div>'
+        + '<pre class="rx-mv">' + (m[0] === '' ? '<span class="rx-u">(empty match)</span>' : uEsc(m[0])) + '</pre>' + (g ? '<table class="rx-g">' + g + '</table>' : '') + '</div>';
+    }).join('') + (ms.length > 200 ? '<div class="jwt-note">… and ' + (ms.length - 200) + ' more matches (all are highlighted on the left).</div>' : '');
+  }
+  // replace preview
+  const rep = uEl('rx-repl').value, ro = uEl('rx-repl-out');
+  if (re && pat) { try { ro.textContent = text.replace(re, rep); } catch (e) { ro.textContent = ''; } uEl('rx-repl-copy').disabled = false; }
+  else { ro.textContent = ''; uEl('rx-repl-copy').disabled = true; }
+}
+function rxCopyMatch(i, btn) { const m = _rx.matches[i]; if (m) uCopy(m[0], btn); }
+function rxCopyAll(btn) { uCopy(_rx.matches.map(m => m[0]).join('\n'), btn); }
+function rxSample() {
+  uEl('rx-pattern').value = RX_SAMPLE.pattern; uEl('rx-text').value = RX_SAMPLE.text; uEl('rx-repl').value = RX_SAMPLE.repl;
+  document.querySelectorAll('#rx-flags input').forEach(c => { c.checked = RX_SAMPLE.flags.indexOf(c.getAttribute('data-f')) !== -1; });
+  rxRun();
+}
+function rxClearPattern() { uEl('rx-pattern').value = ''; rxRun(); uEl('rx-pattern').focus(); }
+function rxClearText() { uEl('rx-text').value = ''; rxRun(); uEl('rx-text').focus(); }
+ccfSyncIndent();
+
+// ── Code Compare (Aligned view): VS Code-style overview ruler on the right edge ─────────────────────
+// Red half = lines only on the left, green half = lines only on the right. Click a mark to jump to that change.
+function ccvRuler() {
+  const main = document.getElementById('cc-main'); if (!main || typeof _cc === 'undefined' || _cc.mode === 'live') return;
+  const old = main.querySelector('.cc-ruler-wrap'); if (old) old.remove();
+  const tbl = main.querySelector('.cc-tbl'); if (!tbl || !_cc.blocks.length) return;
+  const H = tbl.offsetHeight || 1, VH = main.clientHeight || 1, seen = {};
+  main.querySelectorAll('tr[data-blk]').forEach(tr => {
+    const b = tr.getAttribute('data-blk'), top = tr.offsetTop, bot = top + tr.offsetHeight;
+    if (!seen[b]) seen[b] = { top, bot }; else seen[b].bot = bot;
+  });
+  let h = '';
+  Object.keys(seen).forEach(b => {
+    const bl = _cc.blocks[b]; if (!bl) return;
+    const t = (seen[b].top / H * VH).toFixed(1), ht = Math.max(3, (seen[b].bot - seen[b].top) / H * VH).toFixed(1);
+    const cur = +b === _cc.cur ? ' cur' : '', go = ' onclick="ccvGoBlk(' + b + ')" title="Difference ' + (+b + 1) + '"';
+    if (bl.na > 0) h += '<div class="cc-rk l' + cur + '" data-b="' + b + '" style="top:' + t + 'px;height:' + ht + 'px"' + go + '></div>';
+    if (bl.nb > 0) h += '<div class="cc-rk r' + cur + '" data-b="' + b + '" style="top:' + t + 'px;height:' + ht + 'px"' + go + '></div>';
+  });
+  const wrap = document.createElement('div'); wrap.className = 'cc-ruler-wrap';
+  wrap.innerHTML = '<div class="cc-ruler" style="height:' + VH + 'px">' + h + '</div>';
+  main.insertBefore(wrap, main.firstChild);
+}
+function ccvRulerCur() {
+  document.querySelectorAll('#cc-main .cc-rk').forEach(e => e.classList.toggle('cur', +e.getAttribute('data-b') === _cc.cur));
+}
+function ccvGoBlk(b) {
+  _cc.cur = b;
+  document.querySelectorAll('#cc-main tr.cc-cur').forEach(t => t.classList.remove('cc-cur'));
+  const trs = document.querySelectorAll('#cc-main tr[data-blk="' + b + '"]');
+  trs.forEach(t => t.classList.add('cc-cur'));
+  if (trs[0]) trs[0].scrollIntoView({ block: 'center' });
+  ccUpdateBar();
+}
+window.addEventListener('resize', () => { if (typeof _cc !== 'undefined' && _cc && _cc.mode !== 'live') { try { ccvRuler(); } catch (e) {} } });
 </script>
 
 </body>
