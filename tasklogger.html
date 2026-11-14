@@ -1208,6 +1208,48 @@ html.is-touch .pending-card-actions { opacity: 1; }
 .meta-collapse-toggle i { display: block; transition: transform 0.15s; }
 .meta-collapse-toggle.expanded i { transform: rotate(180deg); }
 
+
+/* ── Phone: full-screen editor for task-card text-area fields ───────────────────
+   On small screens, focusing a Description/Remark/custom Text Area field on a task card
+   opens this overlay (see tcfsOpen). It shows the task name + other card details in a
+   header and gives the field the whole screen to type in. Edits are mirrored live into the
+   real card field, so nothing else about saving changes. */
+.tcfs { display: none; }
+@media (max-width: 760px), (pointer: coarse) and (max-height: 500px) {
+  .tcfs.open {
+    display: flex; flex-direction: column;
+    position: fixed; left: 0; top: 0; width: 100%; height: 100vh; height: 100dvh;
+    z-index: 100000; background: var(--bg); color: var(--text-primary);
+  }
+  .tcfs-head {
+    flex: 0 0 auto; padding: 10px 12px 10px; border-bottom: 1px solid var(--border);
+    background: var(--bg-secondary); padding-top: max(10px, env(safe-area-inset-top));
+  }
+  .tcfs-row1 { display: flex; align-items: center; gap: 8px; }
+  .tcfs-title { flex: 1; min-width: 0; font-size: 15px; font-weight: 600; line-height: 1.3;
+    overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .tcfs-title.empty { color: var(--text-tertiary); font-weight: 400; font-style: italic; }
+  .tcfs-timer { font-family: var(--font-mono); font-size: 13px; color: var(--text-secondary); white-space: nowrap; }
+  .tcfs-timer.running { color: var(--green-dark); }
+  .tcfs-timer.paused { color: var(--amber-dark); }
+  .tcfs-btn { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+    width: 38px; height: 38px; border: 1px solid var(--border-md); border-radius: var(--radius-md);
+    background: var(--bg); color: var(--text-secondary); font-size: 18px; padding: 0; cursor: pointer; }
+  .tcfs-btn.copied { color: var(--green-dark); border-color: var(--green-mid); }
+  .tcfs-btn.primary { width: auto; padding: 0 14px; font-size: 14px; font-weight: 600; background: var(--blue-mid); border-color: var(--blue-mid); color: #fff; }
+  .tcfs-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+  .tcfs-chip { font-size: 11px; line-height: 1.3; padding: 2px 8px; border-radius: 999px;
+    background: var(--bg-tertiary); color: var(--text-secondary); border: 1px solid var(--border);
+    max-width: 100%; overflow-wrap: anywhere; }
+  .tcfs-chip b { font-weight: 600; color: var(--text-tertiary); margin-right: 3px; }
+  .tcfs-label { flex: 0 0 auto; padding: 8px 12px 0; font-size: 12px; font-weight: 600; color: var(--text-secondary); }
+  .tcfs-ta {
+    flex: 1 1 auto; min-height: 0; width: 100%; margin: 0; resize: none; border: none; outline: none;
+    background: var(--bg); color: var(--text-primary); padding: 8px 12px max(12px, env(safe-area-inset-bottom));
+    font-family: var(--font-mono); font-size: 16px; /* 16px stops iOS zoom-on-focus */ line-height: 1.55;
+  }
+}
+
 /* Validation error */
 .validation-msg {
   font-size: 11px; color: var(--red-mid); margin-top: 6px;
@@ -16098,6 +16140,115 @@ function focusFieldInput(idAttr) {
   const el = trigger || document.getElementById(idAttr);
   if (el && el.focus) el.focus();
 }
+
+
+// ── Phone: full-screen editor for task-card text-area fields ───────────────────
+// Focusing a text-area field (Description, Remark, custom Text Area) on a task card, on a
+// phone-sized screen only, opens a full-screen overlay with the task name and the card's other
+// details in the header. The overlay's <textarea> mirrors every keystroke into the real
+// card editor (and fires its own oninput), so saving/sync/validation behave exactly as if the
+// user had typed in the card. Desktop/tablet widths are untouched.
+let _tcfs = null; // { id, key, editorId, timer, vvHandler }
+function tcfsIsPhone() {
+  return window.matchMedia('(max-width: 760px), (pointer: coarse) and (max-height: 500px)').matches;
+}
+function tcfsOpen(editor) {
+  if (_tcfs) return;
+  const m = /^meta-(.+)-(\d+)-trigger$/.exec(editor.id || '');
+  if (!m) return;
+  const key = m[1], id = parseInt(m[2], 10);
+  const task = tasks.find(t => t.id === id);
+  if (!task) return;
+  const label = (editor.closest('.meta-field')?.querySelector('.meta-label')?.textContent || '').trim();
+  const cols = (typeof getTaskCardColumns === 'function' ? getTaskCardColumns() : []);
+  const chips = cols.filter(c => c.type !== 'textarea' && !isSystemManagedColumn(c)).map(c => {
+    const v = CORE_TASK_FIELD_KEYS.includes(c.key) ? task[c.key] : (task.customFields && task.customFields[c.key]);
+    const txt = Array.isArray(v) ? v.join(', ') : String(v == null ? '' : v).trim();
+    return txt ? `<span class="tcfs-chip"><b>${esc(c.label)}</b>${esc(txt)}</span>` : '';
+  }).join('');
+  const startVal = (document.getElementById('meta-' + key + '-' + id) || {}).value || '';
+
+  const ov = document.createElement('div');
+  ov.className = 'tcfs';
+  ov.innerHTML = `
+    <div class="tcfs-head">
+      <div class="tcfs-row1">
+        <div class="tcfs-title${task.heading ? '' : ' empty'}">${esc(task.heading || 'Untitled task')}</div>
+        <span class="tcfs-timer"></span>
+        <span class="status-badge badge-${task.status}">${esc(task.status)}</span>
+      </div>
+      ${chips ? `<div class="tcfs-chips">${chips}</div>` : ''}
+    </div>
+    <div class="tcfs-label" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+      <span>${esc(label)}</span>
+      <span style="display:flex;gap:8px">
+        <button type="button" class="tcfs-btn tcfs-copy" title="Copy"><i class="ti ti-clipboard-copy"></i></button>
+        <button type="button" class="tcfs-btn primary tcfs-done">Done</button>
+      </span>
+    </div>
+    <textarea class="tcfs-ta" spellcheck="false" placeholder="${esc(editor.getAttribute('data-placeholder') || '')}"></textarea>`;
+  document.body.appendChild(ov);
+  const ta = ov.querySelector('.tcfs-ta');
+  ta.value = startVal;
+  const state = { id, key, editorId: editor.id, ov, prevOverflow: document.body.style.overflow };
+  _tcfs = state;
+  document.body.style.overflow = 'hidden';
+
+  // Live timer + keep the overlay sized to the visible area when the soft keyboard is up.
+  const timerEl = ov.querySelector('.tcfs-timer');
+  const tick = () => {
+    const src = document.getElementById('timer-' + id);
+    if (src) { timerEl.textContent = src.textContent; timerEl.className = 'tcfs-timer ' + (src.classList.contains('running') ? 'running' : src.classList.contains('paused') ? 'paused' : ''); }
+  };
+  tick(); state.timer = setInterval(tick, 500);
+  if (window.visualViewport) {
+    state.vvHandler = () => { ov.style.height = window.visualViewport.height + 'px'; ov.style.top = window.visualViewport.offsetTop + 'px'; };
+    window.visualViewport.addEventListener('resize', state.vvHandler);
+    window.visualViewport.addEventListener('scroll', state.vvHandler);
+    state.vvHandler();
+  }
+
+  ta.addEventListener('input', () => {
+    const ed = document.getElementById(state.editorId); // re-lookup: the card may have re-rendered
+    if (!ed) return;
+    ed.innerHTML = rtePlainToHtml(ta.value);
+    ed.dispatchEvent(new Event('input')); // runs rteSync + the field's own change handler
+  });
+  ov.querySelector('.tcfs-done').addEventListener('click', tcfsClose);
+  ov.querySelector('.tcfs-copy').addEventListener('click', function () {
+    const btn = this;
+    const flash = () => { btn.classList.add('copied'); setTimeout(() => btn.classList.remove('copied'), 1500); };
+    if (!ta.value) return;
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(ta.value).then(flash).catch(() => rteFallbackCopy(ta.value, flash));
+    else rteFallbackCopy(ta.value, flash);
+  });
+  ov.addEventListener('keydown', e => { if (e.key === 'Escape') { e.preventDefault(); tcfsClose(); } });
+
+  ov.classList.add('open');
+  editor.blur();           // hand focus to the overlay so the card editor never keeps the caret
+  ta.focus();
+  try { const n = ta.value.length; ta.setSelectionRange(n, n); } catch (e) {}
+}
+function tcfsClose() {
+  const s = _tcfs; if (!s) return;
+  _tcfs = null;
+  clearInterval(s.timer);
+  if (window.visualViewport && s.vvHandler) {
+    window.visualViewport.removeEventListener('resize', s.vvHandler);
+    window.visualViewport.removeEventListener('scroll', s.vvHandler);
+  }
+  document.body.style.overflow = s.prevOverflow || '';
+  const ed = document.getElementById(s.editorId);
+  if (ed) { ed.scrollTop = 0; }
+  s.ov.remove();
+  try { if (ed) rteSync(s.editorId.replace(/-trigger$/, '')); } catch (e) {}
+}
+document.addEventListener('focusin', function (e) {
+  const t = e.target;
+  if (_tcfs || !t || !t.classList || !t.classList.contains('rte-editor') || !t.isContentEditable) return;
+  if (!t.closest('.task-card') || !tcfsIsPhone()) return; // task cards only; phone-size only
+  tcfsOpen(t);
+});
 
 // Config-driven task-card fields: every column with Field Visibility → Task Card enabled
 // renders here automatically, in configured order, using its saved type/list/format — adding
