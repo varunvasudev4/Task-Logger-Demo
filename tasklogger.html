@@ -2902,6 +2902,11 @@ tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--vs-focus); color: var(--vs-ln
 .ttl-tcnt.all{border-color:var(--green-mid);color:var(--green-dark);background:var(--green-bg)}
 #ttl-tb-hint{display:none}
 @media (max-width:760px){
+  #log-panel .log-actions-th-inner{justify-content:center}
+  #log-panel .log-actions-th-label{display:none}
+  #log-panel .log-actions-th-inner #log-fullscreen-btn{display:inline-flex!important;align-items:center;justify-content:center;flex:0 0 auto;margin:0;padding:2px 8px;min-height:30px}
+}
+@media (max-width:760px){
   /* Dashboard / Lambda Functions leave the header: they live at the right end of the bottom bar (swipe it) */
   #dashboard-btn{display:none!important}
   .header-row-1,.header-row-1.header-row-1--no-add-task{grid-template-columns:1fr!important}
@@ -3009,7 +3014,7 @@ tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--vs-focus); color: var(--vs-ln
         <div class="log-count" id="log-count">0 entries</div>
       </div>
       <div class="log-header-actions">
-        <span class="ttl-tcnt" id="task-count-pill" title="Tasks completed / total for this date"><i class="ti ti-checks"></i><b id="task-count-val">0/0</b></span>
+        <span class="ttl-tcnt" id="task-count-pill" title="Completed / total log entries for this date (one number when all are completed)"><i class="ti ti-checks"></i><b id="task-count-val">0</b></span>
         <span class="lcd-btn-group" id="lambda-changes-group" style="display:none"><button class="btn lcd-main" onclick="lcdButtonClick()" id="lambda-changes-btn"><i class="ti ti-function"></i> <span class="lcd-t-full">Lambda changes</span><span class="lcd-t-short">Lambda</span> <span class="lcd-cnts" id="lambda-changes-count"></span></button><button class="btn lcd-refetch" onclick="lcdRefetch()" id="lambda-changes-refetch" title="Re-fetch and check the data from the JSON file for this date" aria-label="Re-fetch Lambda changes from the JSON file"><i class="ti ti-refresh" id="lambda-changes-refetch-icon"></i></button></span>
         <button class="btn" onclick="copyLog()" id="copy-btn"><i class="ti ti-clipboard-copy"></i> Copy</button>
         <button class="btn" onclick="openMailModal()" id="mail-btn" title="Send log via email"><i class="ti ti-mail"></i> Email</button>
@@ -17454,9 +17459,29 @@ function buildLogTableColgroup(cols, isPresentDay, isFutureDay) {
 }
 
 // Builds the header row with sort/pin/resize affordances per column.
+// Small screens: the Fullscreen button lives in the Action column header, which frees the log header row for
+// the count, Lambda and day-total controls. Elsewhere it stays in the log header actions.
+function placeLogFsBtn() {
+  const btn = document.getElementById('log-fullscreen-btn');
+  if (!btn) return;
+  const small = window.matchMedia('(max-width: 760px)').matches;
+  const inner = document.querySelector('#log-thead-row th[data-col="__actions"] .log-actions-th-inner');
+  const home = document.querySelector('#log-panel .log-header-actions');
+  if (small && inner) { if (btn.parentNode !== inner) { btn.classList.add('log-fs-in-th'); inner.appendChild(btn); } }
+  else if (home && btn.parentNode !== home) { btn.classList.remove('log-fs-in-th'); home.appendChild(btn); }
+}
+(function () {
+  const mq = window.matchMedia('(max-width: 760px)');
+  const f = () => { try { placeLogFsBtn(); } catch (e) {} };
+  if (mq.addEventListener) mq.addEventListener('change', f); else if (mq.addListener) mq.addListener(f);
+})();
 function buildLogTheadRow(cols, isPresentDay, isFutureDay) {
   const theadRow = document.getElementById('log-thead-row');
   if (!theadRow) return;
+  { // take the Fullscreen button out before the header row is rebuilt (rebuilding would otherwise delete it)
+    const fb = document.getElementById('log-fullscreen-btn'), home = document.querySelector('#log-panel .log-header-actions');
+    if (fb && home && fb.parentNode !== home) home.appendChild(fb);
+  }
   theadRow.innerHTML = cols.map(c => {
     const arrow = logTableSortCol === c.key ? (logTableSortDir === 'asc' ? '▲' : '▼') : '';
     return `<th class="log-th-sortable" data-col="${c.key}">${esc(c.label)}` +
@@ -17471,6 +17496,7 @@ function buildLogTheadRow(cols, isPresentDay, isFutureDay) {
         `<i class="ti ti-chevron-${logActionsCollapsed ? 'left' : 'right'}"></i>` +
       `</button>` +
     `</span></th>`;
+  placeLogFsBtn();
 }
 
 // Re-applies sticky left/right offsets for pinned columns, using the widths currently
@@ -17749,25 +17775,15 @@ function ttlLogTick() {
   if (miss) updateLogTable();
 }
 
-// Tasks created on the selected date: completed / total (same date rule as the task card list, but done tasks count too).
+// Log entries of the selected date: completed (finished) / total. One number when they are equal, "done/total" otherwise.
 function updateTaskCountPill() {
   const pill = document.getElementById('task-count-pill');
   if (!pill) return;
   try {
     const selDate = (typeof getSelectedDate === 'function') ? getSelectedDate() : todayStr();
-    const today = todayStr();
-    let total = 0, done = 0;
-    tasks.forEach(t => {
-      if (!t || isTaskDeleted(t)) return;
-      let ds;
-      if (!t.createdAt) ds = today;
-      else { const d = new Date(t.createdAt); ds = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
-      if (ds !== selDate) return;
-      if (t.status !== 'done' && typeof isRecurringTaskStillHidden === 'function' && isRecurringTaskStillHidden(t)) return;
-      total++;
-      if (t.status === 'done') done++;
-    });
-    const txt = done + '/' + total;
+    const f = logEntries.filter(e => entryMatchesDate(e, selDate));
+    const total = f.length, done = f.filter(e => e.endTs !== null).length;
+    const txt = done === total ? String(done) : done + '/' + total;
     const v = document.getElementById('task-count-val');
     if (v && v.textContent !== txt) v.textContent = txt;
     pill.classList.toggle('all', total > 0 && done === total);
