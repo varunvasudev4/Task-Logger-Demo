@@ -1215,12 +1215,15 @@ html.is-touch .pending-card-actions { opacity: 1; }
    header and gives the field the whole screen to type in. Edits are mirrored live into the
    real card field, so nothing else about saving changes. */
 .tcfs { display: none; }
-@media (max-width: 760px), (pointer: coarse) and (max-height: 500px) {
+@media (max-width: 760px) {
   .tcfs.open {
     display: flex; flex-direction: column;
     position: fixed; left: 0; top: 0; width: 100%; height: 100vh; height: 100dvh;
     z-index: 100000; background: var(--bg); color: var(--text-primary);
+    animation: tcfs-in .2s ease-out;
   }
+  @keyframes tcfs-in { from { opacity: 0; transform: translateY(28px); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) { .tcfs.open { animation: none; } }
   .tcfs-head {
     flex: 0 0 auto; padding: 10px 12px 10px; border-bottom: 1px solid var(--border);
     background: var(--bg-secondary); padding-top: max(10px, env(safe-area-inset-top));
@@ -2893,6 +2896,30 @@ tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--vs-focus); color: var(--vs-ln
   @media (prefers-reduced-motion:reduce){#task-list .task-card:not([data-col]) .task-meta,#task-list .task-card:not([data-col]) .task-lambda-row{animation:none}}
 }
 @media (min-width:761px){.ttl-back,.ttl-morebtn{display:none}}
+/* Completed / total tasks, left of the Lambda changes button */
+.ttl-tcnt{display:inline-flex;align-items:center;gap:5px;flex:0 0 auto;padding:3px 9px;border:1px solid var(--border-md);border-radius:999px;font-family:var(--font-mono);font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap;line-height:1.2;color:var(--text-secondary);background:var(--bg)}
+.ttl-tcnt i{font-size:13px}
+.ttl-tcnt.all{border-color:var(--green-mid);color:var(--green-dark);background:var(--green-bg)}
+#ttl-tb-hint{display:none}
+@media (max-width:760px){
+  /* Dashboard / Lambda Functions leave the header: they live at the right end of the bottom bar (swipe it) */
+  #dashboard-btn{display:none!important}
+  .header-row-1,.header-row-1.header-row-1--no-add-task{grid-template-columns:1fr!important}
+  /* Header stays on top while the task cards scroll underneath */
+  .header{position:sticky;top:0;z-index:60;background:var(--bg-tertiary);padding-top:env(safe-area-inset-top,0px);padding-bottom:10px;margin-bottom:0;box-shadow:-1rem 0 0 var(--bg-tertiary),1rem 0 0 var(--bg-tertiary)}
+  .task-card{scroll-margin:calc(var(--ttl-hdr-h,0px) + 8px) 0 84px}
+  /* Bottom bar scrolls sideways: five tabs fit the screen, Dashboard (and Lambda when enabled) are a swipe away */
+  #ttl-tabbar{display:flex;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x proximity;scrollbar-width:none;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch}
+  #ttl-tabbar::-webkit-scrollbar{display:none}
+  #ttl-tabbar button{flex:0 0 20%;scroll-snap-align:start}
+  #ttl-tabbar button[hidden]{display:none}
+  #ttl-tb-hint{display:flex;position:fixed;right:0;bottom:env(safe-area-inset-bottom,0px);height:56px;width:26px;z-index:91;pointer-events:none;align-items:center;justify-content:flex-end;padding-right:2px;font-size:16px;color:var(--text-tertiary);background:linear-gradient(to right,transparent,var(--bg) 65%)}
+  #ttl-tb-hint[hidden],body.ttl-kb #ttl-tb-hint{display:none}
+  /* Log header: count, Lambda, day totals and Fullscreen stay on one row */
+  #log-panel .ttl-tcnt{padding:3px 6px;font-size:11px;gap:3px}
+  #log-panel .ttl-tcnt i{font-size:12px}
+  #log-panel .lcd-btn-group .lcd-main{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+}
 </style>
 </head>
 <body>
@@ -2985,6 +3012,7 @@ tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--vs-focus); color: var(--vs-ln
         <div class="log-count" id="log-count">0 entries</div>
       </div>
       <div class="log-header-actions">
+        <span class="ttl-tcnt" id="task-count-pill" title="Tasks completed / total for this date"><i class="ti ti-checks"></i><b id="task-count-val">0/0</b></span>
         <span class="lcd-btn-group" id="lambda-changes-group" style="display:none"><button class="btn lcd-main" onclick="lcdButtonClick()" id="lambda-changes-btn"><i class="ti ti-function"></i> <span class="lcd-t-full">Lambda changes</span><span class="lcd-t-short">Lambda</span> <span class="lcd-cnts" id="lambda-changes-count"></span></button><button class="btn lcd-refetch" onclick="lcdRefetch()" id="lambda-changes-refetch" title="Re-fetch and check the data from the JSON file for this date" aria-label="Re-fetch Lambda changes from the JSON file"><i class="ti ti-refresh" id="lambda-changes-refetch-icon"></i></button></span>
         <button class="btn" onclick="copyLog()" id="copy-btn"><i class="ti ti-clipboard-copy"></i> Copy</button>
         <button class="btn" onclick="openMailModal()" id="mail-btn" title="Send log via email"><i class="ti ti-mail"></i> Email</button>
@@ -16362,8 +16390,14 @@ function focusFieldInput(idAttr) {
 // user had typed in the card. Desktop/tablet widths are untouched.
 let _tcfs = null; // { id, key, editorId, timer, vvHandler }
 function tcfsIsPhone() {
-  return window.matchMedia('(max-width: 760px), (pointer: coarse) and (max-height: 500px)').matches;
+  return window.matchMedia('(max-width: 760px)').matches;
 }
+// Window grew past the small-screen width while the overlay was open (rotation / resize): close it so nothing stays locked.
+(function () {
+  const mq = window.matchMedia('(max-width: 760px)');
+  const onChange = () => { if (!mq.matches && _tcfs) tcfsClose(); };
+  if (mq.addEventListener) mq.addEventListener('change', onChange); else if (mq.addListener) mq.addListener(onChange);
+})();
 function tcfsOpen(editor) {
   if (_tcfs) return;
   const m = /^meta-(.+)-(\d+)-trigger$/.exec(editor.id || '');
@@ -16438,20 +16472,31 @@ function tcfsOpen(editor) {
 
   ov.classList.add('open');
   editor.blur();           // hand focus to the overlay so the card editor never keeps the caret
-  ta.focus();
-  try { const n = ta.value.length; ta.setSelectionRange(n, n); } catch (e) {}
+  // Expand to full screen FIRST, then focus the text area, so the soft keyboard only appears once the
+  // overlay is fully in place (focusing in the same frame made the layout jump while the keyboard rose).
+  // The delay stays well under a second so iOS still treats the focus as coming from the user's tap.
+  let focused = false;
+  const focusTa = () => {
+    if (focused || _tcfs !== state) return;
+    focused = true;
+    try { ta.focus({ preventScroll: true }); const n = ta.value.length; ta.setSelectionRange(n, n); } catch (e) {}
+  };
+  const noAnim = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  ov.addEventListener('animationend', e => { if (e.target === ov) focusTa(); });
+  state.focusT = setTimeout(focusTa, noAnim ? 30 : 260);   // fallback if animationend never fires
 }
 function tcfsClose() {
   const s = _tcfs; if (!s) return;
   _tcfs = null;
   clearInterval(s.timer);
+  clearTimeout(s.focusT);
   if (window.visualViewport && s.vvHandler) {
     window.visualViewport.removeEventListener('resize', s.vvHandler);
     window.visualViewport.removeEventListener('scroll', s.vvHandler);
   }
   document.body.style.overflow = s.prevOverflow || '';
   const ed = document.getElementById(s.editorId);
-  if (ed) { ed.scrollTop = 0; }
+  if (ed) { ed.scrollTop = 0; ed.removeAttribute('inputmode'); }
   s.ov.remove();
   try { if (ed) rteSync(s.editorId.replace(/-trigger$/, '')); } catch (e) {}
 }
@@ -16461,6 +16506,12 @@ document.addEventListener('focusin', function (e) {
   if (!t.closest('.task-card') || !tcfsIsPhone()) return; // task cards only; phone-size only
   tcfsOpen(t);
 });
+// On a phone the card's own editor must never raise the keyboard: the full-screen overlay does that once it is open.
+document.addEventListener('pointerdown', function (e) {
+  if (_tcfs || !tcfsIsPhone()) return;
+  const t = e.target && e.target.closest && e.target.closest('.task-card .rte-editor');
+  if (t) t.setAttribute('inputmode', 'none');
+}, true);
 
 // Config-driven task-card fields: every column with Field Visibility → Task Card enabled
 // renders here automatically, in configured order, using its saved type/list/format — adding
@@ -17695,7 +17746,34 @@ function ttlLogTick() {
   if (miss) updateLogTable();
 }
 
+// Tasks created on the selected date: completed / total (same date rule as the task card list, but done tasks count too).
+function updateTaskCountPill() {
+  const pill = document.getElementById('task-count-pill');
+  if (!pill) return;
+  try {
+    const selDate = (typeof getSelectedDate === 'function') ? getSelectedDate() : todayStr();
+    const today = todayStr();
+    let total = 0, done = 0;
+    tasks.forEach(t => {
+      if (!t || isTaskDeleted(t)) return;
+      let ds;
+      if (!t.createdAt) ds = today;
+      else { const d = new Date(t.createdAt); ds = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+      if (ds !== selDate) return;
+      if (t.status !== 'done' && typeof isRecurringTaskStillHidden === 'function' && isRecurringTaskStillHidden(t)) return;
+      total++;
+      if (t.status === 'done') done++;
+    });
+    const txt = done + '/' + total;
+    const v = document.getElementById('task-count-val');
+    if (v && v.textContent !== txt) v.textContent = txt;
+    pill.classList.toggle('all', total > 0 && done === total);
+  } catch (e) {}
+}
+setInterval(updateTaskCountPill, 1500);
+
 function updateLogPanel() {
+  updateTaskCountPill();
   const panel = document.getElementById('log-panel');
   const countEl = document.getElementById('log-count');
   const selDate = (typeof getSelectedDate === 'function') ? getSelectedDate() : todayStr();
@@ -24427,7 +24505,7 @@ function runHistoryCleanup() {
 let _searchActiveIdx = -1;
 let _searchKeywords = [];
 
-function openSearch() {
+function openSearch(noFocus) {
   document.getElementById('task-search-overlay').classList.remove('hidden');
   const inp = document.getElementById('task-search-input');
   inp.value = '';
@@ -24435,7 +24513,7 @@ function openSearch() {
   _searchActiveIdx = -1;
   renderSearchChips();
   renderSearchResults();
-  setTimeout(() => inp.focus(), 30);
+  if (noFocus !== true) setTimeout(() => inp.focus(), 30);   // bottom-bar Search on a phone opens it without raising the keyboard
 }
 
 function closeSearch() {
@@ -33791,9 +33869,23 @@ window.addEventListener('resize', () => { if (typeof _cc !== 'undefined' && _cc 
   try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persist();}catch(e){}
 
   // Tab bar + FAB
-  var tabs=[['pending','ti-clock-exclamation','Pending'],['log','ti-table','Log'],['today','ti-checkbox','Tasks'],['search','ti-search','Search'],['more','ti-dots','More']];
+  var tabs=[['pending','ti-clock-exclamation','Pending'],['log','ti-table','Log'],['today','ti-checkbox','Tasks'],['search','ti-search','Search'],['more','ti-dots','More'],['dashboard','ti-layout-dashboard','Dashboard'],['lambda','ti-function','Lambda']];
   var bar=mk('nav','ttl-tabbar',tabs.map(function(t){return '<button type="button" data-tab="'+t[0]+'"><i class="ti '+t[1]+'"></i><span>'+t[2]+'</span>'+(t[0]==='pending'?'<b class="ttl-cnt" id="ttl-pcnt" hidden></b>':'')+'</button>';}).join(''));
   bar.setAttribute('aria-label','Main');
+  // Dashboard + Lambda Functions moved here from the header. Lambda only exists while Lambda logging is on.
+  var lamBtn=bar.querySelector('[data-tab="lambda"]');
+  if(lamBtn){lamBtn.setAttribute('aria-label','Lambda Functions');lamBtn.title='Lambda Functions';lamBtn.hidden=true;}
+  var tbHint=mk('div','ttl-tb-hint','<i class="ti ti-chevron-right"></i>');tbHint.hidden=true;tbHint.setAttribute('aria-hidden','true');
+  function hintSync(){tbHint.hidden=!(bar.scrollWidth>bar.clientWidth+4&&bar.scrollLeft+bar.clientWidth<bar.scrollWidth-4);}
+  function lamSync(){
+    var on=false;try{on=typeof isLambdaLoggingEnabled==='function'&&!!isLambdaLoggingEnabled();}catch(e){}
+    if(lamBtn&&lamBtn.hidden===on){lamBtn.hidden=!on;if(!on&&bar.scrollLeft>0)bar.scrollLeft=0;}
+    hintSync();
+  }
+  bar.addEventListener('scroll',hintSync,{passive:true});window.addEventListener('resize',hintSync);
+  var _adms=window.applyDashboardMenuState;
+  if(typeof _adms==='function'){window.applyDashboardMenuState=function(){var r=_adms.apply(this,arguments);lamSync();return r;};}
+  setTimeout(lamSync,0);setInterval(lamSync,2000);
   var fab=mk('button','ttl-fab','<i class="ti ti-plus"></i>');fab.type='button';fab.setAttribute('aria-label','Add task');
   function setActive(k){Array.prototype.forEach.call(bar.children,function(b){b.classList.toggle('active',b.getAttribute('data-tab')===k);});}
   setActive('today');
@@ -33886,10 +33978,17 @@ window.addEventListener('resize', () => { if (typeof _cc !== 'undefined' && _cc 
     if(k==='today'){if(selDate()&&selDate()<todayStr())goToday();setView('tasks');}
     else if(k==='log'){if(view==='log'){openSheet('log');return;}if(selDate()>todayStr())goToday();setView('log');}
     else if(k==='pending'){openSheet('pending');}
-    else if(k==='search'){call('openSearch');}
+    else if(k==='search'){try{window.openSearch(true);}catch(x){console.error(x);}}   // open it without raising the keyboard
     else if(k==='more'){openSheet('more');}
+    else if(k==='dashboard'){try{window.dashboardMenuRun('dashboard');}catch(x){console.error(x);}}
+    else if(k==='lambda'){try{window.dashboardMenuRun('lambdaFunctions');}catch(x){console.error(x);}}
   });
   fab.addEventListener('click',function(){if(view!=='tasks')setView('tasks');call('addTask');window.scrollTo({top:0,behavior:'smooth'});});
+
+  // Keep the header height available to scroll-margin so a card scrolled into view clears the sticky header
+  var hdrEl=document.querySelector('.header');
+  function hdrH(){if(hdrEl)document.documentElement.style.setProperty('--ttl-hdr-h',phone()?hdrEl.offsetHeight+'px':'0px');}
+  if(hdrEl){hdrH();if(window.ResizeObserver)new ResizeObserver(hdrH).observe(hdrEl);window.addEventListener('resize',hdrH);}
 
   // Sync button sits next to the date on a phone, back in the second header row on larger screens
   var syncBtn=$('top-sync-btn'),hr1=document.querySelector('.header-row-1'),hr2=document.querySelector('.header-row-2');
