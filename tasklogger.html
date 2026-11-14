@@ -2755,10 +2755,11 @@ tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--vs-focus); color: var(--vs-ln
   .footer{display:none}
   /* Header: keep Dashboard + date + sync; Add moves to the FAB, the rest to the tab bar / More sheet */
   .header-row-1 .btn-primary{display:none!important}
-  .header-row-1,.header-row-1.header-row-1--no-add-task{grid-template-columns:56px 1fr!important}
-  .header-row-2 > :not(.sync-btn){display:none!important}
-  .header-row-2{grid-template-columns:1fr!important}
-  .header-row-2 .sync-btn{grid-column:auto}
+  .header-row-1,.header-row-1.header-row-1--no-add-task{grid-template-columns:56px 1fr auto!important}
+  .header-row-1 .sync-btn{display:inline-flex!important;align-items:center;justify-content:center;gap:6px;min-width:44px;min-height:44px;padding:0 12px}
+  .header-row-1 #top-sync-label{display:none}
+  .header-row-2{display:none!important}
+  #cc-menu-btn{display:none!important}
   /* Inputs: 16px stops iOS zoom-on-focus */
   input:not([type=checkbox]):not([type=radio]):not([type=range]),select,textarea{font-size:16px!important}
   /* Touch targets */
@@ -2777,6 +2778,9 @@ tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--vs-focus); color: var(--vs-ln
   #ttl-tabbar{position:fixed;left:0;right:0;bottom:0;z-index:90;display:grid;grid-template-columns:repeat(5,1fr);background:var(--bg);border-top:1px solid var(--border);padding-bottom:env(safe-area-inset-bottom,0px)}
   #ttl-tabbar button{background:none;border:0;min-height:56px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font:inherit;font-size:11px;color:var(--text-secondary)}
   #ttl-tabbar button i{font-size:22px}
+  #ttl-tabbar button{position:relative}
+  #ttl-tabbar .ttl-cnt{position:absolute;top:5px;left:calc(50% + 6px);min-width:17px;height:17px;padding:0 5px;border-radius:9px;background:#e5484d;color:#fff;font-size:11px;font-weight:600;line-height:17px;text-align:center;box-sizing:border-box}
+  #ttl-tabbar .ttl-cnt[hidden]{display:none}
   #ttl-tabbar button.active{color:var(--blue-mid)}
   #ttl-fab{position:fixed;right:16px;bottom:calc(72px + env(safe-area-inset-bottom,0px));z-index:91;width:56px;height:56px;border-radius:50%;border:0;display:flex;align-items:center;justify-content:center;background:var(--blue-mid);color:#fff;font-size:26px;box-shadow:0 4px 14px rgba(0,0,0,.3)}
   body.ttl-kb #ttl-tabbar,body.ttl-kb #ttl-fab{display:none}
@@ -2784,27 +2788,24 @@ tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--vs-focus); color: var(--vs-ln
   /* More sheet */
   #ttl-sheet{position:fixed;inset:0;z-index:99;background:rgba(0,0,0,.45);align-items:flex-end}
   #ttl-sheet.open{display:flex}
-  #ttl-sheet .ttl-panel{width:100%;max-height:85vh;max-height:85dvh;overflow-y:auto;background:var(--bg);border-radius:18px 18px 0 0;padding:8px 14px calc(14px + env(safe-area-inset-bottom,0px));animation:ttl-up .2s ease-out}
+  #ttl-sheet[data-p="more"] .ttl-panel[data-p="more"],#ttl-sheet[data-p="pending"] .ttl-panel[data-p="pending"]{display:block}
+  #ttl-sheet .ttl-one{grid-template-columns:1fr}
+  #ttl-sheet .ttl-cnt2{margin-left:auto;min-width:22px;padding:2px 7px;border-radius:11px;background:var(--border);color:var(--text-primary);font-size:12px;text-align:center}
+  #ttl-sheet .ttl-panel{display:none;width:100%;max-height:85vh;max-height:85dvh;overflow-y:auto;background:var(--bg);border-radius:18px 18px 0 0;padding:8px 14px calc(14px + env(safe-area-inset-bottom,0px));animation:ttl-up .2s ease-out}
   #ttl-sheet .ttl-grab{width:36px;height:4px;border-radius:2px;background:var(--border-md);margin:0 auto 10px}
   #ttl-sheet .ttl-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
   #ttl-sheet .ttl-grid button{display:flex;align-items:center;gap:8px;min-height:48px;padding:0 12px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--bg);color:var(--text-primary);font:inherit;font-size:14px;text-align:left}
   #ttl-sheet .ttl-sub{margin:14px 2px 8px;font-size:12px;color:var(--text-tertiary)}
-  /* Effort log as cards (default on phones; "Log as table" in More restores the grid) */
-  body:not(.ttl-log-table) .log-wrap{overflow:visible!important;max-height:none!important}
-  body:not(.ttl-log-table) .log-table,body:not(.ttl-log-table) .log-table tbody{display:block;table-layout:auto;width:100%}
-  body:not(.ttl-log-table) .log-table thead{display:none}
-  body:not(.ttl-log-table) .log-table tr{display:block;margin:0 0 10px;padding:6px 12px;border:1px solid var(--border);border-radius:12px;background:var(--bg)}
-  body:not(.ttl-log-table) .log-table td{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;width:auto!important;min-width:0!important;position:static!important;padding:6px 0!important;border:0!important;white-space:normal;overflow:visible;text-overflow:clip;text-align:right}
-  body:not(.ttl-log-table) .log-table td::before{content:attr(data-label);flex:0 0 36%;text-align:left;font-size:12px;color:var(--text-tertiary)}
-  body:not(.ttl-log-table) .log-table td:empty{display:none}
+  /* Two views: Tasks shows only the cards, Log shows only the effort table (a real table, scrolls sideways) */
+  body.ttl-v-tasks #log-panel{display:none!important}
+  body.ttl-v-log #task-list,body.ttl-v-log #ttl-fab{display:none!important}
+  #ttl-logempty{display:none;margin:24px 14px;text-align:center;color:var(--text-tertiary);font-size:14px}
+  .log-wrap{-webkit-overflow-scrolling:touch}
 }
 @media (max-width:760px){
   /* Step 8: touch reorder */
   .task-drag-handle{touch-action:none;-webkit-user-select:none;user-select:none}
   .task-card.dragging{opacity:.92;box-shadow:0 10px 28px rgba(0,0,0,.28);position:relative;z-index:5}
-  .ttl-mvs{display:flex;flex-direction:row;flex:0 0 auto}
-  .ttl-mvs button{width:44px;height:44px;padding:0;border:0;background:none;color:var(--text-secondary);display:flex;align-items:center;justify-content:center}
-  .ttl-mvs i{font-size:16px;pointer-events:none}
   /* Step 9: full-screen tools get a Back arrow instead of the X */
   .jwt-overlay .lm-head .btn-icon[aria-label^="Close"]{display:none!important}
   .jwt-overlay .lm-head .ttl-back{display:flex;min-width:44px;min-height:44px;align-items:center;justify-content:center;order:-1}
@@ -2832,7 +2833,13 @@ tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--vs-focus); color: var(--vs-ln
   #ttl-sheet .ttl-bk{margin:0 2px 8px;font-size:13px;color:var(--text-secondary)}
   #ttl-sheet .ttl-bk.due{color:#e5484d;font-weight:500}
 }
-@media (min-width:761px){.ttl-mvs,.ttl-back,.ttl-morebtn{display:none}}
+@media (max-width:760px){
+  #masters-modal.modal-overlay{align-items:stretch!important;padding:0!important}
+  #masters-modal.modal-overlay>.modal.master-modal{width:100%!important;max-width:100%!important;height:100vh!important;height:100dvh!important;max-height:none!important;border-radius:0!important;border:0!important;margin:0;padding-top:env(safe-area-inset-top,0px);padding-bottom:0;animation:none}
+  #masters-modal.modal-overlay>.modal.master-modal::before{display:none}
+  #masters-modal .modal-header{padding-top:10px}
+}
+@media (min-width:761px){.ttl-back,.ttl-morebtn{display:none}}
 </style>
 </head>
 <body>
@@ -14505,7 +14512,7 @@ function startTask(id) {
   intervals[id] = setInterval(() => {
     const el = document.getElementById('timer-'+id);
     if (el) { el.textContent = fmt(liveElapsedSecs(task)); el.className='timer-display running'; }
-    updateLogTable();
+    ttlLogTick();
     // Phase 22H PART A: keep Total Working Hours ticking live from this
     // same one-second callback — no second timer, per the existing
     // intervals[]/liveElapsedSecs() architecture.
@@ -14540,7 +14547,7 @@ function resumeTask(id) {
   intervals[id] = setInterval(() => {
     const el = document.getElementById('timer-'+id);
     if (el) { el.textContent = fmt(liveElapsedSecs(task)); el.className='timer-display running'; }
-    updateLogTable();
+    ttlLogTick();
     // Phase 22H PART A: keep Total Working Hours ticking live from this
     // same one-second callback — no second timer, per the existing
     // intervals[]/liveElapsedSecs() architecture.
@@ -17573,6 +17580,30 @@ function updateLogTable() {
   wireLogTableColumnInteractions();
   applyLogTableColumnPins();
   if (window._refreshAppTooltip) window._refreshAppTooltip();
+}
+
+// Once-a-second tick from a running timer. Desktop keeps the full rebuild. On a phone, rebuilding the whole table every
+// second made it blink and reset the sideways scroll, so only the running row's minutes are touched, and only while the
+// Log view is on screen. Any other change still goes through updateLogPanel()/updateLogTable().
+function ttlLogTick() {
+  if (!window.matchMedia('(max-width:760px)').matches) { updateLogTable(); return; }
+  const panel = document.getElementById('log-panel');
+  const tbody = document.getElementById('log-tbody');
+  if (!panel || !tbody || panel.style.display === 'none' || panel.offsetParent === null) return;
+  if (!document.querySelector('#log-thead-row [data-col="effort"]')) return;
+  const selDate = getSelectedDate ? getSelectedDate() : todayStr();
+  let miss = false;
+  logEntries.forEach(e => {
+    if (e.durationSecs !== null || !entryMatchesDate(e, selDate)) return;
+    const task = tasks.find(t => t.id === e.taskId);
+    if (!task) return;
+    const tr = tbody.querySelector('tr[data-entry-ts="' + e.startTs + '"]');
+    const td = tr && tr.querySelector('td[data-col="effort"]');
+    if (!td) { miss = true; return; }
+    const v = String(Math.ceil(liveElapsedSecs(task) / 60));
+    if (td.textContent !== v) { td.textContent = v; td.title = v; }
+  });
+  if (miss) updateLogTable();
 }
 
 function updateLogPanel() {
@@ -28075,7 +28106,7 @@ function ensureActiveTimer(task) {
   intervals[task.id] = setInterval(() => {
     const el = document.getElementById('timer-' + task.id);
     if (el) { el.textContent = fmt(liveElapsedSecs(task)); el.className = 'timer-display running'; }
-    updateLogTable();
+    ttlLogTick();
     // Phase 22H PART A: keep Total Working Hours ticking live from this
     // same one-second callback — no second timer, per the existing
     // intervals[]/liveElapsedSecs() architecture.
@@ -33670,49 +33701,72 @@ window.addEventListener('resize', () => { if (typeof _cc !== 'undefined' && _cc 
   // Persistent storage: phones can evict localStorage under pressure.
   try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persist();}catch(e){}
 
-  // Log display mode
-  var LK='ttl_phone_logmode';
-  function logMode(){try{return localStorage.getItem(LK)==='table'?'table':'cards';}catch(e){return 'cards';}}
-  function applyLogMode(){document.body.classList.toggle('ttl-log-table',logMode()==='table');var b=document.querySelector('#ttl-sheet [data-fn="#logmode"] span');if(b)b.textContent=logMode()==='table'?'Log as cards':'Log as table';}
-
   // Tab bar + FAB
-  var tabs=[['today','ti-checkbox','Today'],['pending','ti-clock-exclamation','Pending'],['log','ti-table','Log'],['search','ti-search','Search'],['more','ti-dots','More']];
-  var bar=mk('nav','ttl-tabbar',tabs.map(function(t){return '<button type="button" data-tab="'+t[0]+'"><i class="ti '+t[1]+'"></i><span>'+t[2]+'</span></button>';}).join(''));
+  var tabs=[['pending','ti-clock-exclamation','Pending'],['log','ti-table','Log'],['today','ti-checkbox','Tasks'],['search','ti-search','Search'],['more','ti-dots','More']];
+  var bar=mk('nav','ttl-tabbar',tabs.map(function(t){return '<button type="button" data-tab="'+t[0]+'"><i class="ti '+t[1]+'"></i><span>'+t[2]+'</span>'+(t[0]==='pending'?'<b class="ttl-cnt" id="ttl-pcnt" hidden></b>':'')+'</button>';}).join(''));
   bar.setAttribute('aria-label','Main');
   var fab=mk('button','ttl-fab','<i class="ti ti-plus"></i>');fab.type='button';fab.setAttribute('aria-label','Add task');
   function setActive(k){Array.prototype.forEach.call(bar.children,function(b){b.classList.toggle('active',b.getAttribute('data-tab')===k);});}
   setActive('today');
+  // Two views on a phone: Tasks (cards only, the default) and Log (the effort table only)
+  var view='tasks',lpEmpty=null;
+  function setView(v){
+    view=v;document.body.classList.toggle('ttl-v-log',v==='log');document.body.classList.toggle('ttl-v-tasks',v!=='log');
+    setActive(v==='log'?'log':'today');
+    if(v==='log'){call('updateLogPanel');try{if(typeof logTableExpanded!=='undefined'&&!logTableExpanded)call('toggleLogTable');}catch(x){}}
+    logEmpty();window.scrollTo({top:0});
+  }
+  function logEmpty(){
+    var lp=$('log-panel');
+    if(!lpEmpty){lpEmpty=document.createElement('div');lpEmpty.id='ttl-logempty';lpEmpty.textContent='No log entries yet. Start a task on the Tasks tab and it will appear here.';var l=$('task-list');l.parentNode.insertBefore(lpEmpty,l.nextSibling);}
+    lpEmpty.style.display=(view==='log'&&lp&&lp.style.display==='none')?'block':'none';
+  }
+  var lpEl=$('log-panel');if(lpEl)new MutationObserver(logEmpty).observe(lpEl,{attributes:true,attributeFilter:['style']});
+  document.body.classList.add('ttl-v-tasks');
 
   // More sheet
-  var main=[['ti-list-details','Masters','openMasters'],['ti-file-import','Import / Export','openCSVModal'],['ti-report','Daily summary','openDailySummary'],['ti-mail','Email log','openMailModal'],['ti-clipboard-copy','Copy log','copyLog'],['ti-file-spreadsheet','Download XLSX','exportXLSX'],['ti-refresh','Sync','topSyncClick'],['ti-sun','Theme','cycleTheme'],['ti-layout-list','Log as table','#logmode'],['ti-route','Tour','startTour']];
-  var tools=[['ti-key','JWT decoder','openJwtDecoder'],['ti-binary','Base64','openB64Tool'],['ti-world','Time zones','openTzConv'],['ti-git-compare','Code compare','openCodeCompare'],['ti-markdown','Markdown','openMdPreview'],['ti-letter-case','Case converter','openCaseConv'],['ti-regex','Regex tester','openRegexTester'],['ti-braces','JSON tool','openJsonTool']];
+  var main=[['ti-list-details','Masters','openMasters'],['ti-file-import','Import / Export','openCSVModal'],['ti-report','Daily summary','openDailySummary'],['ti-mail','Email log','openMailModal'],['ti-clipboard-copy','Copy log','copyLog'],['ti-file-spreadsheet','Download XLSX','exportXLSX'],['ti-sun','Theme','cycleTheme'],['ti-route','Tour','startTour']];
+  var tools=[['ti-key','JWT decoder','openJwtDecoder'],['ti-binary','Base64','openB64Tool'],['ti-world','Time zones','openTzConv'],['ti-markdown','Markdown','openMdPreview'],['ti-letter-case','Case converter','openCaseConv'],['ti-regex','Regex tester','openRegexTester'],['ti-braces','JSON tool','openJsonTool']];
   function grid(a){return '<div class="ttl-grid">'+a.map(function(i){return '<button type="button" data-fn="'+i[2]+'"><i class="ti '+i[0]+'"></i><span>'+i[1]+'</span></button>';}).join('')+'</div>';}
-  var sheet=mk('div','ttl-sheet','<div class="ttl-panel" role="dialog" aria-label="More"><div class="ttl-grab"></div>'+grid(main)+'<div class="ttl-sub">Utilities</div>'+grid(tools)+'<div class="ttl-sub">Data</div><div class="ttl-bk" id="ttl-bk"></div>'+grid([['ti-database-export','Back up now','exportBackup']])+'</div>');
-  function openSheet(){applyLogMode();bkRender();sheet.classList.add('open');}
+  var sheet=mk('div','ttl-sheet','<div class="ttl-panel" data-p="pending" role="dialog" aria-label="Pending"><div class="ttl-grab"></div><div class="ttl-grid ttl-one"><button type="button" data-fn="pendingMenuOpenPending"><i class="ti ti-clock-exclamation"></i><span>Pending tasks</span><b class="ttl-cnt2" id="ttl-pc1">0</b></button><button type="button" data-fn="pendingMenuOpenTodo"><i class="ti ti-list-check"></i><span>To Do</span><b class="ttl-cnt2" id="ttl-pc2">0</b></button></div></div><div class="ttl-panel" data-p="more" role="dialog" aria-label="More"><div class="ttl-grab"></div>'+grid(main)+'<div class="ttl-sub">Utilities</div>'+grid(tools)+'<div class="ttl-sub">Data</div><div class="ttl-bk" id="ttl-bk"></div>'+grid([['ti-database-export','Back up now','exportBackup']])+'</div>');
+  function pcounts(){
+    function t(id){var e=$(id);return e?(e.textContent||'0').trim():'0';}
+    var a=t('pending-menu-count-pending'),b=t('pending-menu-count-todo'),n=t('pending-tasks-badge'),be=$('pending-tasks-badge');
+    var c1=$('ttl-pc1'),c2=$('ttl-pc2'),pc=$('ttl-pcnt');
+    if(c1)c1.textContent=a;if(c2)c2.textContent=b;
+    var tot=(be&&!be.classList.contains('hidden'))?n:'';
+    if(pc){pc.textContent=tot;pc.hidden=!tot||tot==='0';}
+  }
+  ['pending-tasks-badge','pending-menu-count-pending','pending-menu-count-todo'].forEach(function(id){var e=$(id);if(e)new MutationObserver(pcounts).observe(e,{childList:true,characterData:true,subtree:true,attributes:true,attributeFilter:['class']});});
+  pcounts();setInterval(pcounts,2000);
+  function openSheet(which){which=which||'more';sheet.setAttribute('data-p',which);if(which==='more')bkRender();else pcounts();sheet.classList.add('open');}
   function closeSheet(){sheet.classList.remove('open');}
   sheet.addEventListener('click',function(e){
     if(e.target===sheet){closeSheet();return;}
     var b=e.target.closest('button[data-fn]');if(!b)return;
     var f=b.getAttribute('data-fn');
-    if(f==='#logmode'){try{localStorage.setItem(LK,logMode()==='table'?'cards':'table');}catch(x){}applyLogMode();closeSheet();return;}
     closeSheet();setTimeout(function(){call(f);},80);
   });
 
   bar.addEventListener('click',function(e){
     var b=e.target.closest('button[data-tab]');if(!b)return;
     var k=b.getAttribute('data-tab');
-    if(k==='today'){setActive('today');window.scrollTo({top:0,behavior:'smooth'});}
-    else if(k==='pending'){call('pendingMenuOpenPending');}
+    if(k==='today'){setView('tasks');}
+    else if(k==='log'){setView('log');}
+    else if(k==='pending'){openSheet('pending');}
     else if(k==='search'){call('openSearch');}
-    else if(k==='more'){openSheet();}
-    else if(k==='log'){
-      setActive('log');
-      try{if(typeof logTableExpanded!=='undefined'&&!logTableExpanded)call('toggleLogTable');}catch(x){}
-      var lp=$('log-panel');
-      if(lp&&lp.style.display!=='none')lp.scrollIntoView({behavior:'smooth',block:'start'});else window.scrollTo({top:document.body.scrollHeight,behavior:'smooth'});
-    }
+    else if(k==='more'){openSheet('more');}
   });
-  fab.addEventListener('click',function(){call('addTask');window.scrollTo({top:0,behavior:'smooth'});});
+  fab.addEventListener('click',function(){if(view!=='tasks')setView('tasks');call('addTask');window.scrollTo({top:0,behavior:'smooth'});});
+
+  // Sync button sits next to the date on a phone, back in the second header row on larger screens
+  var syncBtn=$('top-sync-btn'),hr1=document.querySelector('.header-row-1'),hr2=document.querySelector('.header-row-2');
+  function placeSync(){
+    if(!syncBtn||!hr1||!hr2)return;
+    if(phone()){if(syncBtn.parentNode!==hr1)hr1.insertBefore(syncBtn,hr1.querySelector('.btn-primary'));}
+    else if(syncBtn.parentNode!==hr2)hr2.insertBefore(syncBtn,hr2.firstChild);
+  }
+  placeSync();if(mq.addEventListener)mq.addEventListener('change',placeSync);else if(mq.addListener)mq.addListener(placeSync);
 
   // FAB follows the header Add button (hidden for past dates)
   var addBtn=document.querySelector('.header-row-1 .btn-primary');
@@ -33733,14 +33787,6 @@ window.addEventListener('resize', () => { if (typeof _cc !== 'undefined' && _cc 
   }
   setInterval(fabAvoid,700);window.addEventListener('resize',fabAvoid);window.addEventListener('orientationchange',fabAvoid);
   setTimeout(fabAvoid,300);
-
-  // Active tab follows scroll
-  var tick=0;
-  window.addEventListener('scroll',function(){
-    if(tick||!phone())return;
-    tick=requestAnimationFrame(function(){tick=0;var lp=$('log-panel');
-      setActive(lp&&lp.style.display!=='none'&&lp.getBoundingClientRect().top<window.innerHeight*0.5?'log':'today');});
-  },{passive:true});
 
   // Hide tab bar + FAB while the keyboard is up
   // A focused field alone is not proof: the app focuses the first task input on load, and a hardware
@@ -33787,25 +33833,7 @@ window.addEventListener('resize', () => { if (typeof _cc !== 'undefined' && _cc 
     closeTop();
   });
 
-  // Effort log -> cards: copy each header's label onto its cells
-  var lt=0;
-  function labelCells(){
-    lt=0;if(!phone())return;
-    var map={};
-    Array.prototype.forEach.call(document.querySelectorAll('#log-thead-row th'),function(h,i){map[h.getAttribute('data-col')||('#'+i)]=(h.textContent||'').trim();});
-    Array.prototype.forEach.call(document.querySelectorAll('#log-tbody tr'),function(tr){
-      Array.prototype.forEach.call(tr.children,function(td,i){
-        var l=map[td.getAttribute('data-col')||('#'+i)];
-        if(l!==undefined&&td.getAttribute('data-label')!==l)td.setAttribute('data-label',l);
-      });
-    });
-  }
-  function queueLabels(){if(!lt)lt=setTimeout(labelCells,120);}
-  ['log-tbody','log-thead-row'].forEach(function(id){var e=$(id);if(e)new MutationObserver(queueLabels).observe(e,{childList:true,subtree:true});});
-
-  applyLogMode();labelCells();
-
-  // Step 8: touch reorder (long-press the grip, drag; or use the arrows)
+  // Step 8: touch reorder (long-press the grip, then drag)
   var list=$('task-list'),pd=null;
   function cardsOf(){return Array.prototype.slice.call(list.querySelectorAll('.task-card[id^="row-"]'));}
   function commit(id){try{_dragTaskId=id;taskListDrop({preventDefault:function(){}});}catch(e){console.error(e);}try{_dragTaskId=null;}catch(e){}}
@@ -33833,28 +33861,11 @@ window.addEventListener('resize', () => { if (typeof _cc !== 'undefined' && _cc 
   list.addEventListener('pointerup',function(){endDrag(true);});
   list.addEventListener('pointercancel',function(){endDrag(false);});
   list.addEventListener('contextmenu',function(e){if(phone()&&e.target.closest('.task-drag-handle'))e.preventDefault();});
-  // Move up / down fallback, injected into each card header
+  // Touch devices: stop native HTML5 drag on the grip so the long-press reorder above takes over
   function decorateCards(){
     if(!phone())return;
-    Array.prototype.forEach.call(list.querySelectorAll('.task-top'),function(top){
-      var h=top.querySelector('.task-drag-handle');if(!h)return;
-      if(h.draggable)h.draggable=false;
-      if(top.querySelector('.ttl-mvs'))return;
-      var d=document.createElement('div');d.className='ttl-mvs';
-      d.innerHTML='<button type="button" data-d="-1" aria-label="Move up"><i class="ti ti-chevron-up"></i></button><button type="button" data-d="1" aria-label="Move down"><i class="ti ti-chevron-down"></i></button>';
-      h.insertAdjacentElement('afterend',d);
-    });
+    Array.prototype.forEach.call(list.querySelectorAll('.task-drag-handle'),function(h){if(h.draggable)h.draggable=false;});
   }
-  list.addEventListener('click',function(e){
-    var b=e.target.closest('.ttl-mvs button');if(!b)return;
-    var card=b.closest('.task-card'),all=cardsOf(),i=all.indexOf(card),dir=parseInt(b.getAttribute('data-d'),10);
-    if(i<0)return;
-    if(dir<0&&i>0)list.insertBefore(card,all[i-1]);
-    else if(dir>0&&i<all.length-1)list.insertBefore(all[i+1],card);
-    else return;
-    commit(parseInt(card.id.replace('row-',''),10));
-    card.scrollIntoView({block:'nearest',behavior:'smooth'});
-  });
   new MutationObserver(function(){decorateCards();}).observe(list,{childList:true,subtree:true});
   decorateCards();
 
@@ -33894,7 +33905,7 @@ window.addEventListener('resize', () => { if (typeof _cc !== 'undefined' && _cc 
   // A swipe may start anywhere on the card except the grip, rich-text editors, open dropdown panels,
   // text areas and the field that currently has focus (those keep their own touch behaviour).
   function swOK(el){
-    if(el.closest('.task-drag-handle,.ttl-mvs,.rte-wrap,[contenteditable],textarea,.msdd-panel,[id$="-panel"]'))return false;
+    if(el.closest('.task-drag-handle,.rte-wrap,[contenteditable],textarea,.msdd-panel,[id$="-panel"]'))return false;
     return !(el===document.activeElement&&isField(el));
   }
   function swReset(c){c.style.transform='';c.removeAttribute('data-swipe');c.removeAttribute('data-armed');setTimeout(function(){c.style.transition='';},200);}
