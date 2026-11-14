@@ -2805,6 +2805,17 @@ tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--vs-focus); color: var(--vs-ln
   body.ttl-v-log #task-list,body.ttl-v-log #ttl-fab{display:none!important}
   #ttl-logempty{display:none;margin:24px 14px;text-align:center;color:var(--text-tertiary);font-size:14px}
   .log-wrap{-webkit-overflow-scrolling:touch}
+  /* Bottom Worked / Break boxes are replaced by the header timer on a phone */
+  .work-widget,.break-widget{display:none!important}
+  /* Log view: table only, with Lambda changes on the left and Fullscreen on the right.
+     Copy / Email / Summary / Clear / Download live in the sheet opened by tapping Log again. */
+  .log-header>div:first-child{display:none!important}
+  .log-header{flex-direction:row!important;align-items:center!important;justify-content:space-between;gap:8px}
+  .log-header-actions{width:100%!important;flex-wrap:nowrap!important;justify-content:space-between;align-items:center}
+  .log-header-actions>.btn:not(#log-fullscreen-btn){display:none!important}
+  .log-header-actions>.btn#log-fullscreen-btn{flex:0 0 auto;margin-left:auto}
+  .log-header-actions>.lcd-btn-group{margin-right:auto}
+  #ttl-sheet[data-p="log"] .ttl-panel[data-p="log"]{display:block}
 }
 @media (max-width:760px){
   /* Step 8: touch reorder */
@@ -33718,7 +33729,7 @@ window.addEventListener('resize', () => { if (typeof _cc !== 'undefined' && _cc 
   function setView(v){
     view=v;document.body.classList.toggle('ttl-v-log',v==='log');document.body.classList.toggle('ttl-v-tasks',v!=='log');
     setActive(v==='log'?'log':'today');
-    if(v==='log'){call('updateLogPanel');try{if(typeof logTableExpanded!=='undefined'&&!logTableExpanded)call('toggleLogTable');}catch(x){}}
+    if(v==='log'){try{logTableExpanded=true;}catch(x){}call('updateLogPanel');}
     logEmpty();window.scrollTo({top:0});
   }
   function logEmpty(){
@@ -33734,6 +33745,9 @@ window.addEventListener('resize', () => { if (typeof _cc !== 'undefined' && _cc 
   var tools=[['ti-key','JWT decoder','openJwtDecoder'],['ti-binary','Base64','openB64Tool'],['ti-world','Time zones','openTzConv'],['ti-markdown','Markdown','openMdPreview'],['ti-letter-case','Case converter','openCaseConv'],['ti-regex','Regex tester','openRegexTester'],['ti-braces','JSON tool','openJsonTool']];
   function grid(a){return '<div class="ttl-grid">'+a.map(function(i){return '<button type="button" data-fn="'+i[2]+'"><i class="ti '+i[0]+'"></i><span>'+i[1]+'</span></button>';}).join('')+'</div>';}
   var sheet=mk('div','ttl-sheet','<div class="ttl-panel" data-p="pending" role="dialog" aria-label="Pending"><div class="ttl-grab"></div><div class="ttl-grid ttl-one"><button type="button" data-fn="pendingMenuOpenPending"><i class="ti ti-clock-exclamation"></i><span>Pending tasks</span><b class="ttl-cnt2" id="ttl-pc1">0</b></button><button type="button" data-fn="pendingMenuOpenTodo"><i class="ti ti-list-check"></i><span>To Do</span><b class="ttl-cnt2" id="ttl-pc2">0</b></button></div></div><div class="ttl-panel" data-p="more" role="dialog" aria-label="More"><div class="ttl-grab"></div>'+grid(main)+'<div class="ttl-sub">Utilities</div>'+grid(tools)+'<div class="ttl-sub">Data</div><div class="ttl-bk" id="ttl-bk"></div>'+grid([['ti-database-export','Back up now','exportBackup']])+'</div>');
+  sheet.insertAdjacentHTML('beforeend','<div class="ttl-panel" data-p="log" role="dialog" aria-label="Log actions"><div class="ttl-grab"></div><div class="ttl-grid ttl-one">'+
+    [['ti-clipboard-copy','Copy log','copyLog'],['ti-mail','Email log','openMailModal'],['ti-report','Daily summary','openDailySummary'],['ti-file-spreadsheet','Download XLSX','exportXLSX'],['ti-trash','Clear log','clearLog']]
+    .map(function(i){return '<button type="button" data-fn="'+i[2]+'"><i class="ti '+i[0]+'"></i><span>'+i[1]+'</span></button>';}).join('')+'</div></div>');
   function pcounts(){
     function t(id){var e=$(id);return e?(e.textContent||'0').trim():'0';}
     var a=t('pending-menu-count-pending'),b=t('pending-menu-count-todo'),n=t('pending-tasks-badge'),be=$('pending-tasks-badge');
@@ -33766,6 +33780,7 @@ window.addEventListener('resize', () => { if (typeof _cc !== 'undefined' && _cc 
         var d=selDate(),t=todayStr();
         if(d&&d<t&&view==='tasks')setView('log');
         else if(d&&d>t&&view==='log')setView('tasks');
+        if(view==='log'){try{logTableExpanded=true;}catch(x){}call('updateLogPanel');}
       }
       return r;
     };
@@ -33775,7 +33790,7 @@ window.addEventListener('resize', () => { if (typeof _cc !== 'undefined' && _cc 
     var b=e.target.closest('button[data-tab]');if(!b)return;
     var k=b.getAttribute('data-tab');
     if(k==='today'){if(selDate()&&selDate()<todayStr())goToday();setView('tasks');}
-    else if(k==='log'){if(selDate()>todayStr())goToday();setView('log');}
+    else if(k==='log'){if(view==='log'){openSheet('log');return;}if(selDate()>todayStr())goToday();setView('log');}
     else if(k==='pending'){openSheet('pending');}
     else if(k==='search'){call('openSearch');}
     else if(k==='more'){openSheet('more');}
