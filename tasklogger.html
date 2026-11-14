@@ -2823,7 +2823,11 @@ tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--vs-focus); color: var(--vs-ln
      Copy / Email / Summary / Clear / Download live in the sheet opened by tapping Log again. */
   #log-panel .log-header>div:first-child{display:none!important}
   #log-panel .log-header{flex-direction:row!important;align-items:center!important;justify-content:space-between;gap:8px}
-  #log-panel .log-header-actions{width:100%!important;flex-wrap:wrap!important;align-items:center;row-gap:6px}
+  #log-panel .log-header-actions{width:100%!important;flex-wrap:nowrap!important;align-items:center;gap:4px!important;min-width:0}
+  #log-panel .lcd-btn-group{flex:0 1 auto;min-width:0;display:inline-flex}
+  #log-panel .lcd-btn-group .btn{padding:6px 8px;font-size:12px;min-width:0}
+  #log-panel .ldt{margin-left:2px;gap:4px;flex:0 0 auto}
+  #log-panel .ldt-pill{padding:3px 6px;font-size:11px;gap:3px}
   #log-panel .log-header-actions>.btn:not(#log-fullscreen-btn){display:none!important}
   #log-panel .log-header-actions>#log-fullscreen-btn{flex:0 0 auto;margin-left:auto}
   #log-panel .lcd-t-full{display:none}
@@ -33840,12 +33844,12 @@ window.addEventListener('resize', () => { if (typeof _cc !== 'undefined' && _cc 
 
   // Past dates: Worked / Break totals of the shown day, as small counters next to the Lambda button on the Log view
   var ldt=document.createElement('span');ldt.id='log-day-totals';ldt.className='ldt';
-  ldt.innerHTML='<span class="ldt-pill w" title="Worked on this day"><i class="ti ti-briefcase"></i><b id="ldt-w">00:00:00</b></span><span class="ldt-pill b" title="Break on this day"><i class="ti ti-coffee"></i><b id="ldt-b">00:00:00</b></span>';
+  ldt.innerHTML='<span class="ldt-pill w" title="Worked on this day"><i class="ti ti-briefcase"></i><b id="ldt-w">00:00</b></span><span class="ldt-pill b" title="Break on this day"><i class="ti ti-coffee"></i><b id="ldt-b">00:00</b></span>';
   (function(){var lg=$('lambda-changes-group');if(lg){lg.insertAdjacentElement('afterend',ldt);return;}var a=document.querySelector('#log-panel .log-header-actions');if(a)a.insertBefore(ldt,a.firstChild);})();
   function ldtRender(){
     var d=selDate(),on=phone()&&view==='log'&&d&&d<todayStr();
     ldt.style.display=on?'flex':'none';if(!on)return;
-    try{$('ldt-w').textContent=ttlHms(workTotalSecsForDate(d));$('ldt-b').textContent=ttlHms(breakTotalSecsForDisplay(d));}catch(e){}
+    try{$('ldt-w').textContent=ttlHms(workTotalSecsForDate(d)).slice(0,5);$('ldt-b').textContent=ttlHms(breakTotalSecsForDisplay(d)).slice(0,5);}catch(e){}
   }
   setInterval(ldtRender,2000);
 
