@@ -3014,7 +3014,7 @@ tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--vs-focus); color: var(--vs-ln
         <div class="log-count" id="log-count">0 entries</div>
       </div>
       <div class="log-header-actions">
-        <span class="ttl-tcnt" id="task-count-pill" title="Completed / total log entries for this date (one number when all are completed)"><i class="ti ti-checks"></i><b id="task-count-val">0</b></span>
+        <span class="ttl-tcnt" id="task-count-pill" title="Completed / total effort log entries for this date (completed = task status done; one number when all are completed)"><i class="ti ti-checks"></i><b id="task-count-val">0</b></span>
         <span class="lcd-btn-group" id="lambda-changes-group" style="display:none"><button class="btn lcd-main" onclick="lcdButtonClick()" id="lambda-changes-btn"><i class="ti ti-function"></i> <span class="lcd-t-full">Lambda changes</span><span class="lcd-t-short">Lambda</span> <span class="lcd-cnts" id="lambda-changes-count"></span></button><button class="btn lcd-refetch" onclick="lcdRefetch()" id="lambda-changes-refetch" title="Re-fetch and check the data from the JSON file for this date" aria-label="Re-fetch Lambda changes from the JSON file"><i class="ti ti-refresh" id="lambda-changes-refetch-icon"></i></button></span>
         <button class="btn" onclick="copyLog()" id="copy-btn"><i class="ti ti-clipboard-copy"></i> Copy</button>
         <button class="btn" onclick="openMailModal()" id="mail-btn" title="Send log via email"><i class="ti ti-mail"></i> Email</button>
@@ -17775,14 +17775,22 @@ function ttlLogTick() {
   if (miss) updateLogTable();
 }
 
-// Log entries of the selected date: completed (finished) / total. One number when they are equal, "done/total" otherwise.
+// Log entries of the selected date: those whose task is done / total entries. One number when they are equal, "done/total" otherwise.
 function updateTaskCountPill() {
   const pill = document.getElementById('task-count-pill');
   if (!pill) return;
   try {
     const selDate = (typeof getSelectedDate === 'function') ? getSelectedDate() : todayStr();
     const f = logEntries.filter(e => entryMatchesDate(e, selDate));
-    const total = f.length, done = f.filter(e => e.endTs !== null).length;
+    // An effort log entry counts as completed only when its task's status is done. Pending / paused / running / idle
+    // tasks are not completed (a paused segment also has an end time, so the end time alone says nothing).
+    const byId = new Map(), bySync = new Map();
+    tasks.forEach(t => { if (!t) return; byId.set(t.id, t); if (t._sync && t._sync.syncId) bySync.set(t._sync.syncId, t); });
+    const total = f.length;
+    const done = f.filter(e => {
+      const t = (e.taskSyncId && bySync.get(e.taskSyncId)) || byId.get(e.taskId);
+      return t ? t.status === 'done' : e.endTs !== null;   // entry whose task no longer exists (imported / removed): finished entry = completed
+    }).length;
     const txt = done === total ? String(done) : done + '/' + total;
     const v = document.getElementById('task-count-val');
     if (v && v.textContent !== txt) v.textContent = txt;
