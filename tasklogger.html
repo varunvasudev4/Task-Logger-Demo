@@ -2905,12 +2905,6 @@ tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--vs-focus); color: var(--vs-ln
   /* Dashboard / Lambda Functions leave the header: they live at the right end of the bottom bar (swipe it) */
   #dashboard-btn{display:none!important}
   .header-row-1,.header-row-1.header-row-1--no-add-task{grid-template-columns:1fr!important}
-  /* Header stays on top while the task cards scroll underneath */
-  .header{position:sticky;top:0;z-index:60;background:var(--ttl-hdr-bg,var(--bg-tertiary));padding-top:env(safe-area-inset-top,0px);padding-bottom:10px;margin-bottom:0;box-shadow:-1rem 0 0 var(--ttl-hdr-bg,var(--bg-tertiary)),1rem 0 0 var(--ttl-hdr-bg,var(--bg-tertiary))}
-  html.ttl-hdr-wp .header{-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
-  /* overflow-x:hidden on html + body turns body into a scroll container, which breaks position:sticky; clip does not */
-  html,body{overflow-x:clip}
-  .task-card{scroll-margin:calc(var(--ttl-hdr-h,0px) + 8px) 0 84px}
   /* Bottom bar scrolls sideways: five tabs fit the screen, Dashboard (and Lambda when enabled) are a swipe away */
   #ttl-tabbar{display:flex;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x proximity;scrollbar-width:none;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch}
   #ttl-tabbar::-webkit-scrollbar{display:none}
@@ -33996,28 +33990,12 @@ window.addEventListener('resize', () => { if (typeof _cc !== 'undefined' && _cc 
     if(k==='today'){if(selDate()&&selDate()<todayStr())goToday();setView('tasks');}
     else if(k==='log'){if(view==='log'){openSheet('log');return;}if(selDate()>todayStr())goToday();setView('log');}
     else if(k==='pending'){openSheet('pending');}
-    else if(k==='search'){try{window.openSearch(true);}catch(x){console.error(x);}}   // open it without raising the keyboard
+    else if(k==='search'){try{window.openSearch();var si=$('task-search-input');if(si)si.focus();}catch(x){console.error(x);}}   // open and focus the input right inside the tap
     else if(k==='more'){openSheet('more');}
     else if(k==='dashboard'){try{window.dashboardMenuRun('dashboard');}catch(x){console.error(x);}}
     else if(k==='lambda'){try{window.dashboardMenuRun('lambdaFunctions');}catch(x){console.error(x);}}
   });
   fab.addEventListener('click',function(){if(view!=='tasks')setView('tasks');call('addTask');window.scrollTo({top:0,behavior:'smooth'});});
-
-  // Sticky header takes the page's real background (theme, custom colours); translucent + blurred over a wallpaper
-  function pageBg(){
-    var root=document.documentElement,wp=$('app-wallpaper'),wpOn=!!wp&&getComputedStyle(wp).display!=='none';
-    root.classList.toggle('ttl-hdr-wp',wpOn);
-    if(wpOn){root.style.setProperty('--ttl-hdr-bg','color-mix(in srgb, var(--bg) 85%, transparent)');return;}
-    var c=getComputedStyle(document.body).backgroundColor;
-    if(!c||c==='transparent'||/,\s*0\)$/.test(c))c=getComputedStyle(root).backgroundColor;
-    if(c&&c!==root.style.getPropertyValue('--ttl-hdr-bg'))root.style.setProperty('--ttl-hdr-bg',c);
-  }
-  pageBg();setInterval(pageBg,1500);document.addEventListener('visibilitychange',pageBg);
-
-  // Keep the header height available to scroll-margin so a card scrolled into view clears the sticky header
-  var hdrEl=document.querySelector('.header');
-  function hdrH(){if(hdrEl)document.documentElement.style.setProperty('--ttl-hdr-h',phone()?hdrEl.offsetHeight+'px':'0px');}
-  if(hdrEl){hdrH();if(window.ResizeObserver)new ResizeObserver(hdrH).observe(hdrEl);window.addEventListener('resize',hdrH);}
 
   // Sync button sits next to the date on a phone, back in the second header row on larger screens
   var syncBtn=$('top-sync-btn'),hr1=document.querySelector('.header-row-1'),hr2=document.querySelector('.header-row-2');
