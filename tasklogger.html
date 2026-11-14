@@ -817,7 +817,7 @@ html.is-touch .pending-card-actions { opacity: 1; }
 .lam-fn-count { cursor: help; }
 .cm-lambda-fns { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 8px 20px 0; font-size: 12px; color: var(--text-secondary); }
 .cm-lambda-fns.hidden { display: none; }
-#lambda-log-modal { z-index: 130; }
+#lambda-log-modal { z-index: 460; }   /* above #complete-modal (450) so it can be opened from Complete Task */
 #lcd-changes-modal.lcd-over { z-index: 140; }   /* change viewer opened from the Lambda log / Linked Lambda entries popup sits above it (code viewer is 160) */
 /* "Link to a task" popup opened by Add in the Linked tasks popup: date switcher + task cards */
 #lm-addtask-modal .modal { max-width: 720px; width: 100%; }
@@ -2749,6 +2749,18 @@ tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--vs-focus); color: var(--vs-ln
 /* ttl-phone: native-style phone shell. All rules live inside the 760px query. */
 #ttl-tabbar,#ttl-fab,#ttl-sheet,#ttl-undo{display:none}
 #top-timer-widget{display:none}
+.lcd-t-short{display:none}
+.ldt{display:none;align-items:center;gap:6px;margin-left:8px}
+.ldt-pill{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border:1px solid var(--border-md);border-radius:999px;font-family:var(--font-mono);font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap;line-height:1.2}
+.ldt-pill i{font-size:13px}
+.ldt-pill.w{border-color:var(--green-mid);color:var(--green-dark);background:var(--green-bg)}
+.ldt-pill.b{border-color:var(--amber-mid);color:var(--amber-dark);background:var(--amber-bg)}
+#ttl-log-actions-pop{position:fixed;inset:0;z-index:10060;background:rgba(0,0,0,.45);display:flex;align-items:flex-end;justify-content:center}
+#ttl-log-actions-pop .ttl-lap{width:100%;max-width:480px;max-height:85vh;max-height:85dvh;overflow-y:auto;background:var(--bg);border-radius:18px 18px 0 0;padding:8px 14px calc(14px + env(safe-area-inset-bottom,0px))}
+#ttl-log-actions-pop .ttl-grab{width:36px;height:4px;border-radius:2px;background:var(--border-md);margin:0 auto 10px}
+#ttl-log-actions-pop .ttl-lap-item{display:flex;align-items:center;gap:12px;width:100%;min-height:48px;margin-bottom:8px;padding:0 12px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--bg);color:var(--text-primary);font:inherit;font-size:14px;text-align:left}
+#ttl-log-actions-pop .ttl-lap-item i{font-size:20px;flex:0 0 auto}
+#ttl-log-actions-pop .ttl-lap-item:disabled{opacity:.45}
 @media (max-width:760px){
   html{-webkit-text-size-adjust:100%}
   body{padding-bottom:calc(72px + env(safe-area-inset-bottom,0px));overscroll-behavior-y:contain;-webkit-tap-highlight-color:transparent}
@@ -2809,12 +2821,14 @@ tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--vs-focus); color: var(--vs-ln
   .work-widget,.break-widget{display:none!important}
   /* Log view: table only, with Lambda changes on the left and Fullscreen on the right.
      Copy / Email / Summary / Clear / Download live in the sheet opened by tapping Log again. */
-  .log-header>div:first-child{display:none!important}
-  .log-header{flex-direction:row!important;align-items:center!important;justify-content:space-between;gap:8px}
-  .log-header-actions{width:100%!important;flex-wrap:nowrap!important;justify-content:space-between;align-items:center}
-  .log-header-actions>.btn:not(#log-fullscreen-btn){display:none!important}
-  .log-header-actions>.btn#log-fullscreen-btn{flex:0 0 auto;margin-left:auto}
-  .log-header-actions>.lcd-btn-group{margin-right:auto}
+  #log-panel .log-header>div:first-child{display:none!important}
+  #log-panel .log-header{flex-direction:row!important;align-items:center!important;justify-content:space-between;gap:8px}
+  #log-panel .log-header-actions{width:100%!important;flex-wrap:wrap!important;align-items:center;row-gap:6px}
+  #log-panel .log-header-actions>.btn:not(#log-fullscreen-btn){display:none!important}
+  #log-panel .log-header-actions>#log-fullscreen-btn{flex:0 0 auto;margin-left:auto}
+  #log-panel .lcd-t-full{display:none}
+  #log-panel .lcd-t-short{display:inline}
+  #log-panel .log-actions-collapse-btn{display:none}
   #ttl-sheet[data-p="log"] .ttl-panel[data-p="log"]{display:block}
 }
 @media (max-width:760px){
@@ -2828,7 +2842,9 @@ tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--vs-focus); color: var(--vs-ln
   .task-meta{grid-template-columns:minmax(0,1fr)}
   .task-card{touch-action:pan-y pinch-zoom}
   .task-top{flex-wrap:wrap;row-gap:4px}
-  .task-top .task-input{order:-1;flex:1 1 100%;min-height:44px}
+  .task-drag-handle{order:-2;margin-left:0}
+  .task-top .task-input{order:-1;flex:1 1 calc(100% - 56px);min-width:0;min-height:44px}
+  .ttl-card-body .task-top .task-input{flex-basis:100%}
   .task-top .timer-display{margin-left:auto}
   .task-card:not([data-more]) .task-meta .meta-field-custom:not(.ttl-keep){display:none}
   .ttl-morebtn{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;min-height:44px;margin-top:8px;border:1px dashed var(--border-md);border-radius:var(--radius-md);background:none;color:var(--text-secondary);font:inherit;font-size:13px}
@@ -2947,7 +2963,7 @@ tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--vs-focus); color: var(--vs-ln
         <div class="log-count" id="log-count">0 entries</div>
       </div>
       <div class="log-header-actions">
-        <span class="lcd-btn-group" id="lambda-changes-group" style="display:none"><button class="btn lcd-main" onclick="lcdButtonClick()" id="lambda-changes-btn"><i class="ti ti-function"></i> Lambda changes <span class="lcd-cnts" id="lambda-changes-count"></span></button><button class="btn lcd-refetch" onclick="lcdRefetch()" id="lambda-changes-refetch" title="Re-fetch and check the data from the JSON file for this date" aria-label="Re-fetch Lambda changes from the JSON file"><i class="ti ti-refresh" id="lambda-changes-refetch-icon"></i></button></span>
+        <span class="lcd-btn-group" id="lambda-changes-group" style="display:none"><button class="btn lcd-main" onclick="lcdButtonClick()" id="lambda-changes-btn"><i class="ti ti-function"></i> <span class="lcd-t-full">Lambda changes</span><span class="lcd-t-short">Lambda</span> <span class="lcd-cnts" id="lambda-changes-count"></span></button><button class="btn lcd-refetch" onclick="lcdRefetch()" id="lambda-changes-refetch" title="Re-fetch and check the data from the JSON file for this date" aria-label="Re-fetch Lambda changes from the JSON file"><i class="ti ti-refresh" id="lambda-changes-refetch-icon"></i></button></span>
         <button class="btn" onclick="copyLog()" id="copy-btn"><i class="ti ti-clipboard-copy"></i> Copy</button>
         <button class="btn" onclick="openMailModal()" id="mail-btn" title="Send log via email"><i class="ti ti-mail"></i> Email</button>
         <button class="btn" onclick="openDailySummary()" id="summary-btn" title="Open Daily Summary"><i class="ti ti-report"></i> Summary</button>
@@ -14127,6 +14143,40 @@ function closeLogRowActionsMenu() {
   if (f) f.style.display = 'none';
   _logActionsFloatRow = null;
 }
+// Small screens: the row's actions open as a bottom popup, each option with its icon and a label.
+function _logActionsPhonePopup(src) {
+  closeLogRowActionsMenu();
+  const old = document.getElementById('ttl-log-actions-pop');
+  if (old) old.remove();
+  const pop = document.createElement('div');
+  pop.id = 'ttl-log-actions-pop';
+  const sheet = document.createElement('div');
+  sheet.className = 'ttl-lap';
+  sheet.innerHTML = '<div class="ttl-grab"></div>';
+  Array.prototype.forEach.call(src.querySelectorAll(':scope > button'), b => {
+    const ic = b.querySelector('i');
+    const raw = b.getAttribute('title') || '';
+    const label = b.disabled ? 'Reopen task' : raw.split(' \u2014 ')[0].replace(/\s*\(.*\)\s*$/, '');
+    const color = b.classList.contains('btn-delete') ? '#e5484d' : (b.style.color || '');
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'ttl-lap-item';
+    if (b.disabled) item.disabled = true;
+    const oc = b.getAttribute('onclick');
+    if (oc) item.setAttribute('onclick', oc);
+    const i = document.createElement('i');
+    i.className = ic ? ic.className : 'ti ti-point';
+    if (color) i.style.color = color;
+    const sp = document.createElement('span');
+    sp.textContent = label;
+    item.appendChild(i); item.appendChild(sp);
+    sheet.appendChild(item);
+  });
+  pop.appendChild(sheet);
+  pop.addEventListener('click', (e) => { if (e.target === pop || e.target.closest('.ttl-lap-item:not(:disabled)')) pop.remove(); });
+  const panel = document.getElementById('log-panel');
+  (panel && panel.classList.contains('fullscreen') ? panel : document.body).appendChild(pop);
+}
 function toggleLogRowActionsMenu(evt, rowIdx) {
   evt.preventDefault();
   evt.stopPropagation();
@@ -14134,6 +14184,7 @@ function toggleLogRowActionsMenu(evt, rowIdx) {
   if (f.style.display !== 'none' && _logActionsFloatRow === rowIdx) { closeLogRowActionsMenu(); return; }
   const src = document.getElementById('log-actions-menu-' + rowIdx);
   if (!src) return;
+  if (window.matchMedia('(max-width:760px)').matches) { _logActionsPhonePopup(src); return; }
   const btn = evt.currentTarget || evt.target.closest('button');
   f.innerHTML = '<div class="actions">' + src.innerHTML + '</div>';
   _logActionsFloatRow = rowIdx;
@@ -17577,11 +17628,11 @@ function updateLogTable() {
     const menuList = [btnTransfer, btnRecurring, btnLambda, btnHistory].filter(Boolean);
     const allList  = [btnEdit, btnTransfer, btnCarry, btnReopen, btnRecurring, btnLambda, btnHistory, btnDelete].filter(Boolean);
     const moreToggle = (rowIdx, list, title) => list.length === 0 ? ''
-      : list.length === 1 ? list[0]
+      : (list.length === 1 && !window.matchMedia('(max-width:760px)').matches) ? list[0]
       : `<button type="button" class="btn-icon log-actions-toggle" onclick="toggleLogRowActionsMenu(event, ${rowIdx})" title="${title}"><i class="ti ti-dots-vertical"></i></button>`
         + `<div class="log-actions-src" id="log-actions-menu-${rowIdx}">${list.join('')}</div>`;
 
-    const actionsCellHtml = logActionsCollapsed
+    const actionsCellHtml = (logActionsCollapsed || window.matchMedia('(max-width:760px)').matches)
       ? `<td data-col="__actions" class="log-actions-collapsed-cell">${moreToggle(rowIdx, allList, 'Actions')}</td>`
       : `<td data-col="__actions">
           <div style="display:flex;flex-direction:row;align-items:center;gap:4px">${inlineButtonsHtml}${moreToggle(rowIdx, menuList, 'More actions')}</div>
@@ -33730,7 +33781,7 @@ window.addEventListener('resize', () => { if (typeof _cc !== 'undefined' && _cc 
     view=v;document.body.classList.toggle('ttl-v-log',v==='log');document.body.classList.toggle('ttl-v-tasks',v!=='log');
     setActive(v==='log'?'log':'today');
     if(v==='log'){try{logTableExpanded=true;}catch(x){}call('updateLogPanel');}
-    logEmpty();window.scrollTo({top:0});
+    logEmpty();if(typeof ldtRender==='function')ldtRender();window.scrollTo({top:0});
   }
   function logEmpty(){
     var lp=$('log-panel');
@@ -33782,9 +33833,21 @@ window.addEventListener('resize', () => { if (typeof _cc !== 'undefined' && _cc 
         else if(d&&d>t&&view==='log')setView('tasks');
         if(view==='log'){try{logTableExpanded=true;}catch(x){}call('updateLogPanel');}
       }
+      ldtRender();
       return r;
     };
   }
+
+  // Past dates: Worked / Break totals of the shown day, as small counters next to the Lambda button on the Log view
+  var ldt=document.createElement('span');ldt.id='log-day-totals';ldt.className='ldt';
+  ldt.innerHTML='<span class="ldt-pill w" title="Worked on this day"><i class="ti ti-briefcase"></i><b id="ldt-w">00:00:00</b></span><span class="ldt-pill b" title="Break on this day"><i class="ti ti-coffee"></i><b id="ldt-b">00:00:00</b></span>';
+  (function(){var lg=$('lambda-changes-group');if(lg){lg.insertAdjacentElement('afterend',ldt);return;}var a=document.querySelector('#log-panel .log-header-actions');if(a)a.insertBefore(ldt,a.firstChild);})();
+  function ldtRender(){
+    var d=selDate(),on=phone()&&view==='log'&&d&&d<todayStr();
+    ldt.style.display=on?'flex':'none';if(!on)return;
+    try{$('ldt-w').textContent=ttlHms(workTotalSecsForDate(d));$('ldt-b').textContent=ttlHms(breakTotalSecsForDisplay(d));}catch(e){}
+  }
+  setInterval(ldtRender,2000);
 
   bar.addEventListener('click',function(e){
     var b=e.target.closest('button[data-tab]');if(!b)return;
