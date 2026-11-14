@@ -2748,6 +2748,7 @@ tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--vs-focus); color: var(--vs-ln
 <style id="ttl-phone-css">
 /* ttl-phone: native-style phone shell. All rules live inside the 760px query. */
 #ttl-tabbar,#ttl-fab,#ttl-sheet,#ttl-undo{display:none}
+#top-timer-widget{display:none}
 @media (max-width:760px){
   html{-webkit-text-size-adjust:100%}
   body{padding-bottom:calc(72px + env(safe-area-inset-bottom,0px));overscroll-behavior-y:contain;-webkit-tap-highlight-color:transparent}
@@ -2755,7 +2756,10 @@ tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--vs-focus); color: var(--vs-ln
   .footer{display:none}
   /* Header: keep Dashboard + date + sync; Add moves to the FAB, the rest to the tab bar / More sheet */
   .header-row-1 .btn-primary{display:none!important}
-  .header-row-1,.header-row-1.header-row-1--no-add-task{grid-template-columns:56px 1fr auto!important}
+  .header-row-1,.header-row-1.header-row-1--no-add-task{grid-template-columns:56px 1fr!important;grid-auto-flow:column;grid-auto-columns:auto}
+  /* Row order: Dashboard, Date, Work/Break timer, Sync */
+  .header-row-1 .btn-highlight{order:1}.header-row-1 .date-picker-wrap{order:2}.header-row-1 .sync-btn{order:4}.header-row-1 .btn-primary{order:5}
+  #top-timer-widget{display:inline-flex;order:3;margin:0;min-height:44px;padding:0 10px;border-radius:var(--radius-md)}
   .header-row-1 .sync-btn{display:inline-flex!important;align-items:center;justify-content:center;gap:6px;min-width:44px;min-height:44px;padding:0 12px}
   .header-row-1 #top-sync-label{display:none}
   .header-row-2{display:none!important}
@@ -2872,6 +2876,7 @@ tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--vs-focus); color: var(--vs-ln
           <input type="date" id="log-date-input" class="date-picker-input" onchange="onDateChange()" />
           <span id="today-badge" class="date-today-badge">Today</span>
         </div>
+        <button type="button" class="ttl-hdr-widget idle" id="top-timer-widget" onclick="ttlConsOpen(event)" title="Time tracker — click to start / pause tasks" aria-label="Open time tracker"><span class="ttl-hw-dot"></span><span class="ttl-hw-lbl">Worked</span><span class="ttl-hw-time">00:00:00</span></button>
         <button class="btn btn-primary" onclick="addTask()" aria-label="Add task" title="Add task"><i class="ti ti-plus"></i> <span>Add task</span></button>
       </div>
       <div class="header-row header-row-2">
@@ -33748,11 +33753,29 @@ window.addEventListener('resize', () => { if (typeof _cc !== 'undefined' && _cc 
     closeSheet();setTimeout(function(){call(f);},80);
   });
 
+  // Keep the header date and the Tasks / Log view in step:
+  //  - Log tab with a future date -> date jumps to today; Tasks tab with a past date -> date jumps to today
+  //  - date moved to the past while on Tasks -> Log view; date moved to the future while on Log -> Tasks view
+  function selDate(){var i=$('log-date-input');return i?i.value:'';}
+  function goToday(){var i=$('log-date-input');if(!i)return;i.value=todayStr();try{onDateChange();}catch(e){console.error(e);}}
+  var _odc=window.onDateChange;
+  if(typeof _odc==='function'){
+    window.onDateChange=function(){
+      var r=_odc.apply(this,arguments);
+      if(phone()){
+        var d=selDate(),t=todayStr();
+        if(d&&d<t&&view==='tasks')setView('log');
+        else if(d&&d>t&&view==='log')setView('tasks');
+      }
+      return r;
+    };
+  }
+
   bar.addEventListener('click',function(e){
     var b=e.target.closest('button[data-tab]');if(!b)return;
     var k=b.getAttribute('data-tab');
-    if(k==='today'){setView('tasks');}
-    else if(k==='log'){setView('log');}
+    if(k==='today'){if(selDate()&&selDate()<todayStr())goToday();setView('tasks');}
+    else if(k==='log'){if(selDate()>todayStr())goToday();setView('log');}
     else if(k==='pending'){openSheet('pending');}
     else if(k==='search'){call('openSearch');}
     else if(k==='more'){openSheet('more');}
