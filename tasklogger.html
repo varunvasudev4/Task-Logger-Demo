@@ -2838,7 +2838,9 @@ tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--vs-focus); color: var(--vs-ln
 @media (max-width:760px){
   /* Step 8: touch reorder */
   .task-drag-handle{touch-action:none;-webkit-user-select:none;user-select:none}
-  .task-card.dragging{opacity:.92;box-shadow:0 10px 28px rgba(0,0,0,.28);position:relative;z-index:5}
+  .task-card.dragging{opacity:.35}
+  .ttl-drag-ghost{position:fixed!important;top:0;left:0;z-index:10050;margin:0!important;pointer-events:none;box-shadow:0 12px 30px rgba(0,0,0,.28);opacity:.96;will-change:transform;touch-action:none}
+  .ttl-drag-ghost.settle{transition:transform .16s ease,box-shadow .16s ease;box-shadow:0 2px 8px rgba(0,0,0,.12)}
   /* Step 9: full-screen tools get a Back arrow instead of the X */
   .jwt-overlay .lm-head .btn-icon[aria-label^="Close"]{display:none!important}
   .jwt-overlay .lm-head .ttl-back{display:flex;min-width:44px;min-height:44px;align-items:center;justify-content:center;order:-1}
@@ -2873,6 +2875,24 @@ tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--vs-focus); color: var(--vs-ln
   #masters-modal.modal-overlay>.modal.master-modal{width:100%!important;max-width:100%!important;height:100vh!important;height:100dvh!important;max-height:none!important;border-radius:0!important;border:0!important;margin:0;padding-top:env(safe-area-inset-top,0px);padding-bottom:0;animation:none}
   #masters-modal.modal-overlay>.modal.master-modal::before{display:none}
   #masters-modal .modal-header{padding-top:10px}
+}
+@media (max-width:760px){
+  /* Compact task cards: one expanded at a time, the rest show name, counter, label and action button */
+  .task-card{scroll-margin:8px 0 84px}
+  .task-card[data-col]{padding:8px 12px;margin-bottom:8px}
+  .task-card[data-col] .task-meta,
+  .task-card[data-col] .task-lambda-row,
+  .task-card[data-col] .ttl-morebtn,
+  .task-card[data-col] .actions .btn-delete,
+  .task-card[data-col] .actions [onclick^="openTaskHistoryForTask"]{display:none!important}
+  .task-card[data-col] .task-top .task-input{min-height:40px}
+  .task-card[data-col] .task-top .timer-display{margin-left:0;min-width:0;padding-left:52px;text-align:left}
+  .task-card[data-col] .task-top .actions{margin-left:auto}
+  #task-list .task-card:not([data-col]){box-shadow:0 2px 12px rgba(0,0,0,.09)}
+  #task-list .task-card:not([data-col]) .task-meta,
+  #task-list .task-card:not([data-col]) .task-lambda-row{animation:ttl-exp .18s ease-out}
+  @keyframes ttl-exp{from{opacity:0;transform:translateY(-6px)}}
+  @media (prefers-reduced-motion:reduce){#task-list .task-card:not([data-col]) .task-meta,#task-list .task-card:not([data-col]) .task-lambda-row{animation:none}}
 }
 @media (min-width:761px){.ttl-back,.ttl-morebtn{display:none}}
 </style>
@@ -33947,41 +33967,137 @@ window.addEventListener('resize', () => { if (typeof _cc !== 'undefined' && _cc 
     closeTop();
   });
 
-  // Step 8: touch reorder (long-press the grip, then drag)
-  var list=$('task-list'),pd=null;
+  // Compact cards: only one card is expanded at a time (tap the card or focus its name field);
+  // every other card in the list collapses to name, counter, label and action button.
+  var list=$('task-list'),pd=null,expandedId=null,lastTouch=0;
   function cardsOf(){return Array.prototype.slice.call(list.querySelectorAll('.task-card[id^="row-"]'));}
-  function commit(id){try{_dragTaskId=id;taskListDrop({preventDefault:function(){}});}catch(e){console.error(e);}try{_dragTaskId=null;}catch(e){}}
-  function endDrag(save){
-    if(!pd)return;clearTimeout(pd.t);
-    if(pd.on){pd.card.classList.remove('dragging');if(save)commit(pd.id);}
-    pd=null;
-  }
-  list.addEventListener('pointerdown',function(e){
-    if(!phone()||e.pointerType==='mouse')return;
-    var h=e.target.closest('.task-drag-handle');if(!h)return;
-    var card=h.closest('.task-card');if(!card)return;
-    var me={card:card,id:parseInt(card.id.replace('row-',''),10),x:e.clientX,y:e.clientY,on:false,h:h,pid:e.pointerId};
-    pd=me;
-    me.t=setTimeout(function(){me.on=true;card.classList.add('dragging');try{h.setPointerCapture(me.pid);}catch(x){}if(navigator.vibrate)navigator.vibrate(15);},250);
-  });
-  list.addEventListener('pointermove',function(e){
-    if(!pd)return;
-    if(!pd.on){if(Math.abs(e.clientX-pd.x)>8||Math.abs(e.clientY-pd.y)>8){clearTimeout(pd.t);pd=null;}return;}
-    e.preventDefault();
-    var after=_dragAfterElement(list,e.clientY);
-    if(after==null)list.appendChild(pd.card);else if(after!==pd.card)list.insertBefore(pd.card,after);
-    if(e.clientY<90)window.scrollBy(0,-12);else if(e.clientY>window.innerHeight-130)window.scrollBy(0,12);
-  },{passive:false});
-  list.addEventListener('pointerup',function(){endDrag(true);});
-  list.addEventListener('pointercancel',function(){endDrag(false);});
-  list.addEventListener('contextmenu',function(e){if(phone()&&e.target.closest('.task-drag-handle'))e.preventDefault();});
-  // Touch devices: stop native HTML5 drag on the grip so the long-press reorder above takes over
-  function decorateCards(){
+  function cid(card){return parseInt(card.id.replace('row-',''),10);}
+  function decorateExp(){
     if(!phone())return;
-    Array.prototype.forEach.call(list.querySelectorAll('.task-drag-handle'),function(h){if(h.draggable)h.draggable=false;});
+    cardsOf().forEach(function(c){
+      var col=cid(c)!==expandedId;
+      if(col!==c.hasAttribute('data-col')){if(col)c.setAttribute('data-col','');else c.removeAttribute('data-col');}
+    });
+  }
+  function setExpanded(id,scroll){
+    if(!phone())return;
+    var was=expandedId;expandedId=id;decorateExp();
+    if(scroll&&id!=null&&id!==was){
+      setTimeout(function(){var c=document.getElementById('row-'+id);if(c&&c.scrollIntoView)c.scrollIntoView({block:'nearest',behavior:'smooth'});},30);
+    }
+  }
+  ['pointerdown','touchstart','keydown','mousedown'].forEach(function(t){document.addEventListener(t,function(){lastTouch=Date.now();},true);});
+  // Focusing a task name expands its card (ignored for the automatic focus the app does on load)
+  list.addEventListener('focusin',function(e){
+    if(!phone()||Date.now()-lastTouch>1500)return;
+    var inp=e.target.closest&&e.target.closest('.task-input');if(!inp)return;
+    var c=inp.closest('.task-card[id^="row-"]');if(c)setExpanded(cid(c),true);
+  });
+  list.addEventListener('click',function(e){
+    if(!phone()||pd&&pd.on)return;
+    var c=e.target.closest('.task-card[id^="row-"]');if(!c||!list.contains(c))return;
+    var id=cid(c);
+    if(!c.hasAttribute('data-col')){
+      // Expanded card: tapping the counter or label folds it back
+      if(e.target.closest('.timer-display,.status-badge'))setExpanded(null,false);
+      return;
+    }
+    if(e.target.closest('.task-drag-handle'))return;
+    if(e.target.closest('.actions')){
+      // An action that fails validation (e.g. required fields missing) opens the card so the error is visible
+      setTimeout(function(){var k=document.getElementById('row-'+id);if(k&&k.hasAttribute('data-col')&&k.querySelector('.invalid,.validation-msg.show'))setExpanded(id,true);},40);
+      return;
+    }
+    setExpanded(id,true);
+  });
+  new MutationObserver(decorateExp).observe(list,{childList:true,subtree:true});
+  decorateExp();
+
+  // Step 8: touch / pen / mouse reorder. Same feel as the large screen: the card being moved stays in the list
+  // as a faded placeholder, a copy follows the finger, and the other cards slide out of the way.
+  var reduce=window.matchMedia&&window.matchMedia('(prefers-reduced-motion:reduce)').matches;
+  function commit(id){try{_dragTaskId=id;taskListDrop({preventDefault:function(){}});}catch(e){console.error(e);}try{_dragTaskId=null;}catch(e){}}
+  function flip(change){
+    var cs=cardsOf().filter(function(c){return c!==pd.card;}),before=cs.map(function(c){return c.getBoundingClientRect().top;});
+    change();
+    if(reduce)return;
+    cs.forEach(function(c,i){
+      var d=before[i]-c.getBoundingClientRect().top;
+      if(d&&c.animate)c.animate([{transform:'translateY('+d+'px)'},{transform:'translateY(0)'}],{duration:180,easing:'cubic-bezier(.2,.8,.2,1)'});
+    });
+  }
+  function reorder(y){
+    if(!pd||!pd.on)return;
+    var card=pd.card,after=_dragAfterElement(list,y),cs=cardsOf();
+    if(after==null){if(cs[cs.length-1]===card)return;flip(function(){list.appendChild(card);});}
+    else{if(after===card||after===card.nextElementSibling)return;flip(function(){list.insertBefore(card,after);});}
+  }
+  function place(y){if(pd&&pd.ghost)pd.ghost.style.transform='translate3d(0,'+(y-pd.offY)+'px,0) scale(1.015)';}
+  function tick(){
+    if(!pd||!pd.on)return;
+    var y=pd.cy,top=100,bot=window.innerHeight-130,dy=0;
+    if(y<top)dy=-Math.min(18,Math.ceil((top-y)/5));else if(y>bot)dy=Math.min(18,Math.ceil((y-bot)/5));
+    if(dy){window.scrollBy(0,dy);reorder(y);}
+    pd.raf=requestAnimationFrame(tick);
+  }
+  function lift(){
+    var card=pd.card;
+    expandedId=null;decorateExp();                      // everything folds so short cards are easy to shuffle
+    var r=card.getBoundingClientRect(),g=card.cloneNode(true);
+    Array.prototype.forEach.call(g.querySelectorAll('[id]'),function(n){n.removeAttribute('id');});
+    g.removeAttribute('id');g.removeAttribute('data-more');g.classList.add('ttl-drag-ghost');
+    g.style.width=r.width+'px';g.style.left=r.left+'px';
+    document.body.appendChild(g);
+    pd.on=true;pd.ghost=g;pd.offY=pd.y-r.top;pd.cy=pd.y;pd.origNext=card.nextElementSibling;
+    card.classList.add('dragging');place(pd.y);
+    try{pd.h.setPointerCapture(pd.pid);}catch(x){}
+    if(navigator.vibrate)navigator.vibrate(12);
+    pd.raf=requestAnimationFrame(tick);
+  }
+  function onMove(e){
+    if(!pd||e.pointerId!==pd.pid)return;
+    if(!pd.on){if(Math.abs(e.clientY-pd.y)>4||Math.abs(e.clientX-pd.x)>4)lift();else return;}
+    if(e.cancelable)e.preventDefault();
+    pd.cy=e.clientY;place(pd.cy);reorder(pd.cy);
+  }
+  function detach(){
+    document.removeEventListener('pointermove',onMove);document.removeEventListener('pointerup',onUp);document.removeEventListener('pointercancel',onCancel);
+  }
+  function endDrag(save){
+    if(!pd)return;var me=pd;pd=null;detach();
+    if(!me.on)return;
+    cancelAnimationFrame(me.raf);
+    var card=me.card,g=me.ghost;
+    if(save)commit(me.id);
+    else if(card.parentNode===list){list.insertBefore(card,me.origNext&&me.origNext.parentNode===list?me.origNext:null);}
+    function done(){card.classList.remove('dragging');if(g&&g.parentNode)g.parentNode.removeChild(g);}
+    if(reduce||!g){done();return;}
+    var r=card.getBoundingClientRect();
+    g.classList.add('settle');g.style.transform='translate3d(0,'+r.top+'px,0) scale(1)';
+    setTimeout(done,180);
+  }
+  function onUp(e){if(pd&&e.pointerId===pd.pid)endDrag(true);}
+  function onCancel(e){if(pd&&e.pointerId===pd.pid)endDrag(false);}
+  list.addEventListener('pointerdown',function(e){
+    if(!phone()||pd)return;
+    if(e.pointerType==='mouse'&&e.button!==0)return;
+    var h=e.target.closest('.task-drag-handle');if(!h)return;
+    var card=h.closest('.task-card[id^="row-"]');if(!card)return;
+    pd={card:card,id:cid(card),x:e.clientX,y:e.clientY,on:false,h:h,pid:e.pointerId};
+    document.addEventListener('pointermove',onMove,{passive:false});
+    document.addEventListener('pointerup',onUp);
+    document.addEventListener('pointercancel',onCancel);
+  });
+  list.addEventListener('contextmenu',function(e){if(phone()&&e.target.closest('.task-drag-handle'))e.preventDefault();});
+  // The grip is handled with pointer events on a phone; native HTML5 drag stays for large screens
+  function decorateCards(){
+    var on=phone();
+    Array.prototype.forEach.call(list.querySelectorAll('.task-drag-handle'),function(h){if(h.draggable===on)h.draggable=!on;});
   }
   new MutationObserver(function(){decorateCards();}).observe(list,{childList:true,subtree:true});
   decorateCards();
+  function modeChange(){decorateCards();decorateExp();if(!phone()){cardsOf().forEach(function(c){c.removeAttribute('data-col');});}}
+  if(mq.addEventListener)mq.addEventListener('change',modeChange);else if(mq.addListener)mq.addListener(modeChange);
 
   // Step 10: "More fields" and swipe actions
   var more={};
