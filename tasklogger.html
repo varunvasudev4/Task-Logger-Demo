@@ -2851,7 +2851,6 @@ tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--vs-focus); color: var(--vs-ln
   .task-drag-handle{order:-2;margin-left:0}
   .task-top .task-input{order:-1;flex:1 1 calc(100% - 56px);min-width:0;min-height:44px}
   .ttl-card-body .task-top .task-input{flex-basis:100%}
-  .task-top .timer-display{margin-left:auto}
   .task-card:not([data-more]) .task-meta .meta-field-custom:not(.ttl-keep){display:none}
   .ttl-morebtn{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;min-height:44px;margin-top:8px;border:1px dashed var(--border-md);border-radius:var(--radius-md);background:none;color:var(--text-secondary);font:inherit;font-size:13px}
   .ttl-morebtn i{font-size:16px;transition:transform .15s}
@@ -2879,19 +2878,18 @@ tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--vs-focus); color: var(--vs-ln
 @media (max-width:760px){
   /* Compact task cards: one expanded at a time, the rest show name, counter, label and action button */
   .task-card{scroll-margin:8px 0 84px}
-  .task-card[data-col]{padding:8px 12px;margin-bottom:8px}
+  .task-card{padding:10px 14px;margin-bottom:8px}
   .task-card[data-col] .task-meta,
   .task-card[data-col] .task-lambda-row,
   .task-card[data-col] .ttl-morebtn,
-  .task-card[data-col] .actions .btn-delete,
-  .task-card[data-col] .actions [onclick^="openTaskHistoryForTask"]{display:none!important}
+  .task-card[data-col] .actions .btn-delete{display:none!important}
   .task-card[data-col] .task-top .task-input{min-height:40px}
-  .task-card[data-col] .task-top .timer-display{margin-left:0;min-width:0;padding-left:52px;text-align:left}
-  .task-card[data-col] .task-top .actions{margin-left:auto}
+  .task-top .timer-display{margin-left:0;min-width:0;text-align:left}
+  .task-top .actions{margin-left:auto}
   #task-list .task-card:not([data-col]){box-shadow:0 2px 12px rgba(0,0,0,.09)}
   #task-list .task-card:not([data-col]) .task-meta,
-  #task-list .task-card:not([data-col]) .task-lambda-row{animation:ttl-exp .18s ease-out}
-  @keyframes ttl-exp{from{opacity:0;transform:translateY(-6px)}}
+  #task-list .task-card:not([data-col]) .task-lambda-row{animation:ttl-exp .24s ease-out}
+  @keyframes ttl-exp{from{opacity:0}}
   @media (prefers-reduced-motion:reduce){#task-list .task-card:not([data-col]) .task-meta,#task-list .task-card:not([data-col]) .task-lambda-row{animation:none}}
 }
 @media (min-width:761px){.ttl-back,.ttl-morebtn{display:none}}
@@ -33972,36 +33970,79 @@ window.addEventListener('resize', () => { if (typeof _cc !== 'undefined' && _cc 
   var list=$('task-list'),pd=null,expandedId=null,lastTouch=0;
   function cardsOf(){return Array.prototype.slice.call(list.querySelectorAll('.task-card[id^="row-"]'));}
   function cid(card){return parseInt(card.id.replace('row-',''),10);}
-  function decorateExp(){
-    if(!phone())return;
+  var reduce=window.matchMedia&&window.matchMedia('(prefers-reduced-motion:reduce)').matches;
+  var EASE='cubic-bezier(.2,.8,.2,1)',DUR=240;
+  function applyExp(){
     cardsOf().forEach(function(c){
       var col=cid(c)!==expandedId;
       if(col!==c.hasAttribute('data-col')){if(col)c.setAttribute('data-col','');else c.removeAttribute('data-col');}
     });
   }
+  // Smooth expand / collapse: the card's height and every card's position animate together with one easing,
+  // so the cards below glide instead of jumping.
+  function decorateExp(animate){
+    if(!phone())return;
+    if(animate!==true||reduce){applyExp();return;}
+    var cs=cardsOf();
+    if(!cs.length||!cs[0].animate){applyExp();return;}
+    var vh=window.innerHeight;
+    var before=cs.map(function(c){var r=c.getBoundingClientRect();return {t:r.top,h:r.height};});
+    cs.forEach(function(c){c.getAnimations().forEach(function(a){a.cancel();});});
+    applyExp();
+    cs.forEach(function(c,i){
+      var r=c.getBoundingClientRect(),dt=before[i].t-r.top,dh=before[i].h-r.height,o={duration:DUR,easing:EASE};
+      if(Math.abs(dh)>1)c.animate([{height:before[i].h+'px',overflow:'hidden'},{height:r.height+'px',overflow:'hidden'}],o);
+      var far=(before[i].t>vh+300&&r.top>vh+300)||(before[i].t+before[i].h<-300&&r.bottom<-300);
+      if(Math.abs(dt)>1&&!far)c.animate([{transform:'translateY('+dt+'px)'},{transform:'translateY(0)'}],o);
+    });
+  }
   function setExpanded(id,scroll){
     if(!phone())return;
-    var was=expandedId;expandedId=id;decorateExp();
-    if(scroll&&id!=null&&id!==was){
-      setTimeout(function(){var c=document.getElementById('row-'+id);if(c&&c.scrollIntoView)c.scrollIntoView({block:'nearest',behavior:'smooth'});},30);
+    var was=expandedId;if(id===was)return;
+    expandedId=id;decorateExp(true);
+    if(scroll&&id!=null){
+      setTimeout(function(){var c=document.getElementById('row-'+id);if(c&&c.scrollIntoView)c.scrollIntoView({block:'nearest',behavior:reduce?'auto':'smooth'});},30);
     }
   }
   ['pointerdown','touchstart','keydown','mousedown'].forEach(function(t){document.addEventListener(t,function(){lastTouch=Date.now();},true);});
+  // A scroll or swipe is never a tap: remember where each press started and when the page last scrolled
+  var down={x:0,y:0,t:0},lastScroll=0,lastTap={t:0,x:0,y:0,id:null};
+  document.addEventListener('pointerdown',function(e){down={x:e.clientX,y:e.clientY,t:Date.now()};},true);
+  window.addEventListener('scroll',function(){lastScroll=Date.now();},{passive:true,capture:true});
+  function realTap(e){
+    if(Math.abs(e.clientX-down.x)>10||Math.abs(e.clientY-down.y)>10)return false;   // moved: scroll / swipe / drag
+    if(Date.now()-down.t>500)return false;                                          // long press / text selection
+    if(Date.now()-lastScroll<120)return false;                                      // tap that only stopped a fling
+    return true;
+  }
   // Focusing a task name expands its card (ignored for the automatic focus the app does on load)
   list.addEventListener('focusin',function(e){
     if(!phone()||Date.now()-lastTouch>1500)return;
     var inp=e.target.closest&&e.target.closest('.task-input');if(!inp)return;
     var c=inp.closest('.task-card[id^="row-"]');if(c)setExpanded(cid(c),true);
   });
-  list.addEventListener('click',function(e){
-    if(!phone()||pd&&pd.on)return;
-    var c=e.target.closest('.task-card[id^="row-"]');if(!c||!list.contains(c))return;
+  var INTERACTIVE='input,textarea,select,button,a,label,summary,[contenteditable],.rte-wrap,.msdd-panel,[id$="-panel"],.task-drag-handle,.future-badge';
+  document.addEventListener('click',function(e){
+    if(!phone()||pd&&pd.on||!e.isTrusted)return;
+    if(!document.body.contains(e.target))return;                  // the tap rebuilt the card (button action)
+    if(!realTap(e))return;
+    var c=e.target.closest('.task-card[id^="row-"]');
+    if(c&&!list.contains(c))return;                                // card hosted in the popup
+    if(!c){
+      // Tap outside every card closes the open one (taps inside dialogs, sheets and bars are ignored)
+      if(expandedId!=null&&!e.target.closest('.modal-overlay,.jwt-overlay,.confirm-overlay,.ttl-card-overlay,#ttl-sheet,#ttl-undo,#ttl-tabbar,#ttl-fab,#log-panel,[id$="-panel"],.msdd-panel'))setExpanded(null,false);
+      lastTap.t=0;return;
+    }
     var id=cid(c);
     if(!c.hasAttribute('data-col')){
-      // Expanded card: tapping the counter or label folds it back
-      if(e.target.closest('.timer-display,.status-badge'))setExpanded(null,false);
+      // Expanded card: a double tap on its body (outside inputs and buttons) folds it
+      if(e.target.closest(INTERACTIVE)){lastTap.t=0;return;}
+      var now=Date.now();
+      if(lastTap.id===id&&now-lastTap.t<350&&Math.abs(e.clientX-lastTap.x)<30&&Math.abs(e.clientY-lastTap.y)<30){lastTap.t=0;setExpanded(null,false);}
+      else lastTap={t:now,x:e.clientX,y:e.clientY,id:id};
       return;
     }
+    lastTap.t=0;
     if(e.target.closest('.task-drag-handle'))return;
     if(e.target.closest('.actions')){
       // An action that fails validation (e.g. required fields missing) opens the card so the error is visible
@@ -34010,12 +34051,11 @@ window.addEventListener('resize', () => { if (typeof _cc !== 'undefined' && _cc 
     }
     setExpanded(id,true);
   });
-  new MutationObserver(decorateExp).observe(list,{childList:true,subtree:true});
+  new MutationObserver(function(){decorateExp();}).observe(list,{childList:true,subtree:true});
   decorateExp();
 
   // Step 8: touch / pen / mouse reorder. Same feel as the large screen: the card being moved stays in the list
   // as a faded placeholder, a copy follows the finger, and the other cards slide out of the way.
-  var reduce=window.matchMedia&&window.matchMedia('(prefers-reduced-motion:reduce)').matches;
   function commit(id){try{_dragTaskId=id;taskListDrop({preventDefault:function(){}});}catch(e){console.error(e);}try{_dragTaskId=null;}catch(e){}}
   function flip(change){
     var cs=cardsOf().filter(function(c){return c!==pd.card;}),before=cs.map(function(c){return c.getBoundingClientRect().top;});
@@ -34042,7 +34082,7 @@ window.addEventListener('resize', () => { if (typeof _cc !== 'undefined' && _cc 
   }
   function lift(){
     var card=pd.card;
-    expandedId=null;decorateExp();                      // everything folds so short cards are easy to shuffle
+    expandedId=null;applyExp();                          // everything folds so short cards are easy to shuffle
     var r=card.getBoundingClientRect(),g=card.cloneNode(true);
     Array.prototype.forEach.call(g.querySelectorAll('[id]'),function(n){n.removeAttribute('id');});
     g.removeAttribute('id');g.removeAttribute('data-more');g.classList.add('ttl-drag-ghost');
@@ -34096,7 +34136,7 @@ window.addEventListener('resize', () => { if (typeof _cc !== 'undefined' && _cc 
   }
   new MutationObserver(function(){decorateCards();}).observe(list,{childList:true,subtree:true});
   decorateCards();
-  function modeChange(){decorateCards();decorateExp();if(!phone()){cardsOf().forEach(function(c){c.removeAttribute('data-col');});}}
+  function modeChange(){decorateCards();applyExp();if(!phone()){cardsOf().forEach(function(c){c.removeAttribute('data-col');});}}
   if(mq.addEventListener)mq.addEventListener('change',modeChange);else if(mq.addListener)mq.addListener(modeChange);
 
   // Step 10: "More fields" and swipe actions
