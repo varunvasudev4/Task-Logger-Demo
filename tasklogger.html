@@ -2033,6 +2033,18 @@ body.touring #masters-modal .modal  { z-index: 10101 !important; }
 .ttl-cons-row.running .tm { color: var(--green-dark); font-weight: 600; }
 .ttl-cons-row.paused  .tm { color: var(--amber-dark); }
 .ttl-cons-empty { padding: 22px 12px; text-align: center; color: var(--text-tertiary); font-size: 13px; }
+.ttl-cons-row { cursor: pointer; user-select: none; -webkit-user-select: none; }
+.ttl-cons-row:hover { background: var(--bg-secondary); border-radius: var(--radius-md); }
+/* Task card popup opened by double-clicking a row in the consolidated TTL view */
+.ttl-card-overlay { position: fixed; inset: 0; z-index: 410; background: rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center; padding: 1rem; }
+.ttl-card-overlay.hidden { display: none; }
+.ttl-card-pop { width: 100%; max-width: 760px; max-height: 92vh; display: flex; flex-direction: column; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: 0 10px 30px rgba(0,0,0,0.35); }
+.ttl-card-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+.ttl-card-body { padding: 12px; overflow-y: auto; flex: 1; min-height: 0; }
+.ttl-card-body .task-card { margin-bottom: 0; }
+.ttl-card-body .task-drag-handle { display: none; }
+/* dialogs the card opens (Mark done, delete confirm) must sit above the card popup */
+#complete-modal, #confirm-overlay { z-index: 450; }
 
 /* ── Break timer ── */
 .break-widget {
@@ -3182,6 +3194,17 @@ tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--vs-focus); color: var(--vs-ln
     </div>
     <div class="ttl-cons-sum" id="ttl-cons-sum"></div>
     <div class="ttl-cons-list" id="ttl-cons-list"></div>
+  </div>
+</div>
+
+<!-- Task card popup: double-click a task in the consolidated TTL view to open its actual task card here -->
+<div class="ttl-card-overlay hidden" id="ttl-card-overlay" onclick="if(event.target===this)ttlCardClose()">
+  <div class="ttl-card-pop" role="dialog" aria-modal="true" aria-label="Task card">
+    <div class="ttl-card-head">
+      <div class="modal-title"><i class="ti ti-layout-list" style="vertical-align:-2px;margin-right:6px;color:var(--blue-mid)"></i>Task card</div>
+      <button type="button" class="btn-icon" onclick="ttlCardClose()" title="Close (Esc)" aria-label="Close task card"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="ttl-card-body" id="ttl-card-body"></div>
   </div>
 </div>
 
@@ -16740,7 +16763,7 @@ function renderList(onlyIds) {
   }
   const es = document.getElementById('empty-state');
   if (es) es.remove();
-  const existing = new Set([...list.querySelectorAll('[id^="row-"]')].map(el=>parseInt(el.id.replace('row-',''))));
+  const existing = new Set([...list.querySelectorAll('[id^="row-"]'), ...document.querySelectorAll('#ttl-card-body [id^="row-"]')].map(el=>parseInt(el.id.replace('row-',''))));  // a card hosted in the TTL card popup is not re-created
   // Render in array order (newest first since we unshift)
   // Build a map of existing row elements first
   todayTasks.forEach((task, i) => {
@@ -16822,6 +16845,7 @@ const FS_PORTAL_IDS = [
   'lambda-overlay',        // Lambda Functions full-page overlay
   'cbv-overlay',           // function code viewer
   'ttl-cons-overlay',      // consolidated TTL view (header widget)
+  'ttl-card-overlay',      // task card popup opened from the consolidated TTL view
   'carry-forward-modal',
   'pending-tasks-modal',
   'todo-modal',
@@ -25836,7 +25860,7 @@ function ttlConsRender() {
       btn = '<button type="button" class="btn-icon btn-start" onclick="ttlConsAct(' + t.id + ',\'resume\')" title="Resume"><i class="ti ti-player-play"></i></button>';
     else
       btn = '<button type="button" class="btn-icon btn-start" ' + (named ? '' : 'disabled ') + 'onclick="ttlConsAct(' + t.id + ',\'start\')" title="' + (named ? 'Start timer' : 'Enter a task name first') + '"><i class="ti ti-player-play"></i></button>';
-    return '<div class="ttl-cons-row ' + esc(st) + '" data-tid="' + t.id + '">' +
+    return '<div class="ttl-cons-row ' + esc(st) + '" data-tid="' + t.id + '" ondblclick="ttlCardOpen(' + t.id + ',event)" title="Double-click to open the task card">' +
       '<div class="info"><div class="nm">' + esc(named ? t.heading : '(untitled task)') + '</div>' +
       (t.project ? '<div class="pj">' + esc(Array.isArray(t.project) ? t.project.join(', ') : t.project) + '</div>' : '') + '</div>' +
       '<div class="tm">' + fmt(liveElapsedSecs(t)) + '</div>' + btn + '</div>';
@@ -25892,6 +25916,66 @@ function ttlConsAct(id, act) {
   renderTtlHdrWidgets();
   try { renderWorkWidget(); } catch (e) {}
 }
+// ── Task card popup (double-click a task in the consolidated view) ──────────────
+// The REAL task card (#row-<id>, rendered by renderRow) is moved into the popup, so every field, timer and
+// button works exactly as on the main list. Closing puts it back where it came from (or discards it if the
+// task was completed / deleted, or if it was only created for the popup because the list shows another date).
+let _ttlCard = null;   // { id, ph } — ph: placeholder marking the card's slot in #task-list (null when created just for the popup)
+let _ttlCardTimer = null;
+function ttlCardIsOpen() { const el = document.getElementById('ttl-card-overlay'); return !!(el && !el.classList.contains('hidden')); }
+function ttlCardOpen(id, ev) {
+  if (ev) {
+    if (ev.target && ev.target.closest && ev.target.closest('button, input, textarea, select, a')) return;   // a double-press on Start / Pause must not open the card
+    ev.preventDefault(); ev.stopPropagation();
+    try { const sel = window.getSelection(); if (sel) sel.removeAllRanges(); } catch (e) {}
+  }
+  const task = tasks.find(t => t.id === id);
+  const body = document.getElementById('ttl-card-body');
+  if (!task || isTaskDeleted(task) || !body) return;
+  if (_ttlCard) ttlCardClose();
+  let row = document.getElementById('row-' + id), ph = null;
+  if (row) {
+    ph = document.createElement('div'); ph.hidden = true; ph.setAttribute('data-ttl-card-ph', id);
+    row.parentNode.insertBefore(ph, row);
+  } else {
+    row = document.createElement('div'); row.id = 'row-' + id;
+  }
+  body.appendChild(row);
+  _ttlCard = { id: id, ph: ph };
+  ttlConsClose();
+  document.getElementById('ttl-card-overlay').classList.remove('hidden');
+  renderRow(id);
+  clearInterval(_ttlCardTimer);
+  _ttlCardTimer = setInterval(ttlCardWatch, 1000);
+}
+// Closes the popup on its own if the task is completed or deleted while it is open (Mark done / trash on the card).
+function ttlCardWatch() {
+  if (!_ttlCard) return;
+  const t = tasks.find(x => x.id === _ttlCard.id);
+  if (!t || isTaskDeleted(t) || t.status === 'done') ttlCardClose();
+}
+function ttlCardClose() {
+  clearInterval(_ttlCardTimer); _ttlCardTimer = null;
+  const st = _ttlCard; _ttlCard = null;
+  const ov = document.getElementById('ttl-card-overlay');
+  if (ov) ov.classList.add('hidden');
+  if (!st) return;
+  const row = document.getElementById('row-' + st.id);
+  const t = tasks.find(x => x.id === st.id);
+  const keep = !!(row && st.ph && st.ph.isConnected && t && !isTaskDeleted(t) && t.status !== 'done');
+  if (keep) st.ph.replaceWith(row);
+  else { if (row) row.remove(); if (st.ph) st.ph.remove(); }
+  try { renderList(); } catch (e) {}
+  try { renderTtlHdrWidgets(); } catch (e) {}
+  try { if (ttlConsIsOpen()) ttlConsRender(); } catch (e) {}
+}
+// Escape closes the card popup first (unless Mark done / a confirm dialog is open above it).
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || !ttlCardIsOpen()) return;
+  if (document.querySelector('#complete-modal:not(.hidden), #confirm-overlay:not(.hidden)')) return;
+  e.stopImmediatePropagation(); e.preventDefault(); ttlCardClose();
+}, true);
+
 // One Escape closes only this view (capture phase), not the Lambda / Code popup under it.
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && ttlConsIsOpen()) { e.stopImmediatePropagation(); e.preventDefault(); ttlConsClose(); }
