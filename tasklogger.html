@@ -33803,6 +33803,14 @@ window.addEventListener('resize', () => { if (typeof _cc !== 'undefined' && _cc 
   sheet.insertAdjacentHTML('beforeend','<div class="ttl-panel" data-p="log" role="dialog" aria-label="Log actions"><div class="ttl-grab"></div><div class="ttl-grid ttl-one">'+
     [['ti-clipboard-copy','Copy log','copyLog'],['ti-mail','Email log','openMailModal'],['ti-report','Daily summary','openDailySummary'],['ti-file-spreadsheet','Download XLSX','exportXLSX'],['ti-trash','Clear log','clearLog']]
     .map(function(i){return '<button type="button" data-fn="'+i[2]+'"><i class="ti '+i[0]+'"></i><span>'+i[1]+'</span></button>';}).join('')+'</div></div>');
+  // Theme button in the More sheet mirrors the header one: icon + Light / Dark / System
+  function themeSync(){
+    var b=sheet.querySelector('button[data-fn="cycleTheme"]'),i=$('theme-toggle-icon'),l=$('theme-toggle-label');
+    if(!b||!i||!l)return;
+    var bi=b.querySelector('i'),bs=b.querySelector('span');
+    if(bi)bi.className=i.className;if(bs)bs.textContent=l.textContent;
+  }
+  themeSync();
   function pcounts(){
     function t(id){var e=$(id);return e?(e.textContent||'0').trim():'0';}
     var a=t('pending-menu-count-pending'),b=t('pending-menu-count-todo'),n=t('pending-tasks-badge'),be=$('pending-tasks-badge');
@@ -33813,12 +33821,13 @@ window.addEventListener('resize', () => { if (typeof _cc !== 'undefined' && _cc 
   }
   ['pending-tasks-badge','pending-menu-count-pending','pending-menu-count-todo'].forEach(function(id){var e=$(id);if(e)new MutationObserver(pcounts).observe(e,{childList:true,characterData:true,subtree:true,attributes:true,attributeFilter:['class']});});
   pcounts();setInterval(pcounts,2000);
-  function openSheet(which){which=which||'more';sheet.setAttribute('data-p',which);if(which==='more')bkRender();else pcounts();sheet.classList.add('open');}
+  function openSheet(which){which=which||'more';sheet.setAttribute('data-p',which);if(which==='more'){bkRender();themeSync();}else pcounts();sheet.classList.add('open');}
   function closeSheet(){sheet.classList.remove('open');}
   sheet.addEventListener('click',function(e){
     if(e.target===sheet){closeSheet();return;}
     var b=e.target.closest('button[data-fn]');if(!b)return;
     var f=b.getAttribute('data-fn');
+    if(f==='cycleTheme'){call(f);themeSync();return;}   // Theme: cycle in place, keep the sheet open
     closeSheet();setTimeout(function(){call(f);},80);
   });
 
