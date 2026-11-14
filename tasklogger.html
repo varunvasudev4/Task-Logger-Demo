@@ -2906,14 +2906,17 @@ tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--vs-focus); color: var(--vs-ln
   #dashboard-btn{display:none!important}
   .header-row-1,.header-row-1.header-row-1--no-add-task{grid-template-columns:1fr!important}
   /* Header stays on top while the task cards scroll underneath */
-  .header{position:sticky;top:0;z-index:60;background:var(--bg-tertiary);padding-top:env(safe-area-inset-top,0px);padding-bottom:10px;margin-bottom:0;box-shadow:-1rem 0 0 var(--bg-tertiary),1rem 0 0 var(--bg-tertiary)}
+  .header{position:sticky;top:0;z-index:60;background:var(--ttl-hdr-bg,var(--bg-tertiary));padding-top:env(safe-area-inset-top,0px);padding-bottom:10px;margin-bottom:0;box-shadow:-1rem 0 0 var(--ttl-hdr-bg,var(--bg-tertiary)),1rem 0 0 var(--ttl-hdr-bg,var(--bg-tertiary))}
+  html.ttl-hdr-wp .header{-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
+  /* overflow-x:hidden on html + body turns body into a scroll container, which breaks position:sticky; clip does not */
+  html,body{overflow-x:clip}
   .task-card{scroll-margin:calc(var(--ttl-hdr-h,0px) + 8px) 0 84px}
   /* Bottom bar scrolls sideways: five tabs fit the screen, Dashboard (and Lambda when enabled) are a swipe away */
   #ttl-tabbar{display:flex;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x proximity;scrollbar-width:none;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch}
   #ttl-tabbar::-webkit-scrollbar{display:none}
   #ttl-tabbar button{flex:0 0 20%;scroll-snap-align:start}
   #ttl-tabbar button[hidden]{display:none}
-  #ttl-tb-hint{display:flex;position:fixed;right:0;bottom:env(safe-area-inset-bottom,0px);height:56px;width:26px;z-index:91;pointer-events:none;align-items:center;justify-content:flex-end;padding-right:2px;font-size:16px;color:var(--text-tertiary);background:linear-gradient(to right,transparent,var(--bg) 65%)}
+  #ttl-tb-hint{display:flex;position:fixed;left:0;bottom:env(safe-area-inset-bottom,0px);height:56px;width:26px;z-index:91;pointer-events:none;align-items:center;justify-content:flex-start;padding-left:2px;font-size:16px;color:var(--text-tertiary);background:linear-gradient(to left,transparent,var(--bg) 65%)}
   #ttl-tb-hint[hidden],body.ttl-kb #ttl-tb-hint{display:none}
   /* Log header: count, Lambda, day totals and Fullscreen stay on one row */
   #log-panel .ttl-tcnt{padding:3px 6px;font-size:11px;gap:3px}
@@ -16471,19 +16474,30 @@ function tcfsOpen(editor) {
   ov.addEventListener('keydown', e => { if (e.key === 'Escape') { e.preventDefault(); tcfsClose(); } });
 
   ov.classList.add('open');
-  editor.blur();           // hand focus to the overlay so the card editor never keeps the caret
-  // Expand to full screen FIRST, then focus the text area, so the soft keyboard only appears once the
-  // overlay is fully in place (focusing in the same frame made the layout jump while the keyboard rose).
-  // The delay stays well under a second so iOS still treats the focus as coming from the user's tap.
-  let focused = false;
+  // Expand to full screen FIRST, then focus the text area. A hidden no-keyboard input takes focus right away
+  // (inside the tap, so the browser keeps allowing focus + keyboard); once the overlay has finished expanding,
+  // focus moves to the real text area, which raises the keyboard and puts the caret at the end.
+  const proxy = document.createElement('input');
+  proxy.type = 'text'; proxy.setAttribute('inputmode', 'none'); proxy.setAttribute('aria-hidden', 'true'); proxy.tabIndex = -1;
+  proxy.style.cssText = 'position:absolute;left:0;top:0;width:1px;height:1px;opacity:0;border:0;padding:0;pointer-events:none;font-size:16px';
+  ov.appendChild(proxy);
+  editor.blur();
+  try { proxy.focus({ preventScroll: true }); } catch (e) {}
+  let started = false, tries = 0;
   const focusTa = () => {
-    if (focused || _tcfs !== state) return;
-    focused = true;
-    try { ta.focus({ preventScroll: true }); const n = ta.value.length; ta.setSelectionRange(n, n); } catch (e) {}
+    if (_tcfs !== state) return;
+    try { ta.focus({ preventScroll: true }); } catch (e) {}
+    if (document.activeElement === ta) {
+      try { const n = ta.value.length; ta.setSelectionRange(n, n); } catch (e) {}
+      proxy.remove();
+      return;
+    }
+    if (++tries < 10) state.focusT = setTimeout(focusTa, 80);   // keep trying until the text area really has focus
   };
+  const startFocus = () => { if (started) return; started = true; focusTa(); };
   const noAnim = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  ov.addEventListener('animationend', e => { if (e.target === ov) focusTa(); });
-  state.focusT = setTimeout(focusTa, noAnim ? 30 : 260);   // fallback if animationend never fires
+  ov.addEventListener('animationend', e => { if (e.target === ov) startFocus(); });
+  state.focusT = setTimeout(startFocus, noAnim ? 30 : 260);   // fallback if animationend never fires
 }
 function tcfsClose() {
   const s = _tcfs; if (!s) return;
@@ -16506,12 +16520,7 @@ document.addEventListener('focusin', function (e) {
   if (!t.closest('.task-card') || !tcfsIsPhone()) return; // task cards only; phone-size only
   tcfsOpen(t);
 });
-// On a phone the card's own editor must never raise the keyboard: the full-screen overlay does that once it is open.
-document.addEventListener('pointerdown', function (e) {
-  if (_tcfs || !tcfsIsPhone()) return;
-  const t = e.target && e.target.closest && e.target.closest('.task-card .rte-editor');
-  if (t) t.setAttribute('inputmode', 'none');
-}, true);
+
 
 // Config-driven task-card fields: every column with Field Visibility → Task Card enabled
 // renders here automatically, in configured order, using its saved type/list/format — adding
@@ -33869,20 +33878,29 @@ window.addEventListener('resize', () => { if (typeof _cc !== 'undefined' && _cc 
   try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persist();}catch(e){}
 
   // Tab bar + FAB
-  var tabs=[['pending','ti-clock-exclamation','Pending'],['log','ti-table','Log'],['today','ti-checkbox','Tasks'],['search','ti-search','Search'],['more','ti-dots','More'],['dashboard','ti-layout-dashboard','Dashboard'],['lambda','ti-function','Lambda']];
+  var tabs=[['dashboard','ti-layout-dashboard','Dashboard'],['lambda','ti-function','Lambda'],['pending','ti-clock-exclamation','Pending'],['log','ti-table','Log'],['today','ti-checkbox','Tasks'],['search','ti-search','Search'],['more','ti-dots','More']];
   var bar=mk('nav','ttl-tabbar',tabs.map(function(t){return '<button type="button" data-tab="'+t[0]+'"><i class="ti '+t[1]+'"></i><span>'+t[2]+'</span>'+(t[0]==='pending'?'<b class="ttl-cnt" id="ttl-pcnt" hidden></b>':'')+'</button>';}).join(''));
   bar.setAttribute('aria-label','Main');
   // Dashboard + Lambda Functions moved here from the header. Lambda only exists while Lambda logging is on.
   var lamBtn=bar.querySelector('[data-tab="lambda"]');
   if(lamBtn){lamBtn.setAttribute('aria-label','Lambda Functions');lamBtn.title='Lambda Functions';lamBtn.hidden=true;}
-  var tbHint=mk('div','ttl-tb-hint','<i class="ti ti-chevron-right"></i>');tbHint.hidden=true;tbHint.setAttribute('aria-hidden','true');
-  function hintSync(){tbHint.hidden=!(bar.scrollWidth>bar.clientWidth+4&&bar.scrollLeft+bar.clientWidth<bar.scrollWidth-4);}
+  var tbHint=mk('div','ttl-tb-hint','<i class="ti ti-chevron-left"></i>');tbHint.hidden=true;tbHint.setAttribute('aria-hidden','true');
+  // The bar rests on Pending; Dashboard (and Lambda) wait off-screen on the left, a swipe to the right away
+  var homeBtn=bar.querySelector('[data-tab="pending"]');
+  function homeBar(){if(!mq.matches||!homeBtn)return;var x=homeBtn.offsetLeft;if(Math.abs(bar.scrollLeft-x)>1)bar.scrollLeft=x;hintSync();}
+  function hintSync(){tbHint.hidden=!(mq.matches&&bar.scrollLeft>4&&!document.body.classList.contains('ttl-kb'));}
   function lamSync(){
     var on=false;try{on=typeof isLambdaLoggingEnabled==='function'&&!!isLambdaLoggingEnabled();}catch(e){}
-    if(lamBtn&&lamBtn.hidden===on){lamBtn.hidden=!on;if(!on&&bar.scrollLeft>0)bar.scrollLeft=0;}
+    if(lamBtn&&lamBtn.hidden===on){lamBtn.hidden=!on;requestAnimationFrame(homeBar);}
     hintSync();
   }
-  bar.addEventListener('scroll',hintSync,{passive:true});window.addEventListener('resize',hintSync);
+  bar.addEventListener('scroll',hintSync,{passive:true});window.addEventListener('resize',function(){homeBar();});
+  window.addEventListener('load',homeBar);window.addEventListener('orientationchange',function(){setTimeout(homeBar,200);});
+  if(mq.addEventListener)mq.addEventListener('change',function(){setTimeout(homeBar,50);});
+  // display:none (keyboard up) resets the bar's scroll: put it back on Pending when it returns
+  var wasKb=false;
+  new MutationObserver(function(){var kb=document.body.classList.contains('ttl-kb');if(wasKb&&!kb)requestAnimationFrame(homeBar);wasKb=kb;hintSync();}).observe(document.body,{attributes:true,attributeFilter:['class']});
+  requestAnimationFrame(function(){requestAnimationFrame(homeBar);});
   var _adms=window.applyDashboardMenuState;
   if(typeof _adms==='function'){window.applyDashboardMenuState=function(){var r=_adms.apply(this,arguments);lamSync();return r;};}
   setTimeout(lamSync,0);setInterval(lamSync,2000);
@@ -33984,6 +34002,17 @@ window.addEventListener('resize', () => { if (typeof _cc !== 'undefined' && _cc 
     else if(k==='lambda'){try{window.dashboardMenuRun('lambdaFunctions');}catch(x){console.error(x);}}
   });
   fab.addEventListener('click',function(){if(view!=='tasks')setView('tasks');call('addTask');window.scrollTo({top:0,behavior:'smooth'});});
+
+  // Sticky header takes the page's real background (theme, custom colours); translucent + blurred over a wallpaper
+  function pageBg(){
+    var root=document.documentElement,wp=$('app-wallpaper'),wpOn=!!wp&&getComputedStyle(wp).display!=='none';
+    root.classList.toggle('ttl-hdr-wp',wpOn);
+    if(wpOn){root.style.setProperty('--ttl-hdr-bg','color-mix(in srgb, var(--bg) 85%, transparent)');return;}
+    var c=getComputedStyle(document.body).backgroundColor;
+    if(!c||c==='transparent'||/,\s*0\)$/.test(c))c=getComputedStyle(root).backgroundColor;
+    if(c&&c!==root.style.getPropertyValue('--ttl-hdr-bg'))root.style.setProperty('--ttl-hdr-bg',c);
+  }
+  pageBg();setInterval(pageBg,1500);document.addEventListener('visibilitychange',pageBg);
 
   // Keep the header height available to scroll-margin so a card scrolled into view clears the sticky header
   var hdrEl=document.querySelector('.header');
