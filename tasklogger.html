@@ -2897,7 +2897,7 @@ tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--vs-focus); color: var(--vs-ln
 }
 @media (min-width:761px){.ttl-back,.ttl-morebtn{display:none}}
 /* Completed / total tasks, left of the Lambda changes button */
-.ttl-tcnt{display:inline-flex;align-items:center;gap:5px;flex:0 0 auto;padding:3px 9px;border:1px solid var(--border-md);border-radius:999px;font-family:var(--font-mono);font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap;line-height:1.2;color:var(--text-secondary);background:var(--bg)}
+.ttl-tcnt{display:none;align-items:center;gap:5px;flex:0 0 auto;padding:3px 9px;border:1px solid var(--border-md);border-radius:999px;font-family:var(--font-mono);font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap;line-height:1.2;color:var(--text-secondary);background:var(--bg)}
 .ttl-tcnt i{font-size:13px}
 .ttl-tcnt.all{border-color:var(--green-mid);color:var(--green-dark);background:var(--green-bg)}
 #ttl-tb-hint{display:none}
@@ -2918,7 +2918,7 @@ tr.cc-cur .cc-ln { box-shadow: inset 3px 0 0 var(--vs-focus); color: var(--vs-ln
   #ttl-tb-hint{display:flex;position:fixed;left:0;bottom:env(safe-area-inset-bottom,0px);height:56px;width:26px;z-index:91;pointer-events:none;align-items:center;justify-content:flex-start;padding-left:2px;font-size:16px;color:var(--text-tertiary);background:linear-gradient(to left,transparent,var(--bg) 65%)}
   #ttl-tb-hint[hidden],body.ttl-kb #ttl-tb-hint{display:none}
   /* Log header: count, Lambda, day totals and Fullscreen stay on one row */
-  #log-panel .ttl-tcnt{padding:3px 6px;font-size:11px;gap:3px}
+  #log-panel .ttl-tcnt{display:inline-flex;padding:3px 6px;font-size:11px;gap:3px}
   #log-panel .ttl-tcnt i{font-size:12px}
   #log-panel .lcd-btn-group .lcd-main{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 }
