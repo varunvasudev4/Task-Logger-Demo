@@ -3346,6 +3346,77 @@ html.ttl-tab .task-card.ttl-lp,html.ttl-ls .task-card.ttl-lp{-webkit-user-select
 @media (prefers-reduced-motion:reduce){
   html.ttl-tab #ttl-sheet .ttl-panel,html.ttl-ls #ttl-sheet .ttl-panel,html.ttl-tab #ttl-log-actions-pop .ttl-lap,html.ttl-ls #ttl-log-actions-pop .ttl-lap,html.ttl-tab .modal-overlay:not(.hidden)>.modal,#ttl-ctx.open{animation:none!important}
 }
+
+/* ── Daily Summary (Summary button / More ▾): Masters-style mid popup on desktop; full screen on tablet / phone, where the header carries the TTL widget ── */
+.ds-overlay .ds-box { flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; background: var(--bg); }
+.ds-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 20px 28px; box-sizing: border-box; }
+@media (min-width: 761px) {
+  html:not(.ttl-tab):not(.ttl-ls) .ds-overlay { align-items: center; justify-content: center; padding: 1rem; box-sizing: border-box; background: rgba(0,0,0,0.45); }
+  html:not(.ttl-tab):not(.ttl-ls) .ds-overlay .ds-box {
+    flex: 0 0 auto; width: min(980px, calc(100vw - 32px));
+    height: min(820px, calc(100vh - 48px)); height: min(820px, calc(100dvh - 48px));
+    border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: 0 10px 30px rgba(0,0,0,0.35); overflow: hidden;
+  }
+  html:not(.ttl-tab):not(.ttl-ls) .ds-overlay .lm-head { padding-top: 12px; }
+  html:not(.ttl-tab):not(.ttl-ls) .ds-overlay .ttl-hdr-widget { display: none; }   /* popup: the page's own timer is still in view; widget only on full screen */
+}
+.ds-panel { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+.ds-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 12px 16px; border-bottom: 1px solid var(--border); background: var(--bg-secondary); }
+.ds-toolbar-group { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ds-date-display { display: flex; align-items: center; gap: 7px; font-family: var(--font-head); font-size: 13px; font-weight: 600; color: var(--text-primary); padding: 7px 12px; border: 1px solid var(--border-md); border-radius: var(--radius-md); background: var(--bg); }
+.ds-date-display i { color: var(--text-tertiary); font-size: 14px; }
+.ds-msdd { position: relative; display: inline-block; min-width: 140px; }
+.ds-msdd-trigger { display: inline-flex; align-items: center; gap: 6px; width: 100%; text-align: left; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono); font-size: 12.5px; font-weight: 500; color: var(--text-primary); background: var(--bg); border: 1px solid var(--border-md); border-radius: var(--radius-md); padding: 7px 12px; letter-spacing: 0.02em; }
+.ds-msdd-trigger:hover { background: var(--bg-secondary); }
+.ds-msdd-trigger:focus-visible { outline: 2px solid var(--blue-mid); outline-offset: -2px; }
+.ds-msdd-trigger i { font-size: 14px; color: var(--text-tertiary); }
+.ds-msdd-panel { position: absolute; top: calc(100% + 4px); right: 0; z-index: 60; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-md); box-shadow: 0 4px 16px rgba(0,0,0,0.14); min-width: 200px; max-height: 240px; overflow-y: auto; padding: 4px; }
+.ds-msdd-panel.hidden { display: none; }
+.ds-msdd-option { display: flex; align-items: center; gap: 8px; padding: 8px; font-size: 12.5px; color: var(--text-primary); cursor: pointer; border-radius: 6px; min-height: 36px; box-sizing: border-box; }
+.ds-msdd-option span { overflow-wrap: anywhere; word-break: break-word; }
+.ds-msdd-option:hover { background: var(--bg-secondary); }
+.ds-msdd-option:focus-within { outline: 2px solid var(--blue-mid); outline-offset: -2px; background: var(--bg-secondary); }
+.ds-msdd-option input[type="checkbox"] { cursor: pointer; flex-shrink: 0; }
+.ds-msdd-empty { font-size: 12px; color: var(--text-tertiary); padding: 6px 8px; }
+.ds-summary-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 10px 16px; border-bottom: 1px solid var(--border); font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.02em; }
+.ds-summary-bar-date { font-weight: 600; color: var(--text-primary); }
+.ds-summary-bar-stats { color: var(--text-secondary); }
+.ds-content { padding: 16px; min-height: 160px; }
+.ds-empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 10px; padding: 48px 20px; color: var(--text-tertiary); }
+.ds-empty-state i { font-size: 32px; }
+.ds-empty-state-title { font-family: var(--font-head); font-size: 14px; font-weight: 600; color: var(--text-secondary); }
+.ds-empty-state-sub { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-tertiary); max-width: 360px; }
+.daily-summary-project { border: 1px solid var(--border); border-radius: var(--radius-md); margin-bottom: 16px; overflow: hidden; background: var(--bg); }
+.daily-summary-project:last-child { margin-bottom: 0; }
+.daily-summary-project-header { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: var(--bg-secondary); border-bottom: 1px solid var(--border); font-family: var(--font-head); font-size: 14px; font-weight: 600; color: var(--text-primary); cursor: pointer; user-select: none; min-height: 44px; box-sizing: border-box; }
+.daily-summary-project-header:hover { background: var(--bg-tertiary); }
+.daily-summary-project-header:focus-visible { outline: 2px solid var(--blue-mid); outline-offset: -2px; }
+.daily-summary-project-header i { color: var(--text-tertiary); font-size: 15px; }
+.daily-summary-project-header-label { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
+.daily-summary-project-chevron { flex-shrink: 0; font-size: 16px; color: var(--text-tertiary); transition: transform 0.15s ease; }
+.daily-summary-project-chevron.collapsed { transform: rotate(-90deg); }
+.daily-summary-project-tasks { display: flex; flex-direction: column; padding: 4px 14px 8px; }
+.daily-summary-task { padding: 10px 0; }
+.daily-summary-task + .daily-summary-task { border-top: 1px solid var(--border); }
+.daily-summary-task-name { font-family: var(--font-ui); font-size: 14px; font-weight: 600; color: var(--text-primary); overflow-wrap: anywhere; word-break: break-word; }
+.daily-summary-task-meta { font-family: var(--font-mono); font-size: 11px; color: var(--text-secondary); margin-top: 4px; overflow-wrap: anywhere; word-break: break-word; }
+.daily-summary-task-ticket { font-family: var(--font-mono); font-size: 11px; margin-top: 4px; overflow-wrap: anywhere; word-break: break-word; }
+.daily-summary-task-ticket a { color: var(--blue-mid); text-decoration: underline; }
+.daily-summary-task-block { margin-top: 6px; }
+.daily-summary-task-block-label { font-family: var(--font-mono); font-size: 10.5px; font-weight: 600; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 2px; }
+.daily-summary-task-block-value { font-family: var(--font-ui); font-size: 12.5px; color: var(--text-primary); white-space: pre-line; overflow-wrap: anywhere; word-break: break-word; }
+@media (max-width: 640px) {
+  .ds-scroll { padding: 12px 12px 24px; }
+  .ds-toolbar { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .ds-toolbar-group { width: 100%; flex-wrap: wrap; }
+  .ds-summary-bar { flex-direction: column; align-items: flex-start; gap: 4px; }
+  .ds-date-display { flex: 1 1 auto; justify-content: center; }
+  .ds-msdd { width: 100%; }
+  .ds-msdd-trigger { width: 100%; justify-content: center; }
+  .ds-msdd-panel { left: 0; right: 0; min-width: 0; width: 100%; }
+  .daily-summary-project-header { padding: 10px 12px; }
+  .daily-summary-project-tasks { padding: 4px 12px 8px; }
+}
 </style>
 </head>
 <body>
@@ -4155,6 +4226,34 @@ html.ttl-tab .task-card.ttl-lp,html.ttl-ls .task-card.ttl-lp{-webkit-user-select
           <button type="button" class="btn" id="b64-dec-dl" onclick="b64DownloadDec()" title="Download the decoded file" disabled><i class="ti ti-download"></i> Download</button>
         </div>
         <div class="b64-dec-body" id="b64-dec-body"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Daily Summary: read-only day overview grouped by project. Mid popup on desktop (Masters-popup pattern), full screen on tablet / phone with the TTL widget in the header (like the Utilities tools). -->
+<div class="jwt-overlay ds-overlay hidden" id="ds-overlay" role="dialog" aria-modal="true" aria-label="Daily Summary" onclick="dsBackdropClick(event)">
+  <div class="ds-box">
+    <div class="lm-head">
+      <div class="lm-title"><i class="ti ti-report" style="font-size:18px;color:var(--blue-mid)"></i>Daily Summary</div>
+      <button type="button" class="ttl-hdr-widget idle" onclick="ttlConsOpen(event)" title="Time tracker — click to start / pause tasks" aria-label="Open time tracker"><span class="ttl-hw-dot"></span><span class="ttl-hw-lbl">Worked</span><span class="ttl-hw-time">00:00:00</span></button>
+      <button type="button" class="btn-icon" onclick="closeDailySummary()" title="Close (Esc)" aria-label="Close Daily Summary"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="ds-scroll" id="ds-scroll">
+      <div class="ds-panel">
+        <div class="ds-toolbar">
+          <div class="ds-toolbar-group">
+            <div class="ds-date-display"><i class="ti ti-calendar" aria-hidden="true"></i><span id="ds-date-display-value"></span></div>
+          </div>
+          <div class="ds-toolbar-group">
+            <div class="ds-msdd" id="ds-project-filter">
+              <button type="button" class="ds-msdd-trigger" id="ds-project-filter-trigger" onclick="dsFilterToggle()" aria-haspopup="true" aria-expanded="false" aria-controls="ds-project-filter-panel"><i class="ti ti-filter" aria-hidden="true"></i> <span id="ds-project-filter-label">Projects</span></button>
+              <div class="ds-msdd-panel hidden" id="ds-project-filter-panel" role="group" aria-label="Filter by project"></div>
+            </div>
+          </div>
+        </div>
+        <div class="ds-summary-bar"><span class="ds-summary-bar-date" id="ds-summary-bar-date"></span><span class="ds-summary-bar-stats" id="ds-summary-bar-stats"></span></div>
+        <div class="ds-content" id="ds-summary-content"></div>
       </div>
     </div>
   </div>
@@ -18261,14 +18360,237 @@ function clearLog() {
   }, 'Clear');
 }
 
+// ── Daily Summary ─────────────────────────────────────────────────────────────
+// Opens inside Task Logger (no separate page): a mid-size popup on desktop (Masters-popup layout) and a full-screen
+// view on tablet / phone, where the header carries the TTL widget like the Utilities tools.
+// Read-only: it only reads the live `tasks` / `logEntries` of the day Task Logger is showing and never writes,
+// saves or syncs anything. Filter / collapse choices live in memory only and reset each time it opens.
+let _ds = { date: '', groups: [], selected: new Set(), collapsed: new Set() };
+function dsIsOpen() { const el = document.getElementById('ds-overlay'); return !!(el && !el.classList.contains('hidden')); }
 function openDailySummary() {
-  // Hand off the date Task Logger is currently showing so Daily Summary can
-  // default to the same day (see DAILY_SUMMARY_BASELINE.md §9). Falls back to
-  // today's date if getSelectedDate()/todayStr() are unavailable for any reason.
-  const d = (typeof getSelectedDate === 'function') ? getSelectedDate()
-          : (typeof todayStr === 'function') ? todayStr() : '';
-  window.location.href = d ? ('daily-summary.html?date=' + encodeURIComponent(d)) : 'daily-summary.html';
+  try { closeMoreMenu(); } catch (e) {}
+  const el = document.getElementById('ds-overlay');
+  if (!el) return;
+  const d = (typeof getSelectedDate === 'function' && getSelectedDate()) || todayStr();
+  _ds.date = /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : todayStr();   // the day Task Logger is showing
+  _ds.selected = new Set(); _ds.collapsed = new Set();
+  dsBuild();
+  el.classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+  renderTtlHdrWidgets();
+  dsRenderFilter();
+  dsUpdateFilterLabel();
+  dsSetFilterOpen(false);
+  dsRender();
+  const sc = document.getElementById('ds-scroll'); if (sc) sc.scrollTop = 0;
 }
+function closeDailySummary() {
+  const el = document.getElementById('ds-overlay');
+  if (el) el.classList.add('hidden');
+  document.body.style.overflow = '';
+  dsSetFilterOpen(false);
+  _ds.groups = [];
+}
+// Clicking the dimmed area around the desktop popup closes it (in full screen the box covers the overlay, so this never fires).
+function dsBackdropClick(ev) { if (ev && ev.target && ev.target.id === 'ds-overlay') closeDailySummary(); }
+
+// A log entry belongs to the local calendar day its startTs falls on (same rule as the log table).
+function dsEntryMatches(entry, dateStr) {
+  const d = new Date(entry.startTs);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') === dateStr;
+}
+function dsFindTask(taskId) {
+  for (let i = 0; i < tasks.length; i++) if (tasks[i].id === taskId) return tasks[i];
+  return null;
+}
+// projects -> tasks -> that task's log entries for the day (original entry objects, never copied or changed)
+function dsBuild() {
+  const projects = new Map();
+  logEntries.forEach(entry => {
+    if (!dsEntryMatches(entry, _ds.date)) return;
+    const pk = entry.project || '';
+    if (!projects.has(pk)) projects.set(pk, new Map());
+    const byTask = projects.get(pk);
+    if (!byTask.has(entry.taskId)) {
+      byTask.set(entry.taskId, { taskId: entry.taskId, name: entry.heading || '', project: pk, module: entry.module || '',
+        nature: entry.nature || '', ticket: entry.ticket || '', task: dsFindTask(entry.taskId), entries: [] });
+    }
+    byTask.get(entry.taskId).entries.push(entry);
+  });
+  _ds.groups = Array.from(projects, ([project, byTask]) => ({ project, tasks: Array.from(byTask.values()) }));
+}
+function dsFormatDate() {
+  const d = new Date(_ds.date + 'T00:00:00');
+  return d.toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' });
+}
+// Last entry for a task that day: the latest completed one, else the latest overall (same rule as the Complete popup).
+function dsLastEntry(t) {
+  const rev = t.entries.slice().reverse();
+  return rev.find(e => e.endTs !== null) || rev[0] || null;
+}
+// Effort in minutes: each entry's durationSecs, or the live elapsed time of a task that is still running; summed, then rounded up once.
+function dsEffortMinutes(t) {
+  let secs = 0;
+  t.entries.forEach(e => {
+    if (e.durationSecs != null) secs += e.durationSecs;
+    else if (t.task) secs += liveElapsedSecs(t.task);
+  });
+  return Math.ceil(secs / 60);
+}
+function dsFmtDuration(totalMinutes) {
+  const mins = Math.max(0, Math.round(totalMinutes)), h = Math.floor(mins / 60), m = mins % 60;
+  if (h > 0 && m > 0) return h + 'h ' + m + 'm';
+  if (h > 0) return h + 'h';
+  return m + 'm';
+}
+function dsIsHttpUrl(v) { return /^https?:\/\/\S+$/i.test(v); }
+// Task name: a real name that differs from the description; otherwise the description (first 100 chars); otherwise "Unnamed Task".
+function dsTaskName(t) {
+  const last = dsLastEntry(t);
+  const desc = last ? richTextToPlain(last.description || '') : '';
+  const name = (t.name || '').trim();
+  if (name && name !== desc.trim()) return name;
+  if (desc) return desc.length > 100 ? desc.slice(0, 100) + '...' : desc;
+  return 'Unnamed Task';
+}
+
+function dsEmptyState(reason) {
+  const box = document.getElementById('ds-summary-content');
+  if (!box) return;
+  box.innerHTML = '';
+  const wrap = document.createElement('div'); wrap.className = 'ds-empty-state';
+  const icon = document.createElement('i'); icon.className = 'ti ti-report'; icon.setAttribute('aria-hidden', 'true'); wrap.appendChild(icon);
+  const title = document.createElement('div'); title.className = 'ds-empty-state-title';
+  title.textContent = reason === 'filtered' ? 'No tasks match the selected projects.' : 'No tasks found for this day.';
+  wrap.appendChild(title);
+  const sub = document.createElement('div'); sub.className = 'ds-empty-state-sub';
+  sub.textContent = reason === 'filtered' ? 'Try selecting different projects, or clear the filter to see all.' : 'No log entries started on this date.';
+  wrap.appendChild(sub);
+  box.appendChild(wrap);
+}
+function dsBlock(label, text) {
+  const b = document.createElement('div'); b.className = 'daily-summary-task-block';
+  const l = document.createElement('div'); l.className = 'daily-summary-task-block-label'; l.textContent = label; b.appendChild(l);
+  const v = document.createElement('div'); v.className = 'daily-summary-task-block-value'; v.textContent = text; b.appendChild(v);
+  return b;
+}
+// Every dynamic value goes in through textContent (the ticket link only after an http(s) check), never innerHTML.
+function dsRenderTask(t) {
+  const el = document.createElement('div'); el.className = 'daily-summary-task';
+  const nm = document.createElement('div'); nm.className = 'daily-summary-task-name'; nm.textContent = dsTaskName(t); el.appendChild(nm);
+  const parts = [];
+  if (t.module) parts.push(t.module);
+  if (t.nature) parts.push(t.nature);
+  parts.push(dsEffortMinutes(t) + ' min');
+  const meta = document.createElement('div'); meta.className = 'daily-summary-task-meta'; meta.textContent = parts.join(' • '); el.appendChild(meta);
+  if (t.ticket) {
+    const tk = document.createElement('div'); tk.className = 'daily-summary-task-ticket';
+    if (dsIsHttpUrl(t.ticket)) {
+      const a = document.createElement('a'); a.href = t.ticket; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.textContent = t.ticket; tk.appendChild(a);
+    } else tk.textContent = t.ticket;
+    el.appendChild(tk);
+  }
+  const last = dsLastEntry(t);
+  const desc = last ? richTextToPlain(last.description || '') : '';
+  if (desc) el.appendChild(dsBlock('Description', desc));
+  const remark = last ? richTextToPlain(last.remark || '') : '';
+  if (remark) el.appendChild(dsBlock('Remarks', remark));
+  return el;
+}
+function dsToggleProject(key) {
+  if (_ds.collapsed.has(key)) _ds.collapsed.delete(key); else _ds.collapsed.add(key);
+  dsRender();
+}
+function dsRenderProject(g, idx) {
+  const sec = document.createElement('div'); sec.className = 'daily-summary-project';
+  const collapsed = _ds.collapsed.has(g.project);
+  const name = g.project || '(No project)';
+  const listId = 'ds-project-tasks-' + idx;
+  const head = document.createElement('div'); head.className = 'daily-summary-project-header';
+  head.setAttribute('role', 'button'); head.setAttribute('tabindex', '0');
+  head.setAttribute('aria-expanded', String(!collapsed)); head.setAttribute('aria-controls', listId);
+  head.setAttribute('aria-label', name + (collapsed ? ', collapsed' : ', expanded'));
+  head.addEventListener('click', () => dsToggleProject(g.project));
+  head.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') { e.preventDefault(); dsToggleProject(g.project); } });
+  const ic = document.createElement('i'); ic.className = 'ti ti-folder'; ic.setAttribute('aria-hidden', 'true'); head.appendChild(ic);
+  const lb = document.createElement('span'); lb.className = 'daily-summary-project-header-label'; lb.textContent = name; head.appendChild(lb);
+  const ch = document.createElement('i'); ch.className = 'ti ti-chevron-down daily-summary-project-chevron' + (collapsed ? ' collapsed' : ''); ch.setAttribute('aria-hidden', 'true'); head.appendChild(ch);
+  sec.appendChild(head);
+  const list = document.createElement('div'); list.id = listId; list.className = 'daily-summary-project-tasks';
+  if (collapsed) list.style.display = 'none';
+  g.tasks.forEach(t => list.appendChild(dsRenderTask(t)));
+  sec.appendChild(list);
+  return sec;
+}
+function dsUpdateInfoBar(groups) {
+  const d = document.getElementById('ds-summary-bar-date'); if (d) d.textContent = dsFormatDate();
+  const s = document.getElementById('ds-summary-bar-stats'); if (!s) return;
+  let taskCount = 0, minutes = 0;
+  groups.forEach(g => g.tasks.forEach(t => { taskCount++; minutes += dsEffortMinutes(t); }));
+  s.textContent = 'Projects: ' + groups.length + '  ·  Tasks: ' + taskCount + '  ·  Effort: ' + dsFmtDuration(minutes);
+}
+function dsRender() {
+  const box = document.getElementById('ds-summary-content');
+  if (!box) return;
+  const dv = document.getElementById('ds-date-display-value'); if (dv) dv.textContent = dsFormatDate();
+  const sc = document.getElementById('ds-scroll'), keep = sc ? sc.scrollTop : 0;
+  const visible = _ds.selected.size === 0 ? _ds.groups : _ds.groups.filter(g => _ds.selected.has(g.project));
+  dsUpdateInfoBar(visible);
+  if (_ds.groups.length === 0) dsEmptyState();
+  else if (visible.length === 0) dsEmptyState('filtered');
+  else {
+    box.innerHTML = '';
+    visible.forEach((g, i) => box.appendChild(dsRenderProject(g, i)));
+  }
+  if (sc) sc.scrollTop = keep;
+}
+
+// Project multi-select filter (empty selection = show every project)
+function dsRenderFilter() {
+  const panel = document.getElementById('ds-project-filter-panel');
+  if (!panel) return;
+  panel.innerHTML = '';
+  if (_ds.groups.length === 0) {
+    const empty = document.createElement('div'); empty.className = 'ds-msdd-empty'; empty.textContent = 'No projects'; panel.appendChild(empty);
+    return;
+  }
+  _ds.groups.forEach(g => {
+    const opt = document.createElement('label'); opt.className = 'ds-msdd-option';
+    const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = _ds.selected.has(g.project);
+    cb.addEventListener('change', () => {
+      if (cb.checked) _ds.selected.add(g.project); else _ds.selected.delete(g.project);
+      dsUpdateFilterLabel(); dsRender();
+    });
+    opt.appendChild(cb);
+    const sp = document.createElement('span'); sp.textContent = g.project || '(No project)'; opt.appendChild(sp);
+    panel.appendChild(opt);
+  });
+}
+function dsUpdateFilterLabel() {
+  const l = document.getElementById('ds-project-filter-label');
+  if (l) l.textContent = _ds.selected.size > 0 ? 'Projects (' + _ds.selected.size + ')' : 'Projects';
+}
+function dsSetFilterOpen(open) {
+  const panel = document.getElementById('ds-project-filter-panel'), trg = document.getElementById('ds-project-filter-trigger');
+  if (!panel || !trg) return;
+  panel.classList.toggle('hidden', !open);
+  trg.setAttribute('aria-expanded', String(open));
+}
+function dsFilterToggle() {
+  const panel = document.getElementById('ds-project-filter-panel');
+  if (panel) dsSetFilterOpen(panel.classList.contains('hidden'));
+}
+document.addEventListener('click', (e) => { if (dsIsOpen() && !e.target.closest('.ds-msdd')) dsSetFilterOpen(false); });
+// Escape: closes the project list first, then the summary; the time tracker panel (on top) closes first via its own listener.
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || !dsIsOpen() || ttlConsIsOpen()) return;
+  e.stopImmediatePropagation(); e.preventDefault();
+  const panel = document.getElementById('ds-project-filter-panel');
+  if (panel && !panel.classList.contains('hidden')) {
+    dsSetFilterOpen(false);
+    const trg = document.getElementById('ds-project-filter-trigger'); if (trg) trg.focus();
+  } else closeDailySummary();
+}, true);
 
 // ── Masters modal ─────────────────────────────────────────────────────────────
 // Phase 24: remembers whichever control opened the popup so focus can return
