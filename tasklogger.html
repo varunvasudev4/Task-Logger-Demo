@@ -14685,6 +14685,8 @@ function ltSaveBool(key, val) {
 }
 let logActionsCollapsed = ltLoadBool(LOG_ACTIONS_COLLAPSED_KEY, false);
 function logActionsColWidth(isPresentDay, isFutureDay) {
+  // Phone / tablet layouts always render the single ⋮ button (see actionsCellHtml), so size the column for that, not for the full button row.
+  if (window.matchMedia('(max-width:760px)').matches) return Math.max(LOG_ACTIONS_COL_WIDTH_COLLAPSED, 56);   // ⋮ button, or the Fullscreen button that sits in this header on small screens
   if (logActionsCollapsed) return LOG_ACTIONS_COL_WIDTH_COLLAPSED;
   const n = maxActionButtonsForDay(isPresentDay, isFutureDay);
   const contentWidth = n > 0 ? (n * LOG_ACTIONS_BTN + (n - 1) * LOG_ACTIONS_GAP) : 0;
