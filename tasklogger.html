@@ -8413,6 +8413,9 @@ const GoogleDriveWorkspace = (function () {
   // always checked first). Never merges, never touches local `tasks`/
   // `logEntries`/`masters` — this is an upload-only operation.
   function pushStateToStateFile() {
+    return pushStateToStateFileCore().then(r => { if (r && r.ok) ttlWinOnPushed(r.modifiedTime); return r; });
+  }
+  function pushStateToStateFileCore() {
     if (typeof GoogleAuthManager === 'undefined' || !GoogleAuthManager.isAuthenticated()) {
       return Promise.resolve({ ok: false, reason: 'not-authenticated' });
     }
@@ -8463,6 +8466,8 @@ const GoogleDriveWorkspace = (function () {
       // silently resolved (GOOGLE_DRIVE_API.md §12 principle 5). No Conflict
       // Resolver exists yet to route this to (that's a later phase) — this
       // phase only refuses the write and reports it.
+      { const g = (typeof ttlWinPushGuard === 'function') ? ttlWinPushGuard(existing.modifiedTime) : null;
+        if (g) { _pushStatus = 'idle'; _lastPushResult = g; return g; } }
       if (_stateFileRevision && existing.modifiedTime !== _stateFileRevision) {
         _pushStatus = 'idle';
         const result = { ok: false, reason: 'remote-changed', remoteModifiedTime: existing.modifiedTime };
@@ -8854,6 +8859,7 @@ const GoogleDriveWorkspace = (function () {
     // Phase 7: Tasks/state.json core read/write (manual trigger only)
     findStateFile,
     pushStateToStateFile,
+    getStateFileRevision: () => _stateFileRevision,
     pullStateFromStateFile,
     getFileSyncStatus,
     // Phase 10: full-payload download+validate, for Single Task Merge
@@ -11291,6 +11297,199 @@ function setSyncConflictPolicy(p) {
   saveState();
   if (typeof activeMastersTab !== 'undefined' && activeMastersTab === 'sync' && typeof renderMastersContent === 'function') renderMastersContent();
 }
+// ── Device-local history window (phone storage saver) ─────────────────────────────
+// This device keeps only the last N months of tasks + effort logs in localStorage. Google Drive's state.json
+// stays COMPLETE: older records are never deleted there and no tombstones / sync changes are recorded for
+// them. How it stays safe:
+//   • reconcile(): remote records outside the window that this device does not hold are NOT merged
+//     (so they are not downloaded, and their absence is not read as a deletion). They are kept in memory
+//     as the "archive" for this sync only.
+//   • buildLocalBusinessState(): the archive is added back to the payload, so the file written to Drive
+//     still contains every older record (and the no-op digest compares like with like).
+//   • pushStateToStateFile(): refuses to overwrite Drive unless the archive belongs to the exact file revision
+//     on Drive, so a push can never drop older data.
+//   • Trimming only removes records that are already synced (not dirty), and never open/unfinished work.
+//   • "Load older data" widens the window to a From–To range and runs a normal Sync to pull it in.
+// Settings are per device (key below) and are never synced or part of a backup.
+const TTL_WIN_KEY = 'ttl_local_window';
+let ttlWinSessionFull = false;   // memory only: Sync tapped on an older date → everything is loaded until the app closes
+let ttlWinArchive = null;   // { rev, tasks: [], logs: [] } — remote records outside the window (memory only)
+function ttlWinIsPhone() {
+  try { return Math.min(screen.width, screen.height) < 600 && window.matchMedia('(pointer: coarse)').matches; } catch (e) { return false; }
+}
+function ttlWinCfg() {
+  let c = {};
+  try { c = JSON.parse(localStorage.getItem(TTL_WIN_KEY) || '{}') || {}; } catch (e) { c = {}; }
+  const m = parseInt(c.months, 10);
+  return { on: (c.on === true || c.on === false) ? c.on : null, months: (m >= 1 && m <= 24) ? m : 2,
+           from: /^\d{4}-\d{2}-\d{2}$/.test(c.from || '') ? c.from : null, to: /^\d{4}-\d{2}-\d{2}$/.test(c.to || '') ? c.to : null };
+}
+function ttlWinSaveCfg(c) { try { localStorage.setItem(TTL_WIN_KEY, JSON.stringify(c)); } catch (e) {} }
+function ttlWinEnabled() { const c = ttlWinCfg(); return c.on === null ? ttlWinIsPhone() : c.on; }
+function ttlWinActive() {
+  if (!ttlWinEnabled()) return false;
+  try { return typeof GoogleAuthManager !== 'undefined' && GoogleAuthManager.isAuthenticated(); } catch (e) { return false; }
+}
+function ttlWinIso(ts) { const d = new Date(ts); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+function ttlWinCutoff() { const c = ttlWinCfg(), d = new Date(); d.setMonth(d.getMonth() - c.months); return ttlWinIso(d.getTime()); }
+function ttlWinInWindow(iso) {
+  const c = ttlWinCfg();
+  if (iso >= ttlWinCutoff()) return true;
+  return !!(c.from && c.to && iso >= c.from && iso <= c.to);
+}
+function ttlWinLogKeep(e) {
+  const ts = getLogEntryTimestamp(e);
+  if (ts === null || e.endTs === null) return true;          // unreadable date or still open: never drop
+  return ttlWinInWindow(ttlWinIso(ts));
+}
+function ttlWinLogKey(r) { return r && r.startTs !== undefined ? ((r.taskSyncId || ('legacy:' + (r.heading || ''))) + '@' + r.startTs) : null; }
+function ttlWinTaskKeep(t, refSet) {
+  if (!t || typeof t !== 'object') return true;
+  const sid = t._sync && t._sync.syncId;
+  if (!sid) return true;
+  if (refSet && refSet[sid]) return true;                     // an in-window log points at it
+  if (!isTaskDeleted(t) && t.status !== 'done') return true;  // unfinished work stays
+  return ttlWinInWindow(taskDateStr(t));
+}
+function ttlWinRefSet(logArrays) {
+  const o = {};
+  logArrays.forEach(arr => (arr || []).forEach(e => { if (e && e.taskSyncId && ttlWinLogKeep(e)) o[e.taskSyncId] = true; }));
+  return o;
+}
+// Splits the downloaded remote state into what this device merges (view) and what it must carry back (archive).
+function ttlWinSplit(remote, ignoreLocal) {
+  if (!remote || !ttlWinActive() || ttlWinSessionFull) return { view: remote, archive: null };
+  // A previous full session may have left base entries for older logs this device no longer holds; without
+  // this, "missing here, unchanged there" would be read as a deletion and pushed to Drive.
+  try {
+    const bl = SyncMerge._debug.getBase().logs || {};
+    Object.keys(bl).forEach(k => { const m = /@(-?\d+)$/.exec(k); if (m && !ttlWinInWindow(ttlWinIso(parseInt(m[1], 10)))) delete bl[k]; });
+  } catch (e) {}
+  const rTasks = Array.isArray(remote.tasks) ? remote.tasks : null, rLogs = Array.isArray(remote.logEntries) ? remote.logEntries : null;
+  if (!rTasks && !rLogs) return { view: remote, archive: null };
+  const lt = {}, ll = {};
+  if (!ignoreLocal) {
+    tasks.forEach(t => { const k = t && t._sync && t._sync.syncId; if (k) lt[k] = true; });
+    logEntries.forEach(e => { const k = ttlWinLogKey(e); if (k) ll[k] = true; });
+  }
+  const ref = ttlWinRefSet([rLogs, ignoreLocal ? [] : logEntries]);
+  const view = Object.assign({}, remote), arch = { tasks: [], logs: [] };
+  if (rTasks) view.tasks = rTasks.filter(t => {
+    const k = t && t._sync && t._sync.syncId;
+    if (ttlWinTaskKeep(t, ref) || (k && lt[k])) return true;
+    arch.tasks.push(t); return false;
+  });
+  if (rLogs) view.logEntries = rLogs.filter(e => {
+    if (!e || typeof e !== 'object') return true;
+    const k = ttlWinLogKey(e);
+    if (ttlWinLogKeep(e) || (k && ll[k])) return true;
+    arch.logs.push(e); return false;
+  });
+  return { view: view, archive: arch };
+}
+function ttlWinSetArchive(arch) {
+  if (!arch) { ttlWinArchive = null; return; }
+  let rev = null; try { rev = GoogleDriveWorkspace.getStateFileRevision(); } catch (e) {}
+  ttlWinArchive = { rev: rev, tasks: arch.tasks, logs: arch.logs };
+}
+function ttlWinWithArchive(business) {
+  if (!ttlWinArchive || !ttlWinActive()) return business;
+  const tk = {}, lk = {};
+  business.tasks.forEach(t => { const k = t && t._sync && t._sync.syncId; if (k) tk[k] = true; });
+  business.logEntries.forEach(e => { const k = ttlWinLogKey(e); if (k) lk[k] = true; });
+  const at = ttlWinArchive.tasks.filter(t => !(t && t._sync && tk[t._sync.syncId]));
+  const al = ttlWinArchive.logs.filter(e => { const k = ttlWinLogKey(e); return !(k && lk[k]); });
+  if (at.length) business.tasks = business.tasks.concat(at);
+  if (al.length) business.logEntries = business.logEntries.concat(al);
+  return business;
+}
+// Called inside pushStateToStateFile() with the revision currently on Drive.
+function ttlWinPushGuard(driveRevision) {
+  if (!ttlWinActive() || ttlWinSessionFull) return null;   // full session: this device holds everything
+  if (ttlWinArchive && ttlWinArchive.rev && ttlWinArchive.rev === driveRevision) return null;
+  return { ok: false, reason: 'remote-changed', remoteModifiedTime: driveRevision };   // download + merge first, then push
+}
+function ttlWinOnPushed(rev) { if (ttlWinArchive && rev) ttlWinArchive.rev = rev; }
+// Removes synced, out-of-window records from this device only. No sync change is recorded.
+function ttlWinTrim() {
+  if (!ttlWinActive()) return { ok: false, reason: 'off' };
+  if (ttlWinSessionFull) return { ok: false, reason: 'session' };
+  if (typeof SyncMerge !== 'undefined' && SyncMerge.pendingCount() > 0) return { ok: false, reason: 'conflicts' };
+  let rl = 0, rt = 0;
+  const logsDirty = (typeof isDomainDirty === 'function') && isDomainDirty('logEntries');
+  if (!logsDirty) {
+    const keep = [], gone = [];
+    logEntries.forEach(e => (ttlWinLogKeep(e) ? keep : gone).push(e));
+    if (gone.length) { logEntries = keep; rl = gone.length; if (ttlWinArchive) ttlWinArchive.logs = ttlWinArchive.logs.concat(gone); }
+  }
+  const ref = ttlWinRefSet([logEntries]);
+  const keepT = [], goneT = [];
+  tasks.forEach(t => {
+    const synced = t && t._sync && t._sync.lastSync && !isTaskDirty(t);
+    (!synced || ttlWinTaskKeep(t, ref) ? keepT : goneT).push(t);
+  });
+  if (goneT.length) { tasks = keepT; rt = goneT.length; if (ttlWinArchive) ttlWinArchive.tasks = ttlWinArchive.tasks.concat(goneT); }
+  if (rl || rt) {
+    saveState();
+    try { SyncMerge.commitBase(); } catch (e) {}   // the base must not remember records this device no longer holds
+    try { renderAll(); } catch (e) {}
+  }
+  return { ok: true, logs: rl, tasks: rt };
+}
+// What is written to localStorage: during a full session only the window is persisted (unsynced work always is),
+// so the extra data lives in memory and is gone after a reload.
+function ttlWinPersistView() {
+  if (!ttlWinSessionFull || !ttlWinEnabled()) return { tasks: tasks, logs: logEntries };
+  const logsDirty = (typeof isDomainDirty === 'function') && isDomainDirty('logEntries');
+  const logs = logsDirty ? logEntries : logEntries.filter(ttlWinLogKeep);
+  const ref = ttlWinRefSet([logs]);
+  return { tasks: tasks.filter(t => !(t && t._sync && t._sync.lastSync && !isTaskDirty(t)) || ttlWinTaskKeep(t, ref)), logs: logs };
+}
+// Sync tapped while viewing a date older than the window: load everything from the cloud for this session.
+function ttlWinMaybeLoadAll() {
+  try {
+    if (!ttlWinActive() || ttlWinSessionFull) return;
+    if (typeof getSelectedDate === 'function' && !ttlWinInWindow(getSelectedDate())) ttlWinSessionFull = true;
+  } catch (e) {}
+}
+function ttlWinUiToggle(on) { const c = ttlWinCfg(); c.on = !!on; ttlWinSaveCfg(c); if (typeof renderMastersContent === 'function') renderMastersContent(); }
+function ttlWinUiMonths(v) { const c = ttlWinCfg(), m = parseInt(v, 10); if (m >= 1 && m <= 24) { c.months = m; c.on = ttlWinEnabled(); ttlWinSaveCfg(c); } if (typeof renderMastersContent === 'function') renderMastersContent(); }
+function ttlWinUiLoad() {
+  const f = document.getElementById('ttl-win-from'), t = document.getElementById('ttl-win-to'), st = document.getElementById('ttl-win-status');
+  const from = f && f.value, to = t && t.value;
+  if (!from || !to || from > to) { if (st) { st.style.color = 'var(--red-mid)'; st.textContent = 'Pick a From date that is not after the To date.'; } return; }
+  const c = ttlWinCfg();
+  c.from = (c.from && c.from < from) ? c.from : from; c.to = (c.to && c.to > to) ? c.to : to; c.on = ttlWinEnabled();
+  ttlWinSaveCfg(c);
+  manualSyncClick();   // a normal Sync now treats the range as inside the window and downloads it
+}
+function ttlWinUiClear() {
+  const c = ttlWinCfg(); c.from = null; c.to = null; c.on = ttlWinEnabled(); ttlWinSaveCfg(c);
+  ttlWinTrim();
+  if (typeof renderMastersContent === 'function') renderMastersContent();
+}
+function ttlWinUiTrimNow() {
+  ttlWinSessionFull = false;
+  const r = ttlWinTrim(), st = document.getElementById('ttl-win-status');
+  if (typeof renderMastersContent === 'function') renderMastersContent();
+  const st2 = document.getElementById('ttl-win-status') || st;
+  if (st2) { st2.style.color = 'var(--text-secondary)'; st2.textContent = r.ok ? ('Removed ' + r.tasks + ' task(s) and ' + r.logs + ' log entr' + (r.logs === 1 ? 'y' : 'ies') + ' from this device. Google Drive was not touched.') : (r.reason === 'off' ? 'Turn the option on and connect Google Drive first.' : 'Resolve the waiting sync conflicts first.'); }
+}
+function renderLocalWindowCard() {
+  const c = ttlWinCfg(), on = ttlWinEnabled();
+  const range_unused = (c.from && c.to) ? `<div style="font-size:12px;color:var(--text-secondary);margin-top:8px">Older data loaded on this device: <b>${esc(c.from)}</b> → <b>${esc(c.to)}</b> <button class="btn" style="padding:3px 8px;font-size:11px;margin-left:6px" onclick="ttlWinUiClear()">Remove loaded range</button></div>` : '';
+  return `<div style="border:1px solid var(--border-md);border-radius:var(--radius-md);padding:14px;margin-bottom:14px">
+    <div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:4px"><i class="ti ti-database-minus" style="vertical-align:-2px;margin-right:5px;color:var(--blue-mid)"></i>Local storage window (this device only)</div>
+    <div style="font-size:11px;color:var(--text-tertiary)">Keeps only recent tasks and effort logs on this device to save space. Google Drive keeps everything: older records are never deleted there, and other devices are unaffected. Unsynced or unfinished work is never removed.</div>
+    <label style="display:flex;gap:8px;align-items:center;font-size:13px;margin-top:10px;color:var(--text-primary)"><input type="checkbox" ${on ? 'checked' : ''} onchange="ttlWinUiToggle(this.checked)" /> Keep only the last
+      <input type="number" min="1" max="24" value="${c.months}" style="width:54px" onchange="ttlWinUiMonths(this.value)" /> months here</label>
+    <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">${on ? 'Applies after each successful Sync.' : 'Off: the next Sync downloads all older data to this device.'}</div>
+    <div style="font-size:12px;color:var(--text-secondary);margin-top:10px">To see older data: open an older date and tap the top <b>Sync</b> button. Everything is loaded from the cloud and stays only until the app is closed.${ttlWinSessionFull ? ' <b>Full data is loaded now.</b>' : ''}</div>
+    <div style="margin-top:10px"><button class="btn" style="padding:4px 10px;font-size:11px" onclick="ttlWinUiTrimNow()"><i class="ti ti-trash"></i> Free up space now</button></div>
+    <div id="ttl-win-status" style="font-size:12px;margin-top:8px;color:var(--text-secondary)"></div></div>`;
+}
+// ── End device-local history window ───────────────────────────────────────────────
+
 // The exact business payload written to state.json (also used for the no-op digest).
 function buildLocalBusinessState() {
   const business = {
@@ -11307,6 +11506,7 @@ function buildLocalBusinessState() {
   const lam = lambdaSyncPayload();
   if (lam) { business.lambdaRecords = lam.records; business.lambdaTombstones = lam.tombstones; if (lam.liveDemo) business.lambdaLiveDemo = lam.liveDemo; }
   lamSyncDiag = Object.assign(lamSyncDiag || {}, { sentAt: Date.now(), sentFunctions: lam ? lam.records.functions.length : 0, sentChanges: lam ? lam.records.changes.length : 0 });
+  ttlWinWithArchive(business);   // older records this device does not hold still go back to Drive
   return (typeof SyncMerge !== 'undefined') ? SyncMerge.applyPendingOverrides(business) : business;
 }
 
@@ -12612,8 +12812,11 @@ const BackgroundScheduler = (function () {
       return _lastResult;
     };
     if (changedAccount()) { _running = false; _status = 'idle'; _lastResult = { ok: false, reason: 'account-changed', trigger }; return _lastResult; }
-    const remote = planResult.remoteState;
-    if (getSyncConflictPolicy() === 'remote' && masters && masters.flags && masters.flags.remoteMirrorPending === true) {
+    const mirrorNow = getSyncConflictPolicy() === 'remote' && masters && masters.flags && masters.flags.remoteMirrorPending === true;
+    const winSplit = ttlWinSplit(planResult.remoteState, mirrorNow);   // device-local history window
+    ttlWinSetArchive(winSplit.archive);
+    const remote = winSplit.view;
+    if (mirrorNow) {
       const mr = mirrorRemoteToLocal(remote);
       if (!mr.ok) return fail({ reason: 'mirror-failed', error: mr.error });
       SyncMerge.commitBase();
@@ -12634,6 +12837,7 @@ const BackgroundScheduler = (function () {
       if (pr && !pr.ok) return fail({ reason: pr.reason || 'upload-failed', error: pr.error, authFailure: !!pr.authFailure, httpStatus: pr.httpStatus || null, uploaded: pr });
       if (!pr) SyncMerge.clearDirtyExceptPending();
       SyncMerge.commitBase();
+      try { ttlWinTrim(); } catch (e) { console.warn('[WINDOW] trim failed', e); }
       _running = false; _lastSyncAt = new Date().toISOString(); _status = 'completed';
       _lastResult = { ok: true, trigger: trigger, plan: planResult, uploaded: pr, noop: !pr, merged: { ok: true, results: [] },
         domainsMerged: ['merge'], conflicts: SyncMerge.pendingCount(), autoResolved: rec.autoResolved, mergeSummary: rec.summary };
@@ -14148,7 +14352,7 @@ window.addEventListener('storage', ev => {
 function saveState() {
   if (window._ttlResetting) return; // Reset in progress — never re-write what was just wiped
   try {
-    const _tasksJson = JSON.stringify(tasks), _logJson = JSON.stringify(logEntries);
+    const _pv = ttlWinPersistView(), _tasksJson = JSON.stringify(_pv.tasks), _logJson = JSON.stringify(_pv.logs);
     // Stale-window guard: this window holds its own in-memory copy of tasks/log and writes it back WHOLE.
     // If another tab/window of the app saved since this one last loaded/saved, writing now would silently
     // undo that window's work (a stop or complete coming back as "running", duplicated rows). Reload to the
@@ -20122,6 +20326,7 @@ function renderMastersContent() {
       </div>
 
       ${renderSyncPolicyCard()}
+      ${renderLocalWindowCard()}
       ${renderSyncConflictSummaryCard()}
       <!-- Phase 5: Connection card — Cloud Provider, Connection Status, and
            Authenticated User now reflect live GoogleAuthManager state. Device
@@ -20645,7 +20850,7 @@ function topSyncClick() {
   if (authStatus.state === 'connecting') return;
   if (typeof BackgroundScheduler !== 'undefined' && BackgroundScheduler.isSynchronizationRunning()) return;
   if (typeof SyncMerge !== 'undefined' && SyncMerge.pendingCount() > 0) { openSyncConflictModal(); return; }
-  if (authStatus.authenticated) { manualSyncClick(); return; }
+  if (authStatus.authenticated) { ttlWinMaybeLoadAll(); manualSyncClick(); return; }
   // Phase 22 (Authentication Persistence), PART 9 (Manual Sync + Auth):
   // authentication isn't usable right now — become authenticated (silent
   // recovery first, interactive login only if that fails) as PART OF this
@@ -20653,7 +20858,7 @@ function topSyncClick() {
   // If authentication doesn't succeed either way, nothing further happens
   // here — no sync is attempted, and no automatic retry loop is started
   // (PART 18); the user's next explicit Sync click tries again.
-  ensureAuthenticatedForManualSync().then(ok => { if (ok) manualSyncClick(); });
+  ensureAuthenticatedForManualSync().then(ok => { if (ok) { ttlWinMaybeLoadAll(); manualSyncClick(); } });
 }
 
 // ensureAuthenticatedForManualSync(): the authentication half of PART 9's
